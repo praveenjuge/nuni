@@ -19,7 +19,7 @@ export interface ResolvedConfig {
   getPageKey?: (url: URL) => string
 }
 
-export const VERSION = __NUNI_VERSION__
+export const VERSION: string = __NUNI_VERSION__
 
 export function resolveConfig(options: NuniOptions): ResolvedConfig {
   return {
