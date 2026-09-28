@@ -13,6 +13,8 @@ permissions:
 
 jobs:
   release:
+    # Skipped until production is configured (see DEPLOYING.md, step 5).
+    if: ${{ vars.NUNI_CONVEX_URL != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
