@@ -1,15 +1,12 @@
 export const BASE_PATH = "/dashboard"
 
 /**
- * Public origin the dashboard is served from. In production that is the docs
- * domain (the dashboard sits behind its /dashboard rewrite). Vercel preview
- * deployments fall back to their own branch URL.
+ * Public origin the dashboard is served from: https://nuni.praveenjuge.com in
+ * production (the dashboard sits behind the docs site's /dashboard rewrite),
+ * http://localhost:3000 locally.
  */
 export const APP_URL = (
-  process.env.NEXT_PUBLIC_APP_URL ??
-  (process.env.VERCEL_BRANCH_URL
-    ? `https://${process.env.VERCEL_BRANCH_URL}`
-    : "http://localhost:3000")
+  process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
 ).replace(/\/$/, "")
 
 export const REDIRECT_URI =

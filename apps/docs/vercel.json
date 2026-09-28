@@ -14,5 +14,6 @@
       "source": "/dashboard/:path*",
       "destination": "https://nuni-dashboard.vercel.app/dashboard/:path*"
     }
-  ]
+  ],
+  "ignoreCommand": "[ \"$VERCEL_ENV\" != \"production\" ]"
 }
