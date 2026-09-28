@@ -1,7 +1,7 @@
-dist/
-node_modules/
-.next/
-.turbo/
-coverage/
-pnpm-lock.yaml
-.pnpm-store/
+node_modules
+dist
+.next
+.turbo
+.astro
+bun.lock
+**/_generated/**

@@ -1,0 +1,49 @@
+{
+  "name": "@nuni/react",
+  "version": "0.1.0",
+  "description": "React component for Nuni: pinned comments on your live site.",
+  "license": "MIT",
+  "type": "module",
+  "homepage": "https://nuni.praveenjuge.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/praveenjuge/nuni.git",
+    "directory": "packages/react"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "eslint .",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@nuni/widget": "workspace:^"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@nuni/eslint-config": "workspace:*",
+    "@nuni/tsconfig": "workspace:*",
+    "@types/react": "^19",
+    "eslint": "^10.11.0",
+    "react": "19.2.8",
+    "tsdown": "^0.23.0",
+    "typescript": "^5.9.3"
+  }
+}

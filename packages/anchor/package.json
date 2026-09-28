@@ -1,0 +1,25 @@
+{
+  "name": "@nuni/anchor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nuni/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@nuni/eslint-config": "workspace:*",
+    "@nuni/tsconfig": "workspace:*",
+    "eslint": "^10.11.0",
+    "happy-dom": "^20.14.5",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2"
+  }
+}
