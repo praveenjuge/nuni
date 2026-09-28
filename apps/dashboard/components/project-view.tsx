@@ -3,7 +3,7 @@
 import { api } from "@nuni/backend/api"
 import type { Id } from "@nuni/backend/dataModel"
 import { buildAgentPrompt, CDN_URL } from "@nuni/shared"
-import { useMutation, useQuery } from "convex/react"
+import { useMutation, usePaginatedQuery, useQuery } from "convex/react"
 import {
   ArrowLeftIcon,
   CheckIcon,
@@ -167,7 +167,16 @@ function CommentList({
   publicId: string
   status: Status
 }) {
-  const comments = useQuery(api.comments.listForOwner, { publicId, status })
+  const {
+    results,
+    status: loadStatus,
+    loadMore,
+  } = usePaginatedQuery(
+    api.comments.listForOwner,
+    { publicId, status },
+    { initialNumItems: 50 }
+  )
+  const comments = loadStatus === "LoadingFirstPage" ? undefined : results
   const resolve = useMutation(api.comments.resolve)
   const reopen = useMutation(api.comments.reopen)
   const remove = useMutation(api.comments.remove)
@@ -192,7 +201,6 @@ function CommentList({
   )
 
   if (comments === undefined) return <Skeleton className="h-40 rounded-3xl" />
-  if (comments === null) return null
 
   return (
     <div className="grid gap-3">
@@ -319,6 +327,16 @@ function CommentList({
           ))}
         </ul>
       )}
+      {loadStatus === "CanLoadMore" && (
+        <Button
+          variant="outline"
+          className="w-fit"
+          onClick={() => loadMore(50)}
+        >
+          Load more
+        </Button>
+      )}
+      {loadStatus === "LoadingMore" && <Skeleton className="h-10 w-32" />}
     </div>
   )
 }

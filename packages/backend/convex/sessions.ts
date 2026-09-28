@@ -1,7 +1,7 @@
 import { LIMITS, randomBase58 } from "@nuni/shared"
 import { v } from "convex/values"
 
-import { mutation, query } from "./_generated/server"
+import { internalMutation, mutation, query } from "./_generated/server"
 import {
   fail,
   parseOrigin,
@@ -50,14 +50,15 @@ export const create = mutation({
 
 /** Widget check: is this stored token still an owner session for the project? */
 export const validate = query({
-  args: { publicId: v.string(), sessionToken: v.string() },
-  handler: async (ctx, { publicId, sessionToken }) => {
+  args: { publicId: v.string(), sessionToken: v.string(), origin: v.string() },
+  handler: async (ctx, { publicId, sessionToken, origin }) => {
     const project = await projectByPublicId(ctx, publicId)
     if (!project) return { valid: false as const }
     const session = await sessionFromToken(ctx, sessionToken)
     if (
       !session ||
       session.projectId !== project._id ||
+      session.origin !== origin ||
       project.ownerId !== session.userId
     ) {
       return { valid: false as const }
@@ -107,5 +108,18 @@ export const revokeOwn = mutation({
   handler: async (ctx, { sessionToken }) => {
     const session = await sessionFromToken(ctx, sessionToken)
     if (session) await ctx.db.delete(session._id)
+  },
+})
+
+/** Daily cron: delete expired widget sessions. */
+export const cleanupExpired = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const expired = await ctx.db
+      .query("widgetSessions")
+      .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
+      .take(500)
+    for (const session of expired) await ctx.db.delete(session._id)
+    return expired.length
   },
 })

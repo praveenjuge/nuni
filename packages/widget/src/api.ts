@@ -13,7 +13,6 @@ export interface ProjectStatus {
 
 export interface PageSummary {
   path: string
-  url: string
   count: number
 }
 
@@ -101,7 +100,7 @@ export class NuniApi {
   ) {
     return this.client.onUpdate(
       api.sessions.validate,
-      { publicId: this.config.project, sessionToken },
+      { publicId: this.config.project, sessionToken, origin: location.origin },
       cb,
       () => {}
     )
@@ -167,6 +166,7 @@ export class NuniApi {
       this.client.mutation(api.comments.resolve, {
         id: id as never,
         sessionToken,
+        origin: location.origin,
       })
     )
   }
@@ -176,6 +176,7 @@ export class NuniApi {
       this.client.mutation(api.comments.reopen, {
         id: id as never,
         sessionToken,
+        origin: location.origin,
       })
     )
   }
@@ -185,6 +186,7 @@ export class NuniApi {
       this.client.mutation(api.comments.remove, {
         id: id as never,
         sessionToken,
+        origin: location.origin,
       })
     )
   }

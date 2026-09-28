@@ -45,7 +45,22 @@ export default defineSchema({
     resolvedBy: v.optional(v.id("users")),
   })
     .index("by_project_path", ["projectId", "page.path", "createdAt"])
+    .index("by_project_path_status", [
+      "projectId",
+      "page.path",
+      "status",
+      "createdAt",
+    ])
     .index("by_project_status", ["projectId", "status", "createdAt"]),
+
+  /** Open comment count per page, so the widget can list other pages. */
+  pageStats: defineTable({
+    projectId: v.id("projects"),
+    path: v.string(),
+    openCount: v.number(),
+  })
+    .index("by_project_path", ["projectId", "path"])
+    .index("by_project_open", ["projectId", "openCount"]),
 
   widgetSessions: defineTable({
     tokenHash: v.string(),
@@ -57,7 +72,9 @@ export default defineSchema({
     lastUsedAt: v.optional(v.number()),
   })
     .index("by_tokenHash", ["tokenHash"])
-    .index("by_project", ["projectId"]),
+    .index("by_project", ["projectId"])
+    .index("by_user", ["userId"])
+    .index("by_expires", ["expiresAt"]),
 
   claims: defineTable({
     projectId: v.id("projects"),

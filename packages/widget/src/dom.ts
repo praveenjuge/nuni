@@ -32,12 +32,13 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el
 }
 
-/** Trusted, constant SVG markup only. */
+/** Renders one of the constant SVG strings in icons.ts (never user input). */
 export function icon(svg: string): HTMLSpanElement {
   const span = document.createElement("span")
   span.className = "icon"
   span.setAttribute("aria-hidden", "true")
-  span.innerHTML = svg
+  const parsed = new DOMParser().parseFromString(svg, "image/svg+xml")
+  span.append(document.importNode(parsed.documentElement, true))
   return span
 }
 

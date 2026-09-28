@@ -38,7 +38,7 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         WORKOS_CLIENT_ID: "client_e2e_placeholder",
-        WORKOS_API_KEY: "sk_test_e2e_placeholder",
+        WORKOS_API_KEY: "placeholder-api-key",
         WORKOS_COOKIE_PASSWORD:
           "e2e-cookie-password-at-least-32-characters-long",
         NEXT_PUBLIC_WORKOS_REDIRECT_URI:

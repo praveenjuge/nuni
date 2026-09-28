@@ -1,4 +1,5 @@
 import { LIMITS } from "@nuni/shared"
+import { paginationOptsValidator } from "convex/server"
 import { v } from "convex/values"
 
 import type { Doc, Id } from "./_generated/dataModel"
@@ -9,6 +10,7 @@ import {
   type MutationCtx,
 } from "./_generated/server"
 import {
+  bumpPageOpen,
   ensureProject,
   fail,
   parseOrigin,
@@ -33,7 +35,9 @@ function toPublic(c: Doc<"comments">) {
     body: c.body,
     authorName: c.authorName,
     authorKeyHash: c.authorKeyHash,
-    page: c.page,
+    // Public listings share comments across origins by path, so never expose
+    // another environment's full URL (its query string may be sensitive).
+    page: { origin: c.page.origin, path: c.page.path, title: c.page.title },
     anchor: c.anchor,
     viewport: c.viewport,
     createdAt: c.createdAt,
@@ -60,50 +64,61 @@ function cleanName(name: string): string {
   return clean
 }
 
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin
+  } catch {
+    return null
+  }
+}
+
 function clampString(value: string, max: number) {
   return value.length > max ? value.slice(0, max) : value
 }
 
-/** Comments for one page (all origins). Realtime in the widget. */
+/**
+ * Comments for one page (all origins). Realtime in the widget. Returns the
+ * newest open comments and the most recently resolved ones, so new comments
+ * are never pushed out by old ones.
+ */
 export const listForPage = query({
   args: { publicId: v.string(), path: v.string() },
   handler: async (ctx, { publicId, path }) => {
     const project = await projectByPublicId(ctx, publicId)
     if (!project) return []
-    const comments = await ctx.db
-      .query("comments")
-      .withIndex("by_project_path", (q) =>
-        q.eq("projectId", project._id).eq("page.path", path)
-      )
-      .take(500)
-    return comments.map(toPublic)
+    const byStatus = (status: "open" | "resolved", limit: number) =>
+      ctx.db
+        .query("comments")
+        .withIndex("by_project_path_status", (q) =>
+          q
+            .eq("projectId", project._id)
+            .eq("page.path", path)
+            .eq("status", status)
+        )
+        .order("desc")
+        .take(limit)
+    const [open, resolved] = await Promise.all([
+      byStatus("open", LIMITS.pageOpenLimit),
+      byStatus("resolved", LIMITS.pageResolvedLimit),
+    ])
+    return [...open, ...resolved].map(toPublic)
   },
 })
 
-/** Other pages with open comments, for the widget list. */
+/** Pages with open comments, for the widget list. Reads maintained counts. */
 export const pagesWithComments = query({
   args: { publicId: v.string() },
   handler: async (ctx, { publicId }) => {
     const project = await projectByPublicId(ctx, publicId)
     if (!project) return []
-    const open = await ctx.db
-      .query("comments")
-      .withIndex("by_project_status", (q) =>
-        q.eq("projectId", project._id).eq("status", "open")
+    const pages = await ctx.db
+      .query("pageStats")
+      .withIndex("by_project_open", (q) =>
+        q.eq("projectId", project._id).gt("openCount", 0)
       )
       .order("desc")
-      .take(1000)
-    const pages = new Map<
-      string,
-      { path: string; url: string; count: number }
-    >()
-    for (const c of open) {
-      const entry = pages.get(c.page.path)
-      if (entry) entry.count++
-      else
-        pages.set(c.page.path, { path: c.page.path, url: c.page.url, count: 1 })
-    }
-    return [...pages.values()].sort((a, b) => b.count - a.count)
+      .take(200)
+    return pages.map((p) => ({ path: p.path, count: p.openCount }))
   },
 })
 
@@ -122,6 +137,9 @@ export const createFromWidget = internalMutation({
   },
   handler: async (ctx, args) => {
     const origin = parseOrigin(args.page.origin)
+    if (originOf(args.page.url) !== origin) {
+      fail("invalid_page", "Page URL does not match its origin")
+    }
     const body = cleanBody(args.body)
     const authorName = cleanName(args.authorName)
     if (args.authorSecret.length < 16 || args.authorSecret.length > 128) {
@@ -176,6 +194,7 @@ export const createFromWidget = internalMutation({
       openCount: project.openCount + 1,
       lastActivityAt: now,
     })
+    await bumpPageOpen(ctx, project._id, clampString(args.page.path, 1000), 1)
     return id
   },
 })
@@ -207,6 +226,9 @@ export const editOwn = mutation({
 
 async function removeComment(ctx: MutationCtx, comment: Doc<"comments">) {
   await ctx.db.delete(comment._id)
+  if (comment.status === "open") {
+    await bumpPageOpen(ctx, comment.projectId, comment.page.path, -1)
+  }
   const project = await ctx.db.get(comment.projectId)
   if (project) {
     await ctx.db.patch(project._id, {
@@ -228,16 +250,29 @@ export const deleteOwn = mutation({
   },
 })
 
+type WidgetAuth = { sessionToken?: string; origin?: string }
+
+const widgetAuthArgs = {
+  sessionToken: v.optional(v.string()),
+  origin: v.optional(v.string()),
+}
+
 async function setStatus(
   ctx: MutationCtx,
   id: Id<"comments">,
   status: "open" | "resolved",
-  sessionToken?: string
+  widget: WidgetAuth
 ) {
   const comment = await ctx.db.get(id)
   if (!comment) fail("not_found", "Comment not found")
-  const userId = await requireOwner(ctx, comment.projectId, sessionToken)
+  const userId = await requireOwner(ctx, comment.projectId, widget)
   if (comment.status === status) return
+  await bumpPageOpen(
+    ctx,
+    comment.projectId,
+    comment.page.path,
+    status === "open" ? 1 : -1
+  )
   await ctx.db.patch(id, {
     status,
     resolvedAt: status === "resolved" ? Date.now() : undefined,
@@ -253,47 +288,53 @@ async function setStatus(
 }
 
 export const resolve = mutation({
-  args: { id: v.id("comments"), sessionToken: v.optional(v.string()) },
-  handler: (ctx, { id, sessionToken }) =>
-    setStatus(ctx, id, "resolved", sessionToken),
+  args: { id: v.id("comments"), ...widgetAuthArgs },
+  handler: (ctx, { id, ...widget }) => setStatus(ctx, id, "resolved", widget),
 })
 
 export const reopen = mutation({
-  args: { id: v.id("comments"), sessionToken: v.optional(v.string()) },
-  handler: (ctx, { id, sessionToken }) =>
-    setStatus(ctx, id, "open", sessionToken),
+  args: { id: v.id("comments"), ...widgetAuthArgs },
+  handler: (ctx, { id, ...widget }) => setStatus(ctx, id, "open", widget),
 })
 
 export const remove = mutation({
-  args: { id: v.id("comments"), sessionToken: v.optional(v.string()) },
-  handler: async (ctx, { id, sessionToken }) => {
+  args: { id: v.id("comments"), ...widgetAuthArgs },
+  handler: async (ctx, { id, ...widget }) => {
     const comment = await ctx.db.get(id)
     if (!comment) return
-    await requireOwner(ctx, comment.projectId, sessionToken)
+    await requireOwner(ctx, comment.projectId, widget)
     await removeComment(ctx, comment)
   },
 })
 
-/** Dashboard list, owner only. */
+/** Dashboard list, owner only, newest first, paginated. */
 export const listForOwner = query({
   args: {
     publicId: v.string(),
     status: statusValidator,
+    paginationOpts: paginationOptsValidator,
   },
-  handler: async (ctx, { publicId, status }) => {
+  handler: async (ctx, { publicId, status, paginationOpts }) => {
     const user = await currentUser(ctx)
     const project = await projectByPublicId(ctx, publicId)
-    if (!user || !project || project.ownerId !== user._id) return null
-    const comments = await ctx.db
+    if (!user || !project || project.ownerId !== user._id) {
+      return { page: [], isDone: true, continueCursor: "" }
+    }
+    const result = await ctx.db
       .query("comments")
       .withIndex("by_project_status", (q) =>
         q.eq("projectId", project._id).eq("status", status)
       )
       .order("desc")
-      .take(500)
-    return comments.map((c) => ({
-      ...toPublic(c),
-      userAgent: c.userAgent,
-    }))
+      .paginate(paginationOpts)
+    return {
+      ...result,
+      // The owner sees the full page location for Jump to comment.
+      page: result.page.map((c) => ({
+        ...toPublic(c),
+        page: c.page,
+        userAgent: c.userAgent,
+      })),
+    }
   },
 })

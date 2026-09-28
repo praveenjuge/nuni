@@ -35,7 +35,7 @@ cd packages/backend
 CONVEX_AGENT_MODE=anonymous npx convex dev
 # first time only, in another terminal:
 npx convex env set WORKOS_CLIENT_ID client_placeholder
-npx convex env set WORKOS_API_KEY sk_test_placeholder
+npx convex env set WORKOS_API_KEY placeholder-api-key
 npx convex env set WORKOS_WEBHOOK_SECRET placeholder
 npx convex env set NUNI_ALLOW_TESTING 1   # enables the e2e seeding helper locally
 

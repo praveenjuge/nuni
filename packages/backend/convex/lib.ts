@@ -51,6 +51,28 @@ export async function projectByPublicId(
     .unique()
 }
 
+/** Keep the per-page open comment count in sync. */
+export async function bumpPageOpen(
+  ctx: MutationCtx,
+  projectId: Id<"projects">,
+  path: string,
+  delta: number
+) {
+  const stats = await ctx.db
+    .query("pageStats")
+    .withIndex("by_project_path", (q) =>
+      q.eq("projectId", projectId).eq("path", path)
+    )
+    .unique()
+  if (stats) {
+    await ctx.db.patch(stats._id, {
+      openCount: Math.max(0, stats.openCount + delta),
+    })
+  } else if (delta > 0) {
+    await ctx.db.insert("pageStats", { projectId, path, openCount: delta })
+  }
+}
+
 /** Create the unclaimed project on first use. */
 export async function ensureProject(
   ctx: MutationCtx,
@@ -120,16 +142,17 @@ export async function sessionFromToken(
 export async function requireOwner(
   ctx: Ctx,
   projectId: Id<"projects">,
-  sessionToken?: string
+  widget?: { sessionToken?: string; origin?: string }
 ): Promise<Id<"users">> {
   const project = await ctx.db.get(projectId)
   if (!project) fail("not_found", "Project not found")
 
-  if (sessionToken) {
-    const session = await sessionFromToken(ctx, sessionToken)
+  if (widget?.sessionToken) {
+    const session = await sessionFromToken(ctx, widget.sessionToken)
     if (
       session &&
       session.projectId === projectId &&
+      session.origin === widget.origin &&
       project.ownerId === session.userId
     ) {
       return session.userId

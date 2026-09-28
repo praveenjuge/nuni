@@ -1,6 +1,7 @@
 import { AuthKit, type AuthFunctions } from "@convex-dev/workos-authkit"
 
 import { components, internal } from "./_generated/api"
+import { deleteUserData } from "./users"
 import type { DataModel } from "./_generated/dataModel"
 
 const authFunctions: AuthFunctions = internal.auth
@@ -45,16 +46,6 @@ export const { authKitEvent } = authKit.events({
     })
   },
   "user.deleted": async (ctx, event) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_workosId", (q) => q.eq("workosId", event.data.id))
-      .unique()
-    if (!user) return
-    const sessions = await ctx.db
-      .query("widgetSessions")
-      .filter((q) => q.eq(q.field("userId"), user._id))
-      .collect()
-    for (const session of sessions) await ctx.db.delete(session._id)
-    await ctx.db.delete(user._id)
+    await deleteUserData(ctx, event.data.id)
   },
 })

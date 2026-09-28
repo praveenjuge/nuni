@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest"
 
 import { api, internal } from "../convex/_generated/api"
 import schema from "../convex/schema"
+import { deleteUserData } from "../convex/users"
 
 const modules = import.meta.glob("../convex/**/*.ts")
 
@@ -87,14 +88,20 @@ describe("widget comments", () => {
       "https://prod.example.com",
     ])
     expect(pricing[0]).not.toHaveProperty("userAgent")
+    // Other environments' full URLs are never exposed publicly.
+    expect(pricing[0]!.page).toEqual({
+      origin: expect.any(String),
+      path: "/pricing",
+      title: "Pricing",
+    })
 
     const status = await t.query(api.projects.status, { publicId })
     expect(status).toMatchObject({ exists: true, claimed: false, openCount: 3 })
 
     const pages = await t.query(api.comments.pagesWithComments, { publicId })
     expect(pages).toEqual([
-      expect.objectContaining({ path: "/pricing", count: 2 }),
-      expect.objectContaining({ path: "/about", count: 1 }),
+      { path: "/pricing", count: 2 },
+      { path: "/about", count: 1 },
     ])
   })
 
@@ -184,6 +191,47 @@ describe("widget comments", () => {
       /owner/
     )
   })
+  it("rejects a page URL that does not match its origin", async () => {
+    const t = setup()
+    await expect(
+      t.mutation(internal.comments.createFromWidget, {
+        publicId: generateProjectId(),
+        ip: "1.1.1.1",
+        body: "Hi",
+        authorName: "Sam",
+        authorSecret: generateSecret(),
+        page: { ...page(), url: "https://other.example.com/pricing?token=x" },
+        anchor,
+        viewport: { w: 1, h: 1, dpr: 1 },
+        userAgent: "",
+      })
+    ).rejects.toThrow(/does not match/)
+  })
+
+  it("keeps page counts in sync through resolve, reopen and delete", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId)
+    await addComment(t, publicId, { path: "/about" })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    await alice.mutation(api.comments.resolve, { id })
+    expect(await t.query(api.comments.pagesWithComments, { publicId })).toEqual(
+      [{ path: "/about", count: 1 }]
+    )
+    await alice.mutation(api.comments.reopen, { id })
+    await alice.mutation(api.comments.remove, { id })
+    expect(await t.query(api.comments.pagesWithComments, { publicId })).toEqual(
+      [{ path: "/about", count: 1 }]
+    )
+    // Resolved comments still come back for the page, newest open first.
+    const newer = await addComment(t, publicId)
+    const list = await t.query(api.comments.listForPage, {
+      publicId,
+      path: "/pricing",
+    })
+    expect(list[0]?._id).toBe(newer)
+  })
 })
 
 describe("claiming and owner actions", () => {
@@ -253,14 +301,23 @@ describe("claiming and owner actions", () => {
     await expect(bob.mutation(api.comments.resolve, { id })).rejects.toThrow()
     await alice.mutation(api.comments.resolve, { id })
     expect(
-      await alice.query(api.comments.listForOwner, {
-        publicId,
-        status: "resolved",
-      })
+      (
+        await alice.query(api.comments.listForOwner, {
+          publicId,
+          status: "resolved",
+          paginationOpts: { numItems: 50, cursor: null },
+        })
+      ).page
     ).toHaveLength(1)
     expect(
-      await bob.query(api.comments.listForOwner, { publicId, status: "open" })
-    ).toBeNull()
+      (
+        await bob.query(api.comments.listForOwner, {
+          publicId,
+          status: "open",
+          paginationOpts: { numItems: 50, cursor: null },
+        })
+      ).page
+    ).toHaveLength(0)
     expect(await t.query(api.projects.status, { publicId })).toMatchObject({
       openCount: 0,
     })
@@ -272,7 +329,13 @@ describe("claiming and owner actions", () => {
 
     await alice.mutation(api.comments.remove, { id })
     expect(
-      await alice.query(api.comments.listForOwner, { publicId, status: "open" })
+      (
+        await alice.query(api.comments.listForOwner, {
+          publicId,
+          status: "open",
+          paginationOpts: { numItems: 50, cursor: null },
+        })
+      ).page
     ).toHaveLength(0)
   })
 
@@ -299,28 +362,57 @@ describe("claiming and owner actions", () => {
       origin: "http://localhost:3000",
     })
     expect(
-      await t.query(api.sessions.validate, { publicId, sessionToken: token })
+      await t.query(api.sessions.validate, {
+        publicId,
+        sessionToken: token,
+        origin: "http://localhost:3000",
+      })
     ).toEqual({ valid: true, ownerName: "Alice" })
+    // Tokens only work on the origin they were approved for.
+    expect(
+      await t.query(api.sessions.validate, {
+        publicId,
+        sessionToken: token,
+        origin: "https://evil.example.com",
+      })
+    ).toEqual({ valid: false })
+    await expect(
+      t.mutation(api.comments.resolve, {
+        id,
+        sessionToken: token,
+        origin: "https://evil.example.com",
+      })
+    ).rejects.toThrow(/owner/)
     expect(
       await t.query(api.sessions.validate, {
         publicId: otherId,
         sessionToken: token,
+        origin: "http://localhost:3000",
       })
     ).toEqual({ valid: false })
 
     // Anonymous caller with the token can act as owner on this project only.
-    await t.mutation(api.comments.resolve, { id, sessionToken: token })
+    await t.mutation(api.comments.resolve, {
+      id,
+      sessionToken: token,
+      origin: "http://localhost:3000",
+    })
     await expect(
       t.mutation(api.comments.resolve, {
         id: otherComment,
         sessionToken: token,
+        origin: "http://localhost:3000",
       })
     ).rejects.toThrow()
 
     const [session] = await alice.query(api.sessions.listMine, { publicId })
     await alice.mutation(api.sessions.revoke, { id: session!._id })
     await expect(
-      t.mutation(api.comments.reopen, { id, sessionToken: token })
+      t.mutation(api.comments.reopen, {
+        id,
+        sessionToken: token,
+        origin: "http://localhost:3000",
+      })
     ).rejects.toThrow()
   })
 
@@ -340,7 +432,80 @@ describe("claiming and owner actions", () => {
       }
     })
     await expect(
-      t.mutation(api.comments.resolve, { id, sessionToken: token })
+      t.mutation(api.comments.resolve, {
+        id,
+        sessionToken: token,
+        origin: "http://localhost:3000",
+      })
     ).rejects.toThrow()
+  })
+  it("cleans up expired sessions", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId)
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    await alice.mutation(api.sessions.create, {
+      publicId,
+      origin: "http://localhost:3000",
+    })
+    await alice.mutation(api.sessions.create, {
+      publicId,
+      origin: "http://localhost:3000",
+    })
+    await t.run(async (ctx) => {
+      const [first] = await ctx.db.query("widgetSessions").collect()
+      await ctx.db.patch(first!._id, { expiresAt: Date.now() - 1 })
+    })
+    expect(await t.mutation(internal.sessions.cleanupExpired, {})).toBe(1)
+    const left = await t.run((ctx) => ctx.db.query("widgetSessions").collect())
+    expect(left).toHaveLength(1)
+  })
+
+  it("releases projects when their owner is deleted in WorkOS", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId)
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    await alice.mutation(api.sessions.create, {
+      publicId,
+      origin: "http://localhost:3000",
+    })
+
+    await t.run((ctx) => deleteUserData(ctx as never, "user_alice"))
+
+    expect(await t.query(api.projects.status, { publicId })).toMatchObject({
+      claimed: false,
+    })
+    expect(
+      await t.run((ctx) => ctx.db.query("widgetSessions").collect())
+    ).toHaveLength(0)
+    const bob = await signIn(t, "user_bob", "Bob")
+    expect(await bob.mutation(api.projects.claim, { publicId })).toMatchObject({
+      status: "claimed",
+    })
+  })
+
+  it("shows the claim state without claiming", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId)
+    const alice = await signIn(t, "user_alice", "Alice")
+    const bob = await signIn(t, "user_bob", "Bob")
+    expect(await alice.query(api.projects.claimStatus, { publicId })).toEqual({
+      state: "unclaimed",
+    })
+    expect(await t.query(api.projects.status, { publicId })).toMatchObject({
+      claimed: false,
+    })
+    await alice.mutation(api.projects.claim, { publicId })
+    expect(await alice.query(api.projects.claimStatus, { publicId })).toEqual({
+      state: "mine",
+    })
+    expect(await bob.query(api.projects.claimStatus, { publicId })).toEqual({
+      state: "other",
+      ownerName: "Alice",
+    })
   })
 })

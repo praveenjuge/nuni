@@ -674,7 +674,12 @@ export class NuniWidget {
     this.render()
   }
 
-  private async act(id: string, action: () => Promise<unknown>, done?: string) {
+  /** Runs an action for the open thread. Resolves to true on success. */
+  private async act(
+    id: string,
+    action: () => Promise<unknown>,
+    done?: string
+  ): Promise<boolean> {
     const card = this.card
     if (card?.kind === "thread") {
       card.busy = true
@@ -688,22 +693,26 @@ export class NuniWidget {
         this.card.busy = false
         this.card.editing = false
       }
+      this.render()
+      return true
     } catch (error) {
       if (this.card?.kind === "thread" && this.card.id === id) {
         this.card.busy = false
         this.card.error =
           error instanceof Error ? error.message : "Something went wrong"
       }
+      this.render()
+      return false
     }
-    this.render()
   }
 
   private resolveComment(c: WidgetComment) {
     const token = this.ownerToken
     if (!token) return
     void this.act(c._id, () => this.api.resolve(c._id, token), "Resolved").then(
-      () => {
+      (ok) => {
         if (
+          ok &&
           !this.showResolved &&
           this.card?.kind === "thread" &&
           this.card.id === c._id
@@ -728,7 +737,8 @@ export class NuniWidget {
         ? () => this.api.remove(c._id, token)
         : null
     if (!action) return
-    void this.act(c._id, action, "Deleted").then(() => this.closeCard())
+    // Keep the thread open on failure so the error stays visible.
+    void this.act(c._id, action, "Deleted").then((ok) => ok && this.closeCard())
   }
 
   private saveEdit(c: WidgetComment, body: string) {
