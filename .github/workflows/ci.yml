@@ -73,12 +73,15 @@ jobs:
         working-directory: packages/backend
         env:
           CONVEX_AGENT_MODE: anonymous
+        # The first push creates the local deployment but fails until the
+        # WorkOS env vars exist, so set them and push again.
         run: |
-          npx convex dev --once
+          npx convex dev --once || true
           npx convex env set WORKOS_CLIENT_ID client_ci_placeholder
           npx convex env set WORKOS_API_KEY sk_test_ci_placeholder
           npx convex env set WORKOS_WEBHOOK_SECRET ci_placeholder
           npx convex env set NUNI_ALLOW_TESTING 1
+          npx convex dev --once
       - run: bun run e2e
         working-directory: apps/playground
         env:
