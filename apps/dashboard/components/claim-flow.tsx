@@ -1,13 +1,13 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
-import { useMutation } from "convex/react"
+import { useMutation, useQuery } from "convex/react"
 import {
   CheckCircle2Icon,
   ShieldCheckIcon,
   TriangleAlertIcon,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
@@ -20,13 +20,15 @@ import {
 import { useStoreUser } from "@/components/use-store-user"
 import { hostOf } from "@/lib/format"
 
-type State =
-  | { step: "loading" }
-  | { step: "confirm"; claimedNow: boolean }
+type Result =
   | { step: "done"; handedOff: boolean }
   | { step: "other"; ownerName: string }
   | { step: "error"; message: string }
 
+/**
+ * Nothing is claimed or granted until the user clicks: the page first shows
+ * which site and project the link is for, read-only.
+ */
 export function ClaimFlow({
   project,
   origin,
@@ -35,30 +37,25 @@ export function ClaimFlow({
   origin: string
 }) {
   const { ready } = useStoreUser()
+  const status = useQuery(
+    api.projects.claimStatus,
+    ready ? { publicId: project } : "skip"
+  )
   const claim = useMutation(api.projects.claim)
   const createSession = useMutation(api.sessions.create)
-  const [state, setState] = useState<State>({ step: "loading" })
+  const [result, setResult] = useState<Result | null>(null)
   const [busy, setBusy] = useState(false)
-  const started = useRef(false)
 
-  useEffect(() => {
-    if (!ready || started.current) return
-    started.current = true
-    claim({ publicId: project, origin })
-      .then((result) => {
-        if (result.status === "claimed_by_other")
-          setState({ step: "other", ownerName: result.ownerName })
-        else
-          setState({ step: "confirm", claimedNow: result.status === "claimed" })
-      })
-      .catch((error: unknown) =>
-        setState({ step: "error", message: errorMessage(error) })
-      )
-  }, [ready, claim, project, origin])
-
-  async function allow() {
+  async function confirm() {
     setBusy(true)
     try {
+      if (status?.state === "unclaimed") {
+        const claimed = await claim({ publicId: project, origin })
+        if (claimed.status === "claimed_by_other") {
+          setResult({ step: "other", ownerName: claimed.ownerName })
+          return
+        }
+      }
       const { token } = await createSession({
         publicId: project,
         origin,
@@ -68,63 +65,85 @@ export function ClaimFlow({
       if (opener && !opener.closed) {
         // Only the site that opened this popup, at exactly this origin, can receive it.
         opener.postMessage({ type: "nuni:session", project, token }, origin)
-        setState({ step: "done", handedOff: true })
+        setResult({ step: "done", handedOff: true })
         setTimeout(() => window.close(), 1200)
       } else {
-        setState({ step: "done", handedOff: false })
+        setResult({ step: "done", handedOff: false })
       }
     } catch (error) {
-      setState({ step: "error", message: errorMessage(error) })
+      setResult({ step: "error", message: errorMessage(error) })
     } finally {
       setBusy(false)
     }
   }
 
   const host = hostOf(origin)
+  const view:
+    Result | { step: "loading" } | { step: "confirm"; mine: boolean } =
+    result ??
+    (!ready || status === undefined
+      ? { step: "loading" }
+      : status.state === "other"
+        ? { step: "other", ownerName: status.ownerName }
+        : { step: "confirm", mine: status.state === "mine" })
+
   return (
     <main className="mx-auto grid min-h-svh max-w-md place-items-center p-6">
       <Card className="w-full">
-        {state.step === "loading" && (
+        {view.step === "loading" && (
           <CardHeader>
             <CardTitle>Checking {host}…</CardTitle>
             <CardDescription>One moment.</CardDescription>
           </CardHeader>
         )}
-        {state.step === "confirm" && (
+        {view.step === "confirm" && (
           <>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <ShieldCheckIcon className="size-5 text-primary" />
-                {state.claimedNow ? "You own this site now" : "Welcome back"}
+                {view.mine ? "Welcome back" : `Claim ${host}?`}
               </CardTitle>
               <CardDescription>
-                Allow owner tools on{" "}
-                <strong className="text-foreground">{host}</strong>? You&apos;ll
-                be able to resolve and delete comments right on the page. Only
-                allow sites you control.
+                {view.mine ? (
+                  <>
+                    Allow owner tools on{" "}
+                    <strong className="text-foreground">{host}</strong>?
+                  </>
+                ) : (
+                  <>
+                    You&apos;ll become the owner of the Nuni project on{" "}
+                    <strong className="text-foreground">{host}</strong> and can
+                    resolve and delete its comments, on the page and in the
+                    dashboard. Only claim sites you control.
+                  </>
+                )}
               </CardDescription>
+              <code className="w-fit rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                {project}
+              </code>
             </CardHeader>
-            <CardContent className="flex gap-2">
-              <Button onClick={allow} disabled={busy}>
-                Allow on {host}
+            <CardContent className="flex flex-wrap gap-2">
+              <Button onClick={confirm} disabled={busy}>
+                {view.mine ? `Allow on ${host}` : `Claim and allow on ${host}`}
               </Button>
-              <a
-                className={buttonVariants({ variant: "ghost" })}
-                href={`/dashboard/p/${project}`}
+              <Button
+                variant="ghost"
+                onClick={() => window.close()}
+                disabled={busy}
               >
-                Open dashboard
-              </a>
+                Cancel
+              </Button>
             </CardContent>
           </>
         )}
-        {state.step === "done" && (
+        {view.step === "done" && (
           <>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <CheckCircle2Icon className="size-5 text-primary" /> All set
               </CardTitle>
               <CardDescription>
-                {state.handedOff
+                {view.handedOff
                   ? `You're signed in as the owner on ${host}. This window will close.`
                   : `Go back to ${host} and open Nuni again, or manage comments from the dashboard.`}
               </CardDescription>
@@ -139,22 +158,22 @@ export function ClaimFlow({
             </CardContent>
           </>
         )}
-        {state.step === "other" && (
+        {view.step === "other" && (
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <TriangleAlertIcon className="size-5 text-destructive" /> Already
               claimed
             </CardTitle>
             <CardDescription>
-              {host} is managed by {state.ownerName}. Ask them to resolve
+              {host} is managed by {view.ownerName}. Ask them to resolve
               comments, or contact support if this is your site.
             </CardDescription>
           </CardHeader>
         )}
-        {state.step === "error" && (
+        {view.step === "error" && (
           <CardHeader>
             <CardTitle>Something went wrong</CardTitle>
-            <CardDescription>{state.message}</CardDescription>
+            <CardDescription>{view.message}</CardDescription>
           </CardHeader>
         )}
       </Card>

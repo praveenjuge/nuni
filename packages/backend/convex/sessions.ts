@@ -1,7 +1,8 @@
 import { LIMITS, randomBase58 } from "@nuni/shared"
 import { v } from "convex/values"
 
-import { mutation, query } from "./_generated/server"
+import { internal } from "./_generated/api"
+import { internalMutation, mutation, query } from "./_generated/server"
 import {
   fail,
   parseOrigin,
@@ -107,5 +108,23 @@ export const revokeOwn = mutation({
   handler: async (ctx, { sessionToken }) => {
     const session = await sessionFromToken(ctx, sessionToken)
     if (session) await ctx.db.delete(session._id)
+  },
+})
+
+const CLEANUP_BATCH = 500
+
+/** Daily cron: delete expired widget sessions, continuing until none are left. */
+export const cleanupExpired = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const expired = await ctx.db
+      .query("widgetSessions")
+      .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
+      .take(CLEANUP_BATCH)
+    for (const session of expired) await ctx.db.delete(session._id)
+    if (expired.length === CLEANUP_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.sessions.cleanupExpired, {})
+    }
+    return expired.length
   },
 })

@@ -51,6 +51,33 @@ export async function projectByPublicId(
     .unique()
 }
 
+/** Keep the per-page open comment count in sync. */
+export async function bumpPageOpen(
+  ctx: MutationCtx,
+  projectId: Id<"projects">,
+  path: string,
+  delta: number
+) {
+  const stats = await ctx.db
+    .query("pageStats")
+    .withIndex("by_project_path", (q) =>
+      q.eq("projectId", projectId).eq("path", path)
+    )
+    .unique()
+  if (stats) {
+    await ctx.db.patch(stats._id, {
+      openCount: Math.max(0, stats.openCount + delta),
+    })
+  } else {
+    // Rows are kept at 0 too, so the dashboard can offer every page as a filter.
+    await ctx.db.insert("pageStats", {
+      projectId,
+      path,
+      openCount: Math.max(0, delta),
+    })
+  }
+}
+
 /** Create the unclaimed project on first use. */
 export async function ensureProject(
   ctx: MutationCtx,
@@ -116,17 +143,22 @@ export async function sessionFromToken(
 /**
  * Resolve who is acting as the owner: either the dashboard JWT or a widget
  * session token. Returns the owner user id, or throws.
+ *
+ * Widget session tokens are project-scoped bearer credentials. The origin
+ * they were approved on is recorded for the dashboard, but it is not an
+ * access check: a caller outside the browser can claim any origin. Tokens
+ * are hashed at rest, expire after 30 days and can be revoked.
  */
 export async function requireOwner(
   ctx: Ctx,
   projectId: Id<"projects">,
-  sessionToken?: string
+  widget?: { sessionToken?: string }
 ): Promise<Id<"users">> {
   const project = await ctx.db.get(projectId)
   if (!project) fail("not_found", "Project not found")
 
-  if (sessionToken) {
-    const session = await sessionFromToken(ctx, sessionToken)
+  if (widget?.sessionToken) {
+    const session = await sessionFromToken(ctx, widget.sessionToken)
     if (
       session &&
       session.projectId === projectId &&

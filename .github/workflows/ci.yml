@@ -78,7 +78,7 @@ jobs:
         run: |
           npx convex dev --once || true
           npx convex env set WORKOS_CLIENT_ID client_ci_placeholder
-          npx convex env set WORKOS_API_KEY sk_test_ci_placeholder
+          npx convex env set WORKOS_API_KEY placeholder-api-key
           npx convex env set WORKOS_WEBHOOK_SECRET ci_placeholder
           npx convex env set NUNI_ALLOW_TESTING 1
           npx convex dev --once

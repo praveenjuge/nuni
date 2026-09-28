@@ -10,15 +10,20 @@ export interface NuniInstance {
   destroy(): void
 }
 
-let active: {
+interface Mounted {
   project: string
   widget: NuniWidget | null
   timer: number
-} | null = null
+  handles: number
+}
+
+let active: Mounted | null = null
 
 /**
- * Mount Nuni on the page. Call once on the client. Calling it again with
- * the same project is a no-op; with a different project it replaces it.
+ * Mount Nuni on the page. Call once on the client. Calling it again with the
+ * same project shares the mounted widget; it is removed when every handle is
+ * destroyed. A different project replaces it. Each handle only ever tears
+ * down the widget it was created for.
  */
 export function init(options: NuniOptions): NuniInstance {
   const noop = { destroy() {} }
@@ -30,14 +35,15 @@ export function init(options: NuniOptions): NuniInstance {
     )
     return noop
   }
-  if (active?.project === options.project) return { destroy: destroyActive }
-  destroyActive()
+  if (active?.project === options.project) return handleFor(active)
+  if (active) unmount(active)
 
   const config = resolveConfig(options)
-  const state = {
+  const state: Mounted = {
     project: options.project,
-    widget: null as NuniWidget | null,
+    widget: null,
     timer: 0,
+    handles: 0,
   }
   active = state
 
@@ -59,12 +65,25 @@ export function init(options: NuniOptions): NuniInstance {
   if (idle) idle(mount, { timeout: 1500 })
   else state.timer = window.setTimeout(mount, 1)
 
-  return { destroy: destroyActive }
+  return handleFor(state)
 }
 
-function destroyActive() {
-  if (!active) return
-  clearTimeout(active.timer)
-  active.widget?.destroy()
-  active = null
+function handleFor(state: Mounted): NuniInstance {
+  state.handles++
+  let released = false
+  return {
+    destroy() {
+      if (released) return
+      released = true
+      state.handles--
+      if (state.handles <= 0 && active === state) unmount(state)
+    },
+  }
+}
+
+function unmount(state: Mounted) {
+  clearTimeout(state.timer)
+  state.widget?.destroy()
+  state.widget = null
+  if (active === state) active = null
 }

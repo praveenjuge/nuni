@@ -117,6 +117,8 @@ export class NuniWidget {
   private ownerToken: string | null
   private ownerName: string | null = null
   private deepLinkId: string | null = null
+  /** A deep-linked comment that is outside the page listing window. */
+  private extraComment: WidgetComment | null = null
 
   private layoutFrame = 0
   private pinPositions = new Map<string, { x: number; y: number }>()
@@ -245,6 +247,7 @@ export class NuniWidget {
     this.pageKey = key
     this.pageUnsub?.()
     this.comments = []
+    this.extraComment = null
     this.loaded = false
     this.placements.clear()
     this.card = null
@@ -252,7 +255,12 @@ export class NuniWidget {
     this.pageUnsub = this.api.onPage(
       key,
       (comments) => {
-        this.comments = comments.sort((a, b) => a.createdAt - b.createdAt)
+        const extra = this.extraComment
+        const merged =
+          extra && !comments.some((c) => c._id === extra._id)
+            ? [...comments, extra]
+            : comments
+        this.comments = merged.sort((a, b) => a.createdAt - b.createdAt)
         this.loaded = true
         this.resolvePlacements(false)
         this.openDeepLink()
@@ -594,12 +602,29 @@ export class NuniWidget {
   private openDeepLink() {
     const id = this.deepLinkId
     if (!id || !this.loaded) return
-    const comment = this.comments.find((c) => c._id === id)
     this.deepLinkId = null
-    if (!comment) {
-      this.showToast("That comment was deleted or is on another page")
+    const comment = this.comments.find((c) => c._id === id)
+    if (comment) {
+      this.focusDeepLinked(comment)
       return
     }
+    // Older comments (e.g. long-resolved ones) are outside the page listing.
+    void this.api.getComment(id).then((found) => {
+      if (!found || found.page.path !== this.pageKey) {
+        this.showToast("That comment was deleted or is on another page")
+        return
+      }
+      this.extraComment = found
+      this.comments = [
+        ...this.comments.filter((c) => c._id !== found._id),
+        found,
+      ]
+      this.resolvePlacements(false)
+      this.focusDeepLinked(found)
+    })
+  }
+
+  private focusDeepLinked(comment: WidgetComment) {
     if (comment.status === "resolved" && !this.showResolved) {
       this.showResolved = true
       this.renderPins()
@@ -674,7 +699,12 @@ export class NuniWidget {
     this.render()
   }
 
-  private async act(id: string, action: () => Promise<unknown>, done?: string) {
+  /** Runs an action for the open thread. Resolves to true on success. */
+  private async act(
+    id: string,
+    action: () => Promise<unknown>,
+    done?: string
+  ): Promise<boolean> {
     const card = this.card
     if (card?.kind === "thread") {
       card.busy = true
@@ -688,22 +718,26 @@ export class NuniWidget {
         this.card.busy = false
         this.card.editing = false
       }
+      this.render()
+      return true
     } catch (error) {
       if (this.card?.kind === "thread" && this.card.id === id) {
         this.card.busy = false
         this.card.error =
           error instanceof Error ? error.message : "Something went wrong"
       }
+      this.render()
+      return false
     }
-    this.render()
   }
 
   private resolveComment(c: WidgetComment) {
     const token = this.ownerToken
     if (!token) return
     void this.act(c._id, () => this.api.resolve(c._id, token), "Resolved").then(
-      () => {
+      (ok) => {
         if (
+          ok &&
           !this.showResolved &&
           this.card?.kind === "thread" &&
           this.card.id === c._id
@@ -728,7 +762,16 @@ export class NuniWidget {
         ? () => this.api.remove(c._id, token)
         : null
     if (!action) return
-    void this.act(c._id, action, "Deleted").then(() => this.closeCard())
+    // Keep the thread open on failure so the error stays visible.
+    void this.act(c._id, action, "Deleted").then((ok) => {
+      if (!ok) return
+      // The deep-link fallback is not part of the live subscription, so drop
+      // it by hand or its pin would linger until the next navigation.
+      if (this.extraComment?._id === c._id) this.extraComment = null
+      this.comments = this.comments.filter((x) => x._id !== c._id)
+      this.placements.delete(c._id)
+      this.closeCard()
+    })
   }
 
   private saveEdit(c: WidgetComment, body: string) {

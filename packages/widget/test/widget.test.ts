@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { resolveConfig } from "../src/config"
 import { colorFor, h, initials, timeAgo } from "../src/dom"
@@ -69,5 +69,36 @@ describe("init", () => {
     expect(warn).toHaveBeenCalled()
     instance.destroy()
     warn.mockRestore()
+  })
+})
+
+describe("init handles", () => {
+  const A = "nuni_JJHAES8DaHHYNVh4JoWWXw"
+  const B = "nuni_mknC4w74AuwQ1ez5cCG8Tv"
+  const mounted = () => document.getElementById("nuni-root")
+  afterEach(() => {
+    document.body.innerHTML = ""
+    vi.useRealTimers()
+  })
+
+  it("only removes the widget when every handle for it is destroyed", async () => {
+    const first = init({ project: A })
+    const second = init({ project: A })
+    await vi.waitFor(() => expect(mounted()).not.toBeNull())
+    first.destroy()
+    first.destroy() // idempotent
+    expect(mounted()).not.toBeNull()
+    second.destroy()
+    expect(mounted()).toBeNull()
+  })
+
+  it("an old handle does not remove a newer project's widget", async () => {
+    const a = init({ project: A })
+    const b = init({ project: B })
+    await vi.waitFor(() => expect(mounted()).not.toBeNull())
+    a.destroy()
+    expect(mounted()).not.toBeNull()
+    b.destroy()
+    expect(mounted()).toBeNull()
   })
 })

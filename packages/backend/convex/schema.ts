@@ -39,13 +39,34 @@ export default defineSchema({
     anchor: anchorValidator,
     viewport: viewportValidator,
     userAgent: v.string(),
+    /** Body plus author name, for dashboard search. */
+    searchText: v.optional(v.string()),
     createdAt: v.number(),
     editedAt: v.optional(v.number()),
     resolvedAt: v.optional(v.number()),
     resolvedBy: v.optional(v.id("users")),
   })
     .index("by_project_path", ["projectId", "page.path", "createdAt"])
-    .index("by_project_status", ["projectId", "status", "createdAt"]),
+    .index("by_project_path_status", [
+      "projectId",
+      "page.path",
+      "status",
+      "createdAt",
+    ])
+    .index("by_project_status", ["projectId", "status", "createdAt"])
+    .searchIndex("search_text", {
+      searchField: "searchText",
+      filterFields: ["projectId", "status"],
+    }),
+
+  /** Open comment count per page, so the widget can list other pages. */
+  pageStats: defineTable({
+    projectId: v.id("projects"),
+    path: v.string(),
+    openCount: v.number(),
+  })
+    .index("by_project_path", ["projectId", "path"])
+    .index("by_project_open", ["projectId", "openCount"]),
 
   widgetSessions: defineTable({
     tokenHash: v.string(),
@@ -57,7 +78,9 @@ export default defineSchema({
     lastUsedAt: v.optional(v.number()),
   })
     .index("by_tokenHash", ["tokenHash"])
-    .index("by_project", ["projectId"]),
+    .index("by_project", ["projectId"])
+    .index("by_user", ["userId"])
+    .index("by_expires", ["expiresAt"]),
 
   claims: defineTable({
     projectId: v.id("projects"),

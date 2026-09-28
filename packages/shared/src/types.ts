@@ -55,13 +55,14 @@ export interface WidgetComment {
   body: string
   authorName: string
   authorKeyHash: string
+  /** Public listings only include origin, path and title. */
   page: {
     origin: string
     path: string
-    search: string
-    hash: string
     title: string
-    url: string
+    search?: string
+    hash?: string
+    url?: string
   }
   anchor: Anchor
   viewport: { w: number; h: number; dpr: number }

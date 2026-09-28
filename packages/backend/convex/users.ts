@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server"
+import { mutation, query, type MutationCtx } from "./_generated/server"
 import { authKit } from "./auth"
 import { currentUser, fail } from "./lib"
 
@@ -40,3 +40,31 @@ export const me = query({
     return { _id: user._id, name: user.name, avatarUrl: user.avatarUrl }
   },
 })
+
+/**
+ * WorkOS user.deleted: remove the user and their widget sessions, and release
+ * their projects so they can be claimed again instead of being stranded.
+ */
+export async function deleteUserData(ctx: MutationCtx, workosId: string) {
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_workosId", (q) => q.eq("workosId", workosId))
+    .unique()
+  if (!user) return
+  const sessions = await ctx.db
+    .query("widgetSessions")
+    .withIndex("by_user", (q) => q.eq("userId", user._id))
+    .collect()
+  for (const session of sessions) await ctx.db.delete(session._id)
+  const owned = await ctx.db
+    .query("projects")
+    .withIndex("by_owner", (q) => q.eq("ownerId", user._id))
+    .collect()
+  for (const project of owned) {
+    await ctx.db.patch(project._id, {
+      ownerId: undefined,
+      claimedAt: undefined,
+    })
+  }
+  await ctx.db.delete(user._id)
+}

@@ -47,6 +47,19 @@ export const status = query({
   },
 })
 
+/** What the claim page shows before the user confirms. Read-only. */
+export const claimStatus = query({
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const user = await currentUser(ctx)
+    const project = await projectByPublicId(ctx, publicId)
+    if (!project?.ownerId) return { state: "unclaimed" as const }
+    if (user && project.ownerId === user._id) return { state: "mine" as const }
+    const owner = await ctx.db.get(project.ownerId)
+    return { state: "other" as const, ownerName: owner?.name ?? "someone else" }
+  },
+})
+
 /** Claim an unclaimed project. First come, first served. */
 export const claim = mutation({
   args: { publicId: v.string(), origin: v.optional(v.string()) },

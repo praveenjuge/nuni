@@ -13,7 +13,6 @@ export interface ProjectStatus {
 
 export interface PageSummary {
   path: string
-  url: string
   count: number
 }
 
@@ -105,6 +104,14 @@ export class NuniApi {
       cb,
       () => {}
     )
+  }
+
+  /** One comment by id, for deep links outside the page listing window. */
+  getComment(id: string): Promise<WidgetComment | null> {
+    return this.client
+      .query(api.comments.getById, { publicId: this.config.project, id })
+      .then((c) => c as WidgetComment | null)
+      .catch(() => null)
   }
 
   async createComment(comment: NewComment): Promise<string> {
