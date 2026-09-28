@@ -100,10 +100,18 @@ export class NuniApi {
   ) {
     return this.client.onUpdate(
       api.sessions.validate,
-      { publicId: this.config.project, sessionToken, origin: location.origin },
+      { publicId: this.config.project, sessionToken },
       cb,
       () => {}
     )
+  }
+
+  /** One comment by id, for deep links outside the page listing window. */
+  getComment(id: string): Promise<WidgetComment | null> {
+    return this.client
+      .query(api.comments.getById, { publicId: this.config.project, id })
+      .then((c) => c as WidgetComment | null)
+      .catch(() => null)
   }
 
   async createComment(comment: NewComment): Promise<string> {
@@ -166,7 +174,6 @@ export class NuniApi {
       this.client.mutation(api.comments.resolve, {
         id: id as never,
         sessionToken,
-        origin: location.origin,
       })
     )
   }
@@ -176,7 +183,6 @@ export class NuniApi {
       this.client.mutation(api.comments.reopen, {
         id: id as never,
         sessionToken,
-        origin: location.origin,
       })
     )
   }
@@ -186,7 +192,6 @@ export class NuniApi {
       this.client.mutation(api.comments.remove, {
         id: id as never,
         sessionToken,
-        origin: location.origin,
       })
     )
   }

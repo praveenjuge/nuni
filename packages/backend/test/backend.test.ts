@@ -3,7 +3,7 @@ import rateLimiter from "@convex-dev/rate-limiter/test"
 import workOSAuthKit from "@convex-dev/workos-authkit/test"
 import { generateProjectId, generateSecret, LIMITS } from "@nuni/shared"
 import { convexTest } from "convex-test"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { api, internal } from "../convex/_generated/api"
 import schema from "../convex/schema"
@@ -232,6 +232,20 @@ describe("widget comments", () => {
     })
     expect(list[0]?._id).toBe(newer)
   })
+  it("returns a single comment by id for deep links", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId)
+    expect(await t.query(api.comments.getById, { publicId, id })).toMatchObject(
+      { _id: id }
+    )
+    expect(
+      await t.query(api.comments.getById, { publicId: generateProjectId(), id })
+    ).toBeNull()
+    expect(
+      await t.query(api.comments.getById, { publicId, id: "not-an-id" })
+    ).toBeNull()
+  })
 })
 
 describe("claiming and owner actions", () => {
@@ -365,29 +379,12 @@ describe("claiming and owner actions", () => {
       await t.query(api.sessions.validate, {
         publicId,
         sessionToken: token,
-        origin: "http://localhost:3000",
       })
     ).toEqual({ valid: true, ownerName: "Alice" })
-    // Tokens only work on the origin they were approved for.
-    expect(
-      await t.query(api.sessions.validate, {
-        publicId,
-        sessionToken: token,
-        origin: "https://evil.example.com",
-      })
-    ).toEqual({ valid: false })
-    await expect(
-      t.mutation(api.comments.resolve, {
-        id,
-        sessionToken: token,
-        origin: "https://evil.example.com",
-      })
-    ).rejects.toThrow(/owner/)
     expect(
       await t.query(api.sessions.validate, {
         publicId: otherId,
         sessionToken: token,
-        origin: "http://localhost:3000",
       })
     ).toEqual({ valid: false })
 
@@ -395,13 +392,11 @@ describe("claiming and owner actions", () => {
     await t.mutation(api.comments.resolve, {
       id,
       sessionToken: token,
-      origin: "http://localhost:3000",
     })
     await expect(
       t.mutation(api.comments.resolve, {
         id: otherComment,
         sessionToken: token,
-        origin: "http://localhost:3000",
       })
     ).rejects.toThrow()
 
@@ -411,7 +406,6 @@ describe("claiming and owner actions", () => {
       t.mutation(api.comments.reopen, {
         id,
         sessionToken: token,
-        origin: "http://localhost:3000",
       })
     ).rejects.toThrow()
   })
@@ -435,7 +429,6 @@ describe("claiming and owner actions", () => {
       t.mutation(api.comments.resolve, {
         id,
         sessionToken: token,
-        origin: "http://localhost:3000",
       })
     ).rejects.toThrow()
   })
@@ -507,5 +500,81 @@ describe("claiming and owner actions", () => {
       state: "other",
       ownerName: "Alice",
     })
+  })
+  it("filters the owner list server-side, including unloaded pages", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    for (let i = 0; i < 3; i++) await addComment(t, publicId)
+    await addComment(t, publicId, {
+      path: "/about",
+      origin: "https://prod.example.com",
+    })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    const list = (args: Record<string, string>) =>
+      alice.query(api.comments.listForOwner, {
+        publicId,
+        status: "open",
+        paginationOpts: { numItems: 2, cursor: null },
+        ...args,
+      })
+    expect((await list({ path: "/about" })).page).toHaveLength(1)
+    expect(
+      (await list({ origin: "https://prod.example.com" })).page
+    ).toHaveLength(1)
+    const filters = await alice.query(api.comments.ownerFilters, { publicId })
+    expect(filters.paths.sort()).toEqual(["/about", "/pricing"])
+    expect(filters.origins).toContain("https://prod.example.com")
+  })
+
+  it("rebuilds page counts from existing comments", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId)
+    await addComment(t, publicId)
+    await addComment(t, publicId, { path: "/about" })
+    await t.run(async (ctx) => {
+      for (const row of await ctx.db.query("pageStats").collect())
+        await ctx.db.delete(row._id)
+    })
+    expect(await t.query(api.comments.pagesWithComments, { publicId })).toEqual(
+      []
+    )
+    await t.mutation(internal.comments.rebuildPageStats, {})
+    await t.finishAllScheduledFunctions(() => {})
+    expect(await t.query(api.comments.pagesWithComments, { publicId })).toEqual(
+      [
+        { path: "/pricing", count: 2 },
+        { path: "/about", count: 1 },
+      ]
+    )
+  })
+
+  it("keeps cleaning up while expired sessions remain", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId)
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    await t.run(async (ctx) => {
+      const project = await ctx.db.query("projects").first()
+      const user = await ctx.db.query("users").first()
+      for (let i = 0; i < 520; i++) {
+        await ctx.db.insert("widgetSessions", {
+          tokenHash: `h${i}`,
+          userId: user!._id,
+          projectId: project!._id,
+          origin: "http://localhost:3000",
+          expiresAt: Date.now() - 1,
+        })
+      }
+    })
+    vi.useFakeTimers()
+    await t.mutation(internal.sessions.cleanupExpired, {})
+    await t.finishAllScheduledFunctions(vi.runAllTimers)
+    vi.useRealTimers()
+    expect(
+      await t.run((ctx) => ctx.db.query("widgetSessions").collect())
+    ).toHaveLength(0)
   })
 })

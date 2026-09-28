@@ -2,6 +2,7 @@ import { LIMITS } from "@nuni/shared"
 import { paginationOptsValidator } from "convex/server"
 import { v } from "convex/values"
 
+import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import {
   internalMutation,
@@ -250,12 +251,9 @@ export const deleteOwn = mutation({
   },
 })
 
-type WidgetAuth = { sessionToken?: string; origin?: string }
+type WidgetAuth = { sessionToken?: string }
 
-const widgetAuthArgs = {
-  sessionToken: v.optional(v.string()),
-  origin: v.optional(v.string()),
-}
+const widgetAuthArgs = { sessionToken: v.optional(v.string()) }
 
 async function setStatus(
   ctx: MutationCtx,
@@ -307,26 +305,45 @@ export const remove = mutation({
   },
 })
 
-/** Dashboard list, owner only, newest first, paginated. */
+/** Dashboard list, owner only, newest first, paginated and filtered server-side. */
 export const listForOwner = query({
   args: {
     publicId: v.string(),
     status: statusValidator,
+    path: v.optional(v.string()),
+    origin: v.optional(v.string()),
+    search: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
   },
-  handler: async (ctx, { publicId, status, paginationOpts }) => {
+  handler: async (ctx, args) => {
     const user = await currentUser(ctx)
-    const project = await projectByPublicId(ctx, publicId)
+    const project = await projectByPublicId(ctx, args.publicId)
     if (!user || !project || project.ownerId !== user._id) {
       return { page: [], isDone: true, continueCursor: "" }
     }
-    const result = await ctx.db
-      .query("comments")
-      .withIndex("by_project_status", (q) =>
-        q.eq("projectId", project._id).eq("status", status)
+    const search = args.search?.trim()
+    const base = search
+      ? ctx.db
+          .query("comments")
+          .withSearchIndex("search_body", (q) =>
+            q
+              .search("body", search)
+              .eq("projectId", project._id)
+              .eq("status", args.status)
+          )
+      : ctx.db
+          .query("comments")
+          .withIndex("by_project_status", (q) =>
+            q.eq("projectId", project._id).eq("status", args.status)
+          )
+          .order("desc")
+    const filtered = base.filter((q) =>
+      q.and(
+        args.path ? q.eq(q.field("page.path"), args.path) : true,
+        args.origin ? q.eq(q.field("page.origin"), args.origin) : true
       )
-      .order("desc")
-      .paginate(paginationOpts)
+    )
+    const result = await filtered.paginate(args.paginationOpts)
     return {
       ...result,
       // The owner sees the full page location for Jump to comment.
@@ -336,5 +353,68 @@ export const listForOwner = query({
         userAgent: c.userAgent,
       })),
     }
+  },
+})
+
+/** Filter choices for the dashboard: every page and environment seen. */
+export const ownerFilters = query({
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const user = await currentUser(ctx)
+    const project = await projectByPublicId(ctx, publicId)
+    if (!user || !project || project.ownerId !== user._id) {
+      return { paths: [], origins: [] }
+    }
+    const stats = await ctx.db
+      .query("pageStats")
+      .withIndex("by_project_path", (q) => q.eq("projectId", project._id))
+      .take(1000)
+    return { paths: stats.map((p) => p.path), origins: project.origins }
+  },
+})
+
+/**
+ * One comment by id, for deep links to comments outside the page listing
+ * window (for example old resolved ones). Public shape only.
+ */
+export const getById = query({
+  args: { publicId: v.string(), id: v.string() },
+  handler: async (ctx, { publicId, id }) => {
+    const project = await projectByPublicId(ctx, publicId)
+    const commentId = ctx.db.normalizeId("comments", id)
+    if (!project || !commentId) return null
+    const comment = await ctx.db.get(commentId)
+    if (!comment || comment.projectId !== project._id) return null
+    return toPublic(comment)
+  },
+})
+
+/**
+ * One-off: rebuild per-page open counts from the comments table. Run once
+ * after deploying a version that introduced pageStats onto existing data:
+ *   npx convex run comments:rebuildPageStats
+ */
+export const rebuildPageStats = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, { cursor }) => {
+    if (!cursor) {
+      for (const row of await ctx.db.query("pageStats").collect()) {
+        await ctx.db.delete(row._id)
+      }
+    }
+    const batch = await ctx.db
+      .query("comments")
+      .paginate({ numItems: 500, cursor: cursor ?? null })
+    for (const c of batch.page) {
+      if (c.status === "open")
+        await bumpPageOpen(ctx, c.projectId, c.page.path, 1)
+      else await bumpPageOpen(ctx, c.projectId, c.page.path, 0)
+    }
+    if (!batch.isDone) {
+      await ctx.scheduler.runAfter(0, internal.comments.rebuildPageStats, {
+        cursor: batch.continueCursor,
+      })
+    }
+    return { processed: batch.page.length, done: batch.isDone }
   },
 })

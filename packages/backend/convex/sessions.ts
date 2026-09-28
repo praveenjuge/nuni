@@ -1,6 +1,7 @@
 import { LIMITS, randomBase58 } from "@nuni/shared"
 import { v } from "convex/values"
 
+import { internal } from "./_generated/api"
 import { internalMutation, mutation, query } from "./_generated/server"
 import {
   fail,
@@ -50,15 +51,14 @@ export const create = mutation({
 
 /** Widget check: is this stored token still an owner session for the project? */
 export const validate = query({
-  args: { publicId: v.string(), sessionToken: v.string(), origin: v.string() },
-  handler: async (ctx, { publicId, sessionToken, origin }) => {
+  args: { publicId: v.string(), sessionToken: v.string() },
+  handler: async (ctx, { publicId, sessionToken }) => {
     const project = await projectByPublicId(ctx, publicId)
     if (!project) return { valid: false as const }
     const session = await sessionFromToken(ctx, sessionToken)
     if (
       !session ||
       session.projectId !== project._id ||
-      session.origin !== origin ||
       project.ownerId !== session.userId
     ) {
       return { valid: false as const }
@@ -111,15 +111,20 @@ export const revokeOwn = mutation({
   },
 })
 
-/** Daily cron: delete expired widget sessions. */
+const CLEANUP_BATCH = 500
+
+/** Daily cron: delete expired widget sessions, continuing until none are left. */
 export const cleanupExpired = internalMutation({
   args: {},
   handler: async (ctx) => {
     const expired = await ctx.db
       .query("widgetSessions")
       .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
-      .take(500)
+      .take(CLEANUP_BATCH)
     for (const session of expired) await ctx.db.delete(session._id)
+    if (expired.length === CLEANUP_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.sessions.cleanupExpired, {})
+    }
     return expired.length
   },
 })

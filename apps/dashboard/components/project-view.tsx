@@ -13,7 +13,7 @@ import {
   Trash2Icon,
 } from "lucide-react"
 import Link from "next/link"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { CopyButton } from "@/components/copy-button"
 import { Badge } from "@/components/ui/badge"
@@ -167,44 +167,42 @@ function CommentList({
   publicId: string
   status: Status
 }) {
+  const [page, setPage] = useState("")
+  const [origin, setOrigin] = useState("")
+  const [query, setQuery] = useState("")
+  const search = useDebounced(query.trim(), 250)
+  // Filtering happens on the server, so it covers comments not loaded yet.
   const {
     results,
     status: loadStatus,
     loadMore,
   } = usePaginatedQuery(
     api.comments.listForOwner,
-    { publicId, status },
+    {
+      publicId,
+      status,
+      ...(page ? { path: page } : {}),
+      ...(origin ? { origin } : {}),
+      ...(search ? { search } : {}),
+    },
     { initialNumItems: 50 }
   )
   const comments = loadStatus === "LoadingFirstPage" ? undefined : results
+  const filters = useQuery(api.comments.ownerFilters, { publicId })
   const resolve = useMutation(api.comments.resolve)
   const reopen = useMutation(api.comments.reopen)
   const remove = useMutation(api.comments.remove)
-  const [page, setPage] = useState("")
-  const [origin, setOrigin] = useState("")
-  const [query, setQuery] = useState("")
 
-  const pages = useMemo(
-    () => [...new Set((comments ?? []).map((c) => c.page.path))].sort(),
-    [comments]
-  )
-  const origins = useMemo(
-    () => [...new Set((comments ?? []).map((c) => c.page.origin))].sort(),
-    [comments]
-  )
-  const filtered = (comments ?? []).filter(
-    (c) =>
-      (!page || c.page.path === page) &&
-      (!origin || c.page.origin === origin) &&
-      (!query ||
-        `${c.body} ${c.authorName}`.toLowerCase().includes(query.toLowerCase()))
-  )
+  const pages = useMemo(() => [...(filters?.paths ?? [])].sort(), [filters])
+  const origins = useMemo(() => [...(filters?.origins ?? [])].sort(), [filters])
+  const filtered = comments ?? []
+  const hasFilters = Boolean(page || origin || search)
 
   if (comments === undefined) return <Skeleton className="h-40 rounded-3xl" />
 
   return (
     <div className="grid gap-3">
-      {comments.length > 0 && (
+      {(comments.length > 0 || hasFilters) && (
         <div className="flex flex-wrap gap-2">
           <Input
             className="max-w-xs"
@@ -246,7 +244,7 @@ function CommentList({
       {filtered.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            {comments.length === 0
+            {!hasFilters
               ? status === "open"
                 ? "No open comments. Nice."
                 : "Nothing resolved yet."
@@ -418,4 +416,13 @@ function SessionsCard({ publicId }: { publicId: string }) {
       </CardContent>
     </Card>
   )
+}
+
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), ms)
+    return () => clearTimeout(timer)
+  }, [value, ms])
+  return debounced
 }

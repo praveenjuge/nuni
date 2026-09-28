@@ -51,7 +51,11 @@ export default defineSchema({
       "status",
       "createdAt",
     ])
-    .index("by_project_status", ["projectId", "status", "createdAt"]),
+    .index("by_project_status", ["projectId", "status", "createdAt"])
+    .searchIndex("search_body", {
+      searchField: "body",
+      filterFields: ["projectId", "status"],
+    }),
 
   /** Open comment count per page, so the widget can list other pages. */
   pageStats: defineTable({

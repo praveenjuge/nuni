@@ -117,6 +117,8 @@ export class NuniWidget {
   private ownerToken: string | null
   private ownerName: string | null = null
   private deepLinkId: string | null = null
+  /** A deep-linked comment that is outside the page listing window. */
+  private extraComment: WidgetComment | null = null
 
   private layoutFrame = 0
   private pinPositions = new Map<string, { x: number; y: number }>()
@@ -245,6 +247,7 @@ export class NuniWidget {
     this.pageKey = key
     this.pageUnsub?.()
     this.comments = []
+    this.extraComment = null
     this.loaded = false
     this.placements.clear()
     this.card = null
@@ -252,7 +255,12 @@ export class NuniWidget {
     this.pageUnsub = this.api.onPage(
       key,
       (comments) => {
-        this.comments = comments.sort((a, b) => a.createdAt - b.createdAt)
+        const extra = this.extraComment
+        const merged =
+          extra && !comments.some((c) => c._id === extra._id)
+            ? [...comments, extra]
+            : comments
+        this.comments = merged.sort((a, b) => a.createdAt - b.createdAt)
         this.loaded = true
         this.resolvePlacements(false)
         this.openDeepLink()
@@ -594,12 +602,29 @@ export class NuniWidget {
   private openDeepLink() {
     const id = this.deepLinkId
     if (!id || !this.loaded) return
-    const comment = this.comments.find((c) => c._id === id)
     this.deepLinkId = null
-    if (!comment) {
-      this.showToast("That comment was deleted or is on another page")
+    const comment = this.comments.find((c) => c._id === id)
+    if (comment) {
+      this.focusDeepLinked(comment)
       return
     }
+    // Older comments (e.g. long-resolved ones) are outside the page listing.
+    void this.api.getComment(id).then((found) => {
+      if (!found || found.page.path !== this.pageKey) {
+        this.showToast("That comment was deleted or is on another page")
+        return
+      }
+      this.extraComment = found
+      this.comments = [
+        ...this.comments.filter((c) => c._id !== found._id),
+        found,
+      ]
+      this.resolvePlacements(false)
+      this.focusDeepLinked(found)
+    })
+  }
+
+  private focusDeepLinked(comment: WidgetComment) {
     if (comment.status === "resolved" && !this.showResolved) {
       this.showResolved = true
       this.renderPins()
