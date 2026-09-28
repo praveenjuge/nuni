@@ -1,0 +1,29 @@
+{
+  "name": "@nuni/anchor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "bench": "playwright test -c bench/playwright.config.ts"
+  },
+  "dependencies": {
+    "@nuni/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@nuni/eslint-config": "workspace:*",
+    "@nuni/tsconfig": "workspace:*",
+    "eslint": "^10.11.0",
+    "happy-dom": "^20.14.5",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2",
+    "@types/node": "^22",
+    "@playwright/test": "^1.63.0",
+    "tsdown": "^0.23.0"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  "globalEnv": ["NODE_ENV"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "env": [
+        "NUNI_CONVEX_URL",
+        "NUNI_CONVEX_SITE_URL",
+        "NUNI_APP_URL",
+        "NEXT_PUBLIC_*",
+        "WORKOS_*",
+        "CONVEX_*"
+      ],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "bench": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "size": {
+      "dependsOn": ["build"]
+    },
+    "e2e": {
+      "dependsOn": ["^build"],
+      "cache": false
+    }
+  },
+  "globalPassThroughEnv": [
+    "CI",
+    "CHROMIUM_PATH",
+    "PLAYWRIGHT_*",
+    "CONVEX_AGENT_MODE",
+    "VITE_*"
+  ]
+}

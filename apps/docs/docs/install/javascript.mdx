@@ -1,0 +1,59 @@
+---
+title: Any JavaScript app
+description: Use init() from @nuni/widget in Vue, Nuxt, Svelte, SvelteKit, Astro, Angular or plain bundled JavaScript.
+sidebar:
+  order: 2
+---
+
+```bash
+npm install @nuni/widget
+```
+
+```ts
+import { init } from "@nuni/widget"
+
+const nuni = init({ project: "nuni_..." })
+// later, if you ever need to: nuni.destroy()
+```
+
+Call `init` once, on the client. Calling it again with the same project does nothing.
+
+<Tabs>
+  <Tab title="Vue">
+    ```ts src/main.ts
+    import { init } from "@nuni/widget"
+
+    createApp(App).mount("#app")
+    init({ project: "nuni_..." })
+    ```
+  </Tab>
+  <Tab title="Nuxt">
+    ```ts plugins/nuni.client.ts
+    import { init } from "@nuni/widget"
+
+    export default defineNuxtPlugin(() => {
+      init({ project: "nuni_..." })
+    })
+    ```
+  </Tab>
+  <Tab title="SvelteKit">
+    ```svelte src/routes/+layout.svelte
+    <script>
+      import { onMount } from "svelte"
+      import { init } from "@nuni/widget"
+
+      onMount(() => init({ project: "nuni_..." }).destroy)
+    </script>
+
+    <slot />
+    ```
+  </Tab>
+  <Tab title="Astro">
+    ```astro src/layouts/Layout.astro
+    <script>
+      import { init } from "@nuni/widget"
+      init({ project: "nuni_..." })
+    </script>
+    ```
+  </Tab>
+</Tabs>

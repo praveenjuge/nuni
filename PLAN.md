@@ -14,25 +14,25 @@ Pin reliability is the #1 technical priority. It gets its own engine package and
 
 ## Decisions (from Q&A)
 
-| Topic | Decision |
-|---|---|
-| Project ID | CLI or site generates a random public ID offline (`nuni_` + 22 base58 chars, about 128 bits). The ID is written into code. The server creates the unclaimed project on first use. |
-| Visibility | Widget is always visible everywhere, including production. |
-| Claim | First come, first served, from any origin, via GitHub sign-in. |
-| Environments | One comment space per project, matched by normalized path. Each comment stores its origin and shows an origin badge, with a "this origin only" filter. |
-| Widget tech | Vanilla TS in a Shadow DOM. CSS is compiled with Tailwind v4 into the shadow stylesheet. |
-| Integrations | React component, vanilla `init()`, and a script tag via jsDelivr. No framework auto-edit in the CLI; the agent edits files. |
-| Transport | Convex browser client, realtime over websocket. Comment creation goes through an HTTP action so we get the client IP for rate limits. |
-| npm | `@nuni/widget`, `@nuni/react`, `@nuni/cli`. Unscoped `nuni` is an npm security holding package. |
-| Owner actions | Resolve, reopen and delete both in the dashboard and in the widget, using a revocable widget session token. |
-| Commenters | Post, plus edit and delete their own comments (tracked by a local secret). Only the owner resolves. |
-| Sign-in | WorkOS with `provider: "GitHubOAuth"`, which skips the hosted AuthKit screen. |
-| Unclaimed projects | Kept forever. Rate limited, with a 500-comment cap until claimed. |
-| Hosting | Blume site at `nuni.praveenjuge.com` (landing + docs). The Next.js dashboard is at `/dashboard` through a Vercel rewrite (Next `basePath: "/dashboard"`). |
-| Package manager | Bun workspaces + Turborepo. |
-| Prompt | Available from: the site's "Copy prompt" button (ID baked in), `@nuni/cli init` output, llms.txt, and the npm README. |
-| Reliability | Playwright benchmark gate in CI (95% or better correct, near-zero wrong), plus Vitest unit tests. |
-| Mobile | Pins viewable on touch devices, and comments can be placed there too (tap-select, bottom-sheet composer). |
+| Topic              | Decision                                                                                                                                                                          |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project ID         | CLI or site generates a random public ID offline (`nuni_` + 22 base58 chars, about 128 bits). The ID is written into code. The server creates the unclaimed project on first use. |
+| Visibility         | Widget is always visible everywhere, including production.                                                                                                                        |
+| Claim              | First come, first served, from any origin, via GitHub sign-in.                                                                                                                    |
+| Environments       | One comment space per project, matched by normalized path. Each comment stores its origin and shows an origin badge, with a "this origin only" filter.                            |
+| Widget tech        | Vanilla TS in a Shadow DOM. CSS is compiled with Tailwind v4 into the shadow stylesheet.                                                                                          |
+| Integrations       | React component, vanilla `init()`, and a script tag via jsDelivr. No framework auto-edit in the CLI; the agent edits files.                                                       |
+| Transport          | Convex browser client, realtime over websocket. Comment creation goes through an HTTP action so we get the client IP for rate limits.                                             |
+| npm                | `@nuni/widget`, `@nuni/react`, `@nuni/cli`. Unscoped `nuni` is an npm security holding package.                                                                                   |
+| Owner actions      | Resolve, reopen and delete both in the dashboard and in the widget, using a revocable widget session token.                                                                       |
+| Commenters         | Post, plus edit and delete their own comments (tracked by a local secret). Only the owner resolves.                                                                               |
+| Sign-in            | WorkOS with `provider: "GitHubOAuth"`, which skips the hosted AuthKit screen.                                                                                                     |
+| Unclaimed projects | Kept forever. Rate limited, with a 500-comment cap until claimed.                                                                                                                 |
+| Hosting            | Blume site at `nuni.praveenjuge.com` (landing + docs). The Next.js dashboard is at `/dashboard` through a Vercel rewrite (Next `basePath: "/dashboard"`).                         |
+| Package manager    | Bun workspaces + Turborepo.                                                                                                                                                       |
+| Prompt             | Available from: the site's "Copy prompt" button (ID baked in), `@nuni/cli init` output, llms.txt, and the npm README.                                                             |
+| Reliability        | Playwright benchmark gate in CI (95% or better correct, near-zero wrong), plus Vitest unit tests.                                                                                 |
+| Mobile             | Pins viewable on touch devices, and comments can be placed there too (tap-select, bottom-sheet composer).                                                                         |
 
 ## Monorepo layout
 
@@ -156,6 +156,7 @@ Build tooling: tsdown for library packages (ESM + d.ts, plus an IIFE for the wid
 ## Phase 3: Widget (packages/widget + packages/react)
 
 **API:**
+
 - `init({ project, apiUrl?, getPageKey? })` returns `{ destroy }`.
 - The IIFE build auto-inits from `<script ... data-project="nuni_...">`.
 - `@nuni/react`: `<Nuni project />`, a `"use client"` component that calls `init` in an effect and `destroy` on unmount.
@@ -233,17 +234,19 @@ Build tooling: tsdown for library packages (ESM + d.ts, plus an IIFE for the wid
 
 **Environment variables:**
 
-| Where | Variables |
-|---|---|
-| Convex | `WORKOS_CLIENT_ID`, `WORKOS_API_KEY`, `WORKOS_WEBHOOK_SECRET` |
-| Dashboard | `WORKOS_CLIENT_ID`, `WORKOS_API_KEY`, `WORKOS_COOKIE_PASSWORD`, `NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://nuni.praveenjuge.com/dashboard/callback`, `CONVEX_DEPLOY_KEY` |
-| Widget publish (GitHub Actions) | `NUNI_CONVEX_URL`, `NUNI_CONVEX_SITE_URL`, `NUNI_APP_URL` |
+| Where                           | Variables                                                                                                                                                              |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Convex                          | `WORKOS_CLIENT_ID`, `WORKOS_API_KEY`, `WORKOS_WEBHOOK_SECRET`                                                                                                          |
+| Dashboard                       | `WORKOS_CLIENT_ID`, `WORKOS_API_KEY`, `WORKOS_COOKIE_PASSWORD`, `NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://nuni.praveenjuge.com/dashboard/callback`, `CONVEX_DEPLOY_KEY` |
+| Widget publish (GitHub Actions) | `NUNI_CONVEX_URL`, `NUNI_CONVEX_SITE_URL`, `NUNI_APP_URL`                                                                                                              |
 
 **GitHub Actions:**
+
 - `ci.yml`: bun install, then `turbo lint typecheck test build`, size-limit, and the Playwright benchmark.
 - `release.yml`: Changesets opens a version PR, then publishes the 3 packages to npm with provenance (trusted publishing). jsDelivr serves `@nuni/widget@1` automatically.
 
 **Your setup checklist:**
+
 - npm: register the npm org `@nuni` (check availability first; fallback scope `@nunijs`).
 - WorkOS: create the app (staging + prod), enable GitHub OAuth (GitHub OAuth app pointed at WorkOS's callback), and add the redirect URIs.
 - Convex: create the project.

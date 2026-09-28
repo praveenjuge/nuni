@@ -1,0 +1,37 @@
+{
+  "name": "@nuni/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./convex/_generated/api.js",
+    "./dataModel": "./convex/_generated/dataModel.d.ts",
+    "./server": "./convex/_generated/server.js"
+  },
+  "scripts": {
+    "dev": "convex dev",
+    "codegen": "convex codegen",
+    "lint": "eslint .",
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "dev:local": "CONVEX_AGENT_MODE=anonymous convex dev"
+  },
+  "dependencies": {
+    "@convex-dev/rate-limiter": "^0.4.0",
+    "@convex-dev/workos-authkit": "^0.2.10",
+    "@nuni/shared": "workspace:*",
+    "convex": "^1.46.0",
+    "@workos-inc/node": "^10.14.0"
+  },
+  "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
+    "@nuni/eslint-config": "workspace:*",
+    "@nuni/tsconfig": "workspace:*",
+    "convex-test": "^0.0.60",
+    "eslint": "^10.11.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2",
+    "@types/node": "^22",
+    "vite": "^8.3.1"
+  }
+}

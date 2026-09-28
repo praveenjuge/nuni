@@ -1,0 +1,65 @@
+{
+  "name": "@nuni/widget",
+  "version": "0.1.0",
+  "description": "Pin comments to anything on your site. Talk it through with your team.",
+  "license": "MIT",
+  "type": "module",
+  "homepage": "https://nuni.praveenjuge.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/praveenjuge/nuni.git",
+    "directory": "packages/widget"
+  },
+  "keywords": [
+    "comments",
+    "feedback",
+    "review",
+    "annotations",
+    "figma"
+  ],
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "unpkg": "./dist/nuni.global.js",
+  "jsdelivr": "./dist/nuni.global.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "eslint .",
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "size": "size-limit"
+  },
+  "devDependencies": {
+    "@nuni/anchor": "workspace:*",
+    "@nuni/backend": "workspace:*",
+    "@nuni/eslint-config": "workspace:*",
+    "@nuni/shared": "workspace:*",
+    "@nuni/tsconfig": "workspace:*",
+    "@size-limit/preset-small-lib": "^14.1.0",
+    "@types/node": "^22",
+    "convex": "^1.46.0",
+    "eslint": "^10.11.0",
+    "happy-dom": "^20.14.5",
+    "size-limit": "^14.1.0",
+    "tsdown": "^0.23.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2"
+  }
+}

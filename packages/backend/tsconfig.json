@@ -1,0 +1,10 @@
+{
+  "extends": "@nuni/tsconfig/node.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "verbatimModuleSyntax": false
+  },
+  "include": ["convex", "test", "vitest.config.ts"],
+  "exclude": ["convex/_generated"]
+}

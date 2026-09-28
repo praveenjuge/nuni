@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "cd ../.. && bun install --frozen-lockfile",
+  "buildCommand": "cd ../.. && bunx turbo run build --filter=@nuni/docs",
+  "outputDirectory": "dist",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/dashboard",
+      "destination": "https://nuni-dashboard.vercel.app/dashboard"
+    },
+    {
+      "source": "/dashboard/:path*",
+      "destination": "https://nuni-dashboard.vercel.app/dashboard/:path*"
+    }
+  ],
+  "ignoreCommand": "[ \"$VERCEL_ENV\" != \"production\" ]"
+}
