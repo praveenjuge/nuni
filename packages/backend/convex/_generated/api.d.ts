@@ -15,6 +15,7 @@ import type * as lib from "../lib.js";
 import type * as projects from "../projects.js";
 import type * as rateLimits from "../rateLimits.js";
 import type * as sessions from "../sessions.js";
+import type * as testing from "../testing.js";
 import type * as users from "../users.js";
 import type * as validators from "../validators.js";
 
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   projects: typeof projects;
   rateLimits: typeof rateLimits;
   sessions: typeof sessions;
+  testing: typeof testing;
   users: typeof users;
   validators: typeof validators;
 }>;
