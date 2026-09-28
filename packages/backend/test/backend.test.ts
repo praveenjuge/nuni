@@ -572,6 +572,41 @@ describe("claiming and owner actions", () => {
     ).toEqual([{ path: "/b", count: 1 }])
   })
 
+  it("rebuild zeroes stale pages and backfills search text", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId, { path: "/a" })
+    await addComment(t, publicId, { path: "/b" })
+    await addComment(t, publicId, { path: "/c" })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    await t.run(async (ctx) => {
+      const b = (await ctx.db.query("comments").collect()).find(
+        (c) => c.page.path === "/b"
+      )!
+      await ctx.db.patch(b._id, { status: "resolved" })
+      const projectId = b.projectId
+      await ctx.db.insert("pageStats", {
+        projectId,
+        path: "/gone",
+        openCount: 3,
+      })
+      for (const c of await ctx.db.query("comments").collect())
+        await ctx.db.patch(c._id, { searchText: undefined })
+    })
+    await t.mutation(internal.comments.rebuildPageStats, {})
+    await t.finishAllScheduledFunctions(() => {})
+    const rows = await t.run((ctx) => ctx.db.query("pageStats").collect())
+    expect(Object.fromEntries(rows.map((r) => [r.path, r.openCount]))).toEqual({
+      "/a": 1,
+      "/b": 0,
+      "/c": 1,
+      "/gone": 0,
+    })
+    const comments = await t.run((ctx) => ctx.db.query("comments").collect())
+    expect(comments.every((c) => c.searchText?.includes("Sam"))).toBe(true)
+  })
+
   it("searches by author name as well as body", async () => {
     const t = setup()
     const publicId = generateProjectId()

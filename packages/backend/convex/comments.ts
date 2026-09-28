@@ -399,63 +399,150 @@ export const getById = query({
   },
 })
 
+/** Most open comments counted for one page by the rebuild (stays well inside transaction limits). */
+const REBUILD_PATH_CAP = 4000
+
 /**
- * One-off maintenance: recompute per-page open counts (and search text) from
- * the comments table. Each project is rebuilt inside a single transaction,
- * so comments written concurrently are never counted twice; projects are
- * processed one after another by the scheduler.
+ * One-off maintenance: recompute per-page open counts and backfill search
+ * text. Work is split into small scheduled steps so no transaction hits
+ * Convex's read limits. Each page's count is read and written in a single
+ * transaction, so concurrent comment writes are never counted twice.
  *   npx convex run comments:rebuildPageStats
  */
 export const rebuildPageStats = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.scheduler.runAfter(0, internal.comments.rebuildSearchText, {})
+    await ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {})
+  },
+})
+
+export const rebuildSearchText = internalMutation({
   args: { cursor: v.optional(v.union(v.string(), v.null())) },
   handler: async (ctx, { cursor }) => {
     const batch = await ctx.db
-      .query("projects")
-      .paginate({ numItems: 1, cursor: cursor ?? null })
-    for (const project of batch.page) {
-      const counts = new Map<string, number>()
-      for (const status of ["open", "resolved"] as const) {
-        const comments = await ctx.db
-          .query("comments")
-          .withIndex("by_project_status", (q) =>
-            q.eq("projectId", project._id).eq("status", status)
-          )
-          .collect()
-        for (const c of comments) {
-          counts.set(
-            c.page.path,
-            (counts.get(c.page.path) ?? 0) + (status === "open" ? 1 : 0)
-          )
-          if (c.searchText === undefined) {
-            await ctx.db.patch(c._id, {
-              searchText: searchTextFor(c.body, c.authorName),
-            })
-          }
-        }
-      }
-      const existing = await ctx.db
-        .query("pageStats")
-        .withIndex("by_project_path", (q) => q.eq("projectId", project._id))
-        .collect()
-      for (const row of existing) {
-        const openCount = counts.get(row.path) ?? 0
-        if (row.openCount !== openCount)
-          await ctx.db.patch(row._id, { openCount })
-        counts.delete(row.path)
-      }
-      for (const [path, openCount] of counts) {
-        await ctx.db.insert("pageStats", {
-          projectId: project._id,
-          path,
-          openCount,
+      .query("comments")
+      .paginate({ numItems: 200, cursor: cursor ?? null })
+    for (const c of batch.page) {
+      if (c.searchText === undefined) {
+        await ctx.db.patch(c._id, {
+          searchText: searchTextFor(c.body, c.authorName),
         })
       }
     }
     if (!batch.isDone) {
-      await ctx.scheduler.runAfter(0, internal.comments.rebuildPageStats, {
+      await ctx.scheduler.runAfter(0, internal.comments.rebuildSearchText, {
         cursor: batch.continueCursor,
       })
     }
-    return { projects: batch.page.length, done: batch.isDone }
   },
 })
+
+/**
+ * Walks projects one by one. Within a project, the "paths" stage visits each
+ * distinct comment path (one path per step) and recounts it exactly; the
+ * "stale" stage then zeroes pageStats rows whose page has no comments left.
+ */
+export const rebuildProjectStats = internalMutation({
+  args: {
+    projectCursor: v.optional(v.union(v.string(), v.null())),
+    projectId: v.optional(v.id("projects")),
+    stage: v.optional(v.union(v.literal("paths"), v.literal("stale"))),
+    afterPath: v.optional(v.string()),
+    statsCursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const next = (rest: Record<string, unknown>) =>
+      ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {
+        projectCursor: args.projectCursor ?? null,
+        ...rest,
+      })
+
+    if (!args.projectId) {
+      const batch = await ctx.db
+        .query("projects")
+        .paginate({ numItems: 1, cursor: args.projectCursor ?? null })
+      const project = batch.page[0]
+      if (!project) return
+      await ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {
+        projectCursor: batch.isDone ? undefined : batch.continueCursor,
+        projectId: project._id,
+        stage: "paths",
+      })
+      return
+    }
+    const projectId = args.projectId
+
+    if (args.stage !== "stale") {
+      const { afterPath } = args
+      const first = await ctx.db
+        .query("comments")
+        .withIndex("by_project_path_status", (q) =>
+          afterPath === undefined
+            ? q.eq("projectId", projectId)
+            : q.eq("projectId", projectId).gt("page.path", afterPath)
+        )
+        .first()
+      if (!first) {
+        await next({ projectId, stage: "stale", statsCursor: null })
+        return
+      }
+      const path = first.page.path
+      const open = await ctx.db
+        .query("comments")
+        .withIndex("by_project_path_status", (q) =>
+          q
+            .eq("projectId", projectId)
+            .eq("page.path", path)
+            .eq("status", "open")
+        )
+        .take(REBUILD_PATH_CAP)
+      await setPageOpen(ctx, projectId, path, open.length)
+      await next({ projectId, stage: "paths", afterPath: path })
+      return
+    }
+
+    const rows = await ctx.db
+      .query("pageStats")
+      .withIndex("by_project_path", (q) => q.eq("projectId", projectId))
+      .paginate({ numItems: 100, cursor: args.statsCursor ?? null })
+    for (const row of rows.page) {
+      if (row.openCount === 0) continue
+      const any = await ctx.db
+        .query("comments")
+        .withIndex("by_project_path_status", (q) =>
+          q.eq("projectId", projectId).eq("page.path", row.path)
+        )
+        .first()
+      if (!any) await ctx.db.patch(row._id, { openCount: 0 })
+    }
+    if (!rows.isDone) {
+      await next({
+        projectId,
+        stage: "stale",
+        statsCursor: rows.continueCursor,
+      })
+    } else if (args.projectCursor) {
+      await ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {
+        projectCursor: args.projectCursor,
+      })
+    }
+  },
+})
+
+async function setPageOpen(
+  ctx: MutationCtx,
+  projectId: Id<"projects">,
+  path: string,
+  openCount: number
+) {
+  const row = await ctx.db
+    .query("pageStats")
+    .withIndex("by_project_path", (q) =>
+      q.eq("projectId", projectId).eq("path", path)
+    )
+    .unique()
+  if (!row) await ctx.db.insert("pageStats", { projectId, path, openCount })
+  else if (row.openCount !== openCount)
+    await ctx.db.patch(row._id, { openCount })
+}
