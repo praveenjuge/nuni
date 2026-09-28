@@ -8,5 +8,8 @@ export default authkitProxy({
 
 export const config = {
   // "/" is listed separately: with basePath, the catch-all does not match the bare /dashboard.
-  matcher: ["/", "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|ico|webp)$).*)"],
+  matcher: [
+    "/",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|ico|webp)$).*)",
+  ],
 }

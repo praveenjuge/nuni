@@ -5,7 +5,10 @@ export interface AnchorOptions {
   ignoreAttributePrefixes?: string[]
 }
 
-export function attributeAllowed(name: string, options: AnchorOptions): boolean {
+export function attributeAllowed(
+  name: string,
+  options: AnchorOptions
+): boolean {
   const prefixes = options.ignoreAttributePrefixes
   return !prefixes || !prefixes.some((p) => name.startsWith(p))
 }

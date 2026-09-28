@@ -42,7 +42,11 @@ Render it once, in your root layout. It is a client component, so it works from 
 // app/layout.tsx
 import { Nuni } from "@nuni/react"
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   return (
     <html lang="en">
       <body>

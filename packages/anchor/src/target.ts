@@ -1,5 +1,22 @@
-const INTERACTIVE = "a[href], button, label, summary, select, textarea, input, [role=button], [role=link], [role=tab], [role=menuitem], [role=checkbox], [role=switch], [role=option]"
-const INLINE = new Set(["SPAN", "STRONG", "EM", "B", "I", "SMALL", "MARK", "SUB", "SUP", "ABBR", "CODE", "KBD", "TIME", "U", "S"])
+const INTERACTIVE =
+  "a[href], button, label, summary, select, textarea, input, [role=button], [role=link], [role=tab], [role=menuitem], [role=checkbox], [role=switch], [role=option]"
+const INLINE = new Set([
+  "SPAN",
+  "STRONG",
+  "EM",
+  "B",
+  "I",
+  "SMALL",
+  "MARK",
+  "SUB",
+  "SUP",
+  "ABBR",
+  "CODE",
+  "KBD",
+  "TIME",
+  "U",
+  "S",
+])
 
 /**
  * Choose the element a click should attach to: the interactive control or

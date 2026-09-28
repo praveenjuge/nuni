@@ -14,7 +14,9 @@ export default function CopyPrompt() {
     <div className="not-prose my-6 overflow-hidden rounded-xl border border-border bg-muted/40">
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">Paste this into Codex, Claude Code or Cursor</div>
+          <div className="text-sm font-semibold">
+            Paste this into Codex, Claude Code or Cursor
+          </div>
           <div className="truncate font-mono text-xs text-muted-foreground">
             Your project ID: {projectId || "…"}
           </div>
@@ -41,7 +43,9 @@ export default function CopyPrompt() {
           New ID
         </button>
       </div>
-      <div className="max-h-72 overflow-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap">{prompt}</div>
+      <div className="max-h-72 overflow-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+        {prompt}
+      </div>
     </div>
   )
 }

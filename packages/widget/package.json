@@ -10,7 +10,13 @@
     "url": "git+https://github.com/praveenjuge/nuni.git",
     "directory": "packages/widget"
   },
-  "keywords": ["comments", "feedback", "review", "annotations", "figma"],
+  "keywords": [
+    "comments",
+    "feedback",
+    "review",
+    "annotations",
+    "figma"
+  ],
   "sideEffects": false,
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -24,7 +30,10 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "publishConfig": {
     "access": "public",
     "provenance": true
@@ -44,6 +53,7 @@
     "@nuni/shared": "workspace:*",
     "@nuni/tsconfig": "workspace:*",
     "@size-limit/preset-small-lib": "^14.1.0",
+    "@types/node": "^22",
     "convex": "^1.46.0",
     "eslint": "^10.11.0",
     "happy-dom": "^20.14.5",

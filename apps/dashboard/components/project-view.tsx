@@ -18,7 +18,13 @@ import { useMemo, useState } from "react"
 import { CopyButton } from "@/components/copy-button"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -46,11 +52,15 @@ export function ProjectView({ publicId }: { publicId: string }) {
         <CardHeader>
           <CardTitle>Project not found</CardTitle>
           <CardDescription>
-            This project does not exist or belongs to someone else. Claim it from the widget on your site first.
+            This project does not exist or belongs to someone else. Claim it
+            from the widget on your site first.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Link href="/" className="text-sm font-medium text-primary hover:underline">
+          <Link
+            href="/"
+            className="text-sm font-medium text-primary hover:underline"
+          >
             Back to projects
           </Link>
         </CardContent>
@@ -61,12 +71,17 @@ export function ProjectView({ publicId }: { publicId: string }) {
   return (
     <div className="grid gap-8">
       <div className="grid gap-2">
-        <Link href="/" className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <Link
+          href="/"
+          className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
           <ArrowLeftIcon className="size-4" /> Projects
         </Link>
         <ProjectName projectId={project._id} name={project.name} />
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs">{project.publicId}</code>
+          <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs">
+            {project.publicId}
+          </code>
           {project.origins.map((o) => (
             <Badge key={o} variant="outline">
               {hostOf(o)}
@@ -79,7 +94,9 @@ export function ProjectView({ publicId }: { publicId: string }) {
         <Tabs value={status} onValueChange={(v) => setStatus(v as Status)}>
           <TabsList>
             <TabsTrigger value="open">Open ({project.openCount})</TabsTrigger>
-            <TabsTrigger value="resolved">Resolved ({Math.max(0, project.commentCount - project.openCount)})</TabsTrigger>
+            <TabsTrigger value="resolved">
+              Resolved ({Math.max(0, project.commentCount - project.openCount)})
+            </TabsTrigger>
           </TabsList>
         </Tabs>
         <CommentList publicId={publicId} status={status} />
@@ -93,14 +110,28 @@ export function ProjectView({ publicId }: { publicId: string }) {
   )
 }
 
-function ProjectName({ projectId, name }: { projectId: Id<"projects">; name: string }) {
+function ProjectName({
+  projectId,
+  name,
+}: {
+  projectId: Id<"projects">
+  name: string
+}) {
   const rename = useMutation(api.projects.rename)
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(name)
   if (!editing) {
     return (
       <h1 className="text-2xl font-semibold tracking-tight">
-        <button type="button" className="rounded-md text-left hover:bg-muted" title="Rename" onClick={() => { setValue(name); setEditing(true) }}>
+        <button
+          type="button"
+          className="rounded-md text-left hover:bg-muted"
+          title="Rename"
+          onClick={() => {
+            setValue(name)
+            setEditing(true)
+          }}
+        >
           {name}
         </button>
       </h1>
@@ -115,7 +146,12 @@ function ProjectName({ projectId, name }: { projectId: Id<"projects">; name: str
         setEditing(false)
       }}
     >
-      <Input autoFocus value={value} onChange={(e) => setValue(e.target.value)} aria-label="Project name" />
+      <Input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        aria-label="Project name"
+      />
       <Button type="submit">Save</Button>
       <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
         Cancel
@@ -124,7 +160,13 @@ function ProjectName({ projectId, name }: { projectId: Id<"projects">; name: str
   )
 }
 
-function CommentList({ publicId, status }: { publicId: string; status: Status }) {
+function CommentList({
+  publicId,
+  status,
+}: {
+  publicId: string
+  status: Status
+}) {
   const comments = useQuery(api.comments.listForOwner, { publicId, status })
   const resolve = useMutation(api.comments.resolve)
   const reopen = useMutation(api.comments.reopen)
@@ -133,13 +175,20 @@ function CommentList({ publicId, status }: { publicId: string; status: Status })
   const [origin, setOrigin] = useState("")
   const [query, setQuery] = useState("")
 
-  const pages = useMemo(() => [...new Set((comments ?? []).map((c) => c.page.path))].sort(), [comments])
-  const origins = useMemo(() => [...new Set((comments ?? []).map((c) => c.page.origin))].sort(), [comments])
+  const pages = useMemo(
+    () => [...new Set((comments ?? []).map((c) => c.page.path))].sort(),
+    [comments]
+  )
+  const origins = useMemo(
+    () => [...new Set((comments ?? []).map((c) => c.page.origin))].sort(),
+    [comments]
+  )
   const filtered = (comments ?? []).filter(
     (c) =>
       (!page || c.page.path === page) &&
       (!origin || c.page.origin === origin) &&
-      (!query || `${c.body} ${c.authorName}`.toLowerCase().includes(query.toLowerCase()))
+      (!query ||
+        `${c.body} ${c.authorName}`.toLowerCase().includes(query.toLowerCase()))
   )
 
   if (comments === undefined) return <Skeleton className="h-40 rounded-3xl" />
@@ -149,8 +198,19 @@ function CommentList({ publicId, status }: { publicId: string; status: Status })
     <div className="grid gap-3">
       {comments.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          <Input className="max-w-xs" placeholder="Search comments" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search comments" />
-          <select className="h-8 rounded-2xl border bg-background px-3 text-sm" value={page} onChange={(e) => setPage(e.target.value)} aria-label="Filter by page">
+          <Input
+            className="max-w-xs"
+            placeholder="Search comments"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search comments"
+          />
+          <select
+            className="h-8 rounded-2xl border bg-background px-3 text-sm"
+            value={page}
+            onChange={(e) => setPage(e.target.value)}
+            aria-label="Filter by page"
+          >
             <option value="">All pages</option>
             {pages.map((p) => (
               <option key={p} value={p}>
@@ -159,7 +219,12 @@ function CommentList({ publicId, status }: { publicId: string; status: Status })
             ))}
           </select>
           {origins.length > 1 && (
-            <select className="h-8 rounded-2xl border bg-background px-3 text-sm" value={origin} onChange={(e) => setOrigin(e.target.value)} aria-label="Filter by site">
+            <select
+              className="h-8 rounded-2xl border bg-background px-3 text-sm"
+              value={origin}
+              onChange={(e) => setOrigin(e.target.value)}
+              aria-label="Filter by site"
+            >
               <option value="">All environments</option>
               {origins.map((o) => (
                 <option key={o} value={o}>
@@ -191,7 +256,9 @@ function CommentList({ publicId, status }: { publicId: string; status: Status })
                       {initials(c.authorName)}
                     </span>
                     <span className="font-medium">{c.authorName}</span>
-                    <span className="text-muted-foreground">{timeAgo(c.createdAt)}</span>
+                    <span className="text-muted-foreground">
+                      {timeAgo(c.createdAt)}
+                    </span>
                     <Badge variant="secondary" className="font-mono">
                       {c.page.path}
                     </Badge>
@@ -200,18 +267,35 @@ function CommentList({ publicId, status }: { publicId: string; status: Status })
                   <p className="text-sm whitespace-pre-wrap">{c.body}</p>
                   <p className="truncate text-xs text-muted-foreground">
                     On <code className="font-mono">&lt;{c.anchor.tag}&gt;</code>
-                    {c.anchor.text ? ` "${c.anchor.text}"` : ""} · {c.viewport.w}×{c.viewport.h}
+                    {c.anchor.text ? ` "${c.anchor.text}"` : ""} ·{" "}
+                    {c.viewport.w}×{c.viewport.h}
                   </p>
                   <div className="flex flex-wrap gap-2 pt-1">
-                    <a className={buttonVariants({ variant: "outline", size: "sm" })} href={jumpUrl(c.page, c._id)} target="_blank" rel="noreferrer">
+                    <a
+                      className={buttonVariants({
+                        variant: "outline",
+                        size: "sm",
+                      })}
+                      href={jumpUrl(c.page, c._id)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
                       <ExternalLinkIcon /> Jump to comment
                     </a>
                     {c.status === "open" ? (
-                      <Button size="sm" variant="outline" onClick={() => resolve({ id: c._id })}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => resolve({ id: c._id })}
+                      >
                         <CheckIcon /> Resolve
                       </Button>
                     ) : (
-                      <Button size="sm" variant="outline" onClick={() => reopen({ id: c._id })}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => reopen({ id: c._id })}
+                      >
                         <RotateCcwIcon /> Reopen
                       </Button>
                     )}
@@ -220,7 +304,10 @@ function CommentList({ publicId, status }: { publicId: string; status: Status })
                       variant="ghost"
                       className="ml-auto text-destructive"
                       onClick={() => {
-                        if (confirm("Delete this comment? This can't be undone.")) void remove({ id: c._id })
+                        if (
+                          confirm("Delete this comment? This can't be undone.")
+                        )
+                          void remove({ id: c._id })
                       }}
                     >
                       <Trash2Icon /> Delete
@@ -243,19 +330,28 @@ function InstallCard({ publicId }: { publicId: string }) {
     <Card>
       <CardHeader>
         <CardTitle>Install</CardTitle>
-        <CardDescription>The project ID is public. Use the same one on every environment.</CardDescription>
+        <CardDescription>
+          The project ID is public. Use the same one on every environment.
+        </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3 text-sm">
         <div className="grid gap-1.5">
           <span className="text-muted-foreground">React (@nuni/react)</span>
-          <pre className="overflow-x-auto rounded-xl bg-muted p-3 font-mono text-xs">{react}</pre>
+          <pre className="overflow-x-auto rounded-xl bg-muted p-3 font-mono text-xs">
+            {react}
+          </pre>
         </div>
         <div className="grid gap-1.5">
           <span className="text-muted-foreground">Script tag</span>
-          <pre className="overflow-x-auto rounded-xl bg-muted p-3 font-mono text-xs">{script}</pre>
+          <pre className="overflow-x-auto rounded-xl bg-muted p-3 font-mono text-xs">
+            {script}
+          </pre>
         </div>
         <div>
-          <CopyButton value={buildAgentPrompt({ projectId: publicId })} label="Copy agent prompt" />
+          <CopyButton
+            value={buildAgentPrompt({ projectId: publicId })}
+            label="Copy agent prompt"
+          />
         </div>
       </CardContent>
     </Card>
@@ -269,13 +365,17 @@ function SessionsCard({ publicId }: { publicId: string }) {
     <Card>
       <CardHeader>
         <CardTitle>Signed-in browsers</CardTitle>
-        <CardDescription>Where you can resolve and delete comments right from the widget.</CardDescription>
+        <CardDescription>
+          Where you can resolve and delete comments right from the widget.
+        </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-2 text-sm">
         {sessions === undefined ? (
           <Skeleton className="h-10" />
         ) : sessions.length === 0 ? (
-          <p className="text-muted-foreground">None. Use &ldquo;Owner sign in&rdquo; in the widget on your site.</p>
+          <p className="text-muted-foreground">
+            None. Use &ldquo;Owner sign in&rdquo; in the widget on your site.
+          </p>
         ) : (
           sessions.map((s) => (
             <div key={s._id} className="flex items-center gap-2">
@@ -283,10 +383,15 @@ function SessionsCard({ publicId }: { publicId: string }) {
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{hostOf(s.origin)}</div>
                 <div className="truncate text-xs text-muted-foreground">
-                  {timeAgo(s._creationTime)} · {s.userAgent?.split(") ")[0]?.split("(")[1] ?? "Browser"}
+                  {timeAgo(s._creationTime)} ·{" "}
+                  {s.userAgent?.split(") ")[0]?.split("(")[1] ?? "Browser"}
                 </div>
               </div>
-              <Button size="sm" variant="ghost" onClick={() => revoke({ id: s._id })}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => revoke({ id: s._id })}
+              >
                 Revoke
               </Button>
             </div>

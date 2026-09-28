@@ -1,5 +1,8 @@
 type Child = Node | string | null | undefined | false
-type Attrs = Record<string, string | number | boolean | EventListener | null | undefined>
+type Attrs = Record<
+  string,
+  string | number | boolean | EventListener | null | undefined
+>
 
 /** Tiny element factory. Strings become text nodes (never HTML). */
 export function h<K extends keyof HTMLElementTagNameMap>(
@@ -22,7 +25,9 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   }
   for (const child of children.flat()) {
     if (child == null || child === false) continue
-    el.append(typeof child === "string" ? document.createTextNode(child) : child)
+    el.append(
+      typeof child === "string" ? document.createTextNode(child) : child
+    )
   }
   return el
 }
@@ -50,7 +55,10 @@ export function timeAgo(ts: number, now = Date.now()): string {
 
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
-  const letters = parts.length > 1 ? parts[0]![0]! + parts[parts.length - 1]![0]! : (parts[0] ?? "?").slice(0, 2)
+  const letters =
+    parts.length > 1
+      ? parts[0]![0]! + parts[parts.length - 1]![0]!
+      : (parts[0] ?? "?").slice(0, 2)
   return letters.toUpperCase()
 }
 

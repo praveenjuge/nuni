@@ -65,7 +65,12 @@ function looksRandom(token: string): boolean {
   const digits = token.replace(/[^0-9]/g, "").length
   if (digits === 0) {
     // Mixed case gibberish without separators, e.g. "kQzLmX"
-    return /^[a-zA-Z]{6,}$/.test(token) && /[A-Z].*[A-Z]/.test(token) && /[a-z]/.test(token) && !/^[A-Z][a-z]+([A-Z][a-z]+)+$/.test(token)
+    return (
+      /^[a-zA-Z]{6,}$/.test(token) &&
+      /[A-Z].*[A-Z]/.test(token) &&
+      /[a-z]/.test(token) &&
+      !/^[A-Z][a-z]+([A-Z][a-z]+)+$/.test(token)
+    )
   }
   const letters = token.replace(/[^a-zA-Z]/g, "").length
   if (letters === 0) return true

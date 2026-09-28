@@ -83,10 +83,16 @@ http.route({
       }
       const message = error instanceof Error ? error.message : String(error)
       if (message.includes("ArgumentValidationError")) {
-        return json(request, 400, { code: "invalid", message: "Invalid comment" })
+        return json(request, 400, {
+          code: "invalid",
+          message: "Invalid comment",
+        })
       }
       console.error(error)
-      return json(request, 500, { code: "server_error", message: "Something went wrong" })
+      return json(request, 500, {
+        code: "server_error",
+        message: "Something went wrong",
+      })
     }
   }),
 })

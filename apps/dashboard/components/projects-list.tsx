@@ -7,7 +7,13 @@ import { ArrowRightIcon, MessageSquareIcon } from "lucide-react"
 import Link from "next/link"
 
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useStoreUser } from "@/components/use-store-user"
 import { hostOf, timeAgo } from "@/lib/format"
@@ -20,7 +26,9 @@ export function ProjectsList() {
     <div className="grid gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-        <p className="text-sm text-muted-foreground">Sites you have claimed. Comments update live.</p>
+        <p className="text-sm text-muted-foreground">
+          Sites you have claimed. Comments update live.
+        </p>
       </div>
       {projects === undefined ? (
         <div className="grid gap-3 sm:grid-cols-2">
@@ -32,12 +40,15 @@ export function ProjectsList() {
           <CardHeader>
             <CardTitle>No projects yet</CardTitle>
             <CardDescription>
-              Add Nuni to a site, open it, click the Nuni button and choose &ldquo;Claim Nuni&rdquo;. It
-              will show up here.
+              Add Nuni to a site, open it, click the Nuni button and choose
+              &ldquo;Claim Nuni&rdquo;. It will show up here.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <a href={`${DOCS_URL}/quickstart`} className="text-sm font-medium text-primary hover:underline">
+            <a
+              href={`${DOCS_URL}/quickstart`}
+              className="text-sm font-medium text-primary hover:underline"
+            >
               Read the quickstart
             </a>
           </CardContent>
@@ -61,8 +72,12 @@ export function ProjectsList() {
                     <MessageSquareIcon />
                     {p.openCount} open
                   </Badge>
-                  <span className="text-muted-foreground">{p.commentCount} total</span>
-                  <span className="ml-auto text-xs text-muted-foreground">{timeAgo(p.lastActivityAt)}</span>
+                  <span className="text-muted-foreground">
+                    {p.commentCount} total
+                  </span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {timeAgo(p.lastActivityAt)}
+                  </span>
                 </CardContent>
               </Card>
             </Link>

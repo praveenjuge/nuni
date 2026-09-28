@@ -12,9 +12,21 @@ export type NuniProps = NuniOptions
  * <Nuni project="nuni_..." />
  * ```
  */
-export function Nuni({ project, convexUrl, convexSiteUrl, appUrl, getPageKey }: NuniProps) {
+export function Nuni({
+  project,
+  convexUrl,
+  convexSiteUrl,
+  appUrl,
+  getPageKey,
+}: NuniProps) {
   useEffect(() => {
-    const instance = init({ project, convexUrl, convexSiteUrl, appUrl, getPageKey })
+    const instance = init({
+      project,
+      convexUrl,
+      convexSiteUrl,
+      appUrl,
+      getPageKey,
+    })
     return () => instance.destroy()
     // getPageKey is read once; changing it at runtime is not supported.
   }, [project, convexUrl, convexSiteUrl, appUrl])

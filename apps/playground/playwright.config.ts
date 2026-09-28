@@ -8,7 +8,9 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:5173",
     headless: true,
-    launchOptions: process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {},
+    launchOptions: process.env.CHROMIUM_PATH
+      ? { executablePath: process.env.CHROMIUM_PATH }
+      : {},
   },
   webServer: [
     {
@@ -22,6 +24,28 @@ export default defineConfig({
       url: "http://127.0.0.1:5173",
       reuseExistingServer: true,
       timeout: 60_000,
+      env: {
+        VITE_CONVEX_URL: "http://127.0.0.1:3210",
+        VITE_CONVEX_SITE_URL: "http://127.0.0.1:3211",
+        VITE_APP_URL: "http://localhost:3000",
+      },
+    },
+    {
+      // Only used as the popup origin for the claim handoff test.
+      command: "bun run --cwd ../dashboard dev",
+      url: "http://localhost:3000/dashboard/claim",
+      reuseExistingServer: true,
+      timeout: 120_000,
+      env: {
+        WORKOS_CLIENT_ID: "client_e2e_placeholder",
+        WORKOS_API_KEY: "sk_test_e2e_placeholder",
+        WORKOS_COOKIE_PASSWORD:
+          "e2e-cookie-password-at-least-32-characters-long",
+        NEXT_PUBLIC_WORKOS_REDIRECT_URI:
+          "http://localhost:3000/dashboard/callback",
+        NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+        NEXT_PUBLIC_CONVEX_URL: "http://127.0.0.1:3210",
+      },
     },
   ],
 })

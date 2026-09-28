@@ -11,7 +11,11 @@ import { buildAgentPrompt } from "../packages/shared/src/prompt"
 
 const START = "<!-- prompt:start -->"
 const END = "<!-- prompt:end -->"
-const files = ["packages/widget/README.md", "packages/react/README.md", "packages/cli/README.md"]
+const files = [
+  "packages/widget/README.md",
+  "packages/react/README.md",
+  "packages/cli/README.md",
+]
 const block = `${START}\n\n\`\`\`text\n${buildAgentPrompt()}\n\`\`\`\n\n${END}`
 
 let stale = false
@@ -19,7 +23,8 @@ for (const file of files) {
   const content = readFileSync(file, "utf8")
   const start = content.indexOf(START)
   const end = content.indexOf(END)
-  if (start === -1 || end === -1) throw new Error(`${file} is missing prompt markers`)
+  if (start === -1 || end === -1)
+    throw new Error(`${file} is missing prompt markers`)
   const next = content.slice(0, start) + block + content.slice(end + END.length)
   if (next !== content) {
     stale = true

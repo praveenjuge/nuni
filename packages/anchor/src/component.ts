@@ -1,7 +1,8 @@
 /** Best-effort React component name for an element (dev and most prod builds). */
 export function reactComponentName(el: Element): string | undefined {
   const key = Object.keys(el).find(
-    (k) => k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")
+    (k) =>
+      k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")
   )
   if (!key) return undefined
   type Fiber = { type?: unknown; return?: Fiber | null }

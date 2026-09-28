@@ -95,7 +95,8 @@ function describeSegment(el: Element, options: AnchorOptions): string {
   if (testId) return tag + attrSelector(testId.attr, testId.value)
 
   let segment = tag
-  for (const cls of stableClasses(el).slice(0, 2)) segment += `.${cssEscape(cls)}`
+  for (const cls of stableClasses(el).slice(0, 2))
+    segment += `.${cssEscape(cls)}`
 
   for (const name of ["name", "type", "role"]) {
     const value = el.getAttribute(name)

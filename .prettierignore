@@ -5,3 +5,8 @@ dist
 .astro
 bun.lock
 **/_generated/**
+dist
+bench-report.json
+test-results
+playwright-report
+.bundle

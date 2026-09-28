@@ -119,7 +119,8 @@ describe("widget comments", () => {
   it("rate limits per IP", async () => {
     const t = setup()
     const publicId = generateProjectId()
-    for (let i = 0; i < 10; i++) await addComment(t, publicId, { ip: "9.9.9.9" })
+    for (let i = 0; i < 10; i++)
+      await addComment(t, publicId, { ip: "9.9.9.9" })
     await expect(addComment(t, publicId, { ip: "9.9.9.9" })).rejects.toThrow(
       /Slow down/
     )
@@ -197,10 +198,14 @@ describe("claiming and owner actions", () => {
     const alice = await signIn(t, "user_alice", "Alice")
     const bob = await signIn(t, "user_bob", "Bob")
 
-    expect(await alice.mutation(api.projects.claim, { publicId })).toMatchObject({
+    expect(
+      await alice.mutation(api.projects.claim, { publicId })
+    ).toMatchObject({
       status: "claimed",
     })
-    expect(await alice.mutation(api.projects.claim, { publicId })).toMatchObject({
+    expect(
+      await alice.mutation(api.projects.claim, { publicId })
+    ).toMatchObject({
       status: "already_owner",
     })
     expect(await bob.mutation(api.projects.claim, { publicId })).toEqual({
@@ -248,9 +253,14 @@ describe("claiming and owner actions", () => {
     await expect(bob.mutation(api.comments.resolve, { id })).rejects.toThrow()
     await alice.mutation(api.comments.resolve, { id })
     expect(
-      await alice.query(api.comments.listForOwner, { publicId, status: "resolved" })
+      await alice.query(api.comments.listForOwner, {
+        publicId,
+        status: "resolved",
+      })
     ).toHaveLength(1)
-    expect(await bob.query(api.comments.listForOwner, { publicId, status: "open" })).toBeNull()
+    expect(
+      await bob.query(api.comments.listForOwner, { publicId, status: "open" })
+    ).toBeNull()
     expect(await t.query(api.projects.status, { publicId })).toMatchObject({
       openCount: 0,
     })
@@ -278,7 +288,10 @@ describe("claiming and owner actions", () => {
 
     const bob = await signIn(t, "user_bob", "Bob")
     await expect(
-      bob.mutation(api.sessions.create, { publicId, origin: "http://localhost:3000" })
+      bob.mutation(api.sessions.create, {
+        publicId,
+        origin: "http://localhost:3000",
+      })
     ).rejects.toThrow(/owner/)
 
     const { token } = await alice.mutation(api.sessions.create, {
@@ -289,13 +302,19 @@ describe("claiming and owner actions", () => {
       await t.query(api.sessions.validate, { publicId, sessionToken: token })
     ).toEqual({ valid: true, ownerName: "Alice" })
     expect(
-      await t.query(api.sessions.validate, { publicId: otherId, sessionToken: token })
+      await t.query(api.sessions.validate, {
+        publicId: otherId,
+        sessionToken: token,
+      })
     ).toEqual({ valid: false })
 
     // Anonymous caller with the token can act as owner on this project only.
     await t.mutation(api.comments.resolve, { id, sessionToken: token })
     await expect(
-      t.mutation(api.comments.resolve, { id: otherComment, sessionToken: token })
+      t.mutation(api.comments.resolve, {
+        id: otherComment,
+        sessionToken: token,
+      })
     ).rejects.toThrow()
 
     const [session] = await alice.query(api.sessions.listMine, { publicId })

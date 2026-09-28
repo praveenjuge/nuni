@@ -48,7 +48,9 @@ export class NuniApi {
   constructor(private config: ResolvedConfig) {
     this.client = new ConvexClient(config.convexUrl, {
       unsavedChangesWarning: false,
-      skipConvexDeploymentUrlCheck: !/\.convex\.cloud\/?$/.test(config.convexUrl),
+      skipConvexDeploymentUrlCheck: !/\.convex\.cloud\/?$/.test(
+        config.convexUrl
+      ),
     })
   }
 
@@ -71,7 +73,11 @@ export class NuniApi {
     )
   }
 
-  onPage(path: string, cb: (comments: WidgetComment[]) => void, onError: (e: Error) => void) {
+  onPage(
+    path: string,
+    cb: (comments: WidgetComment[]) => void,
+    onError: (e: Error) => void
+  ) {
     return this.client.onUpdate(
       api.comments.listForPage,
       { publicId: this.config.project, path },
@@ -110,7 +116,10 @@ export class NuniApi {
         body: JSON.stringify({ publicId: this.config.project, ...comment }),
       })
     } catch {
-      throw new NuniApiError("Couldn't reach Nuni. Check your connection.", "network")
+      throw new NuniApiError(
+        "Couldn't reach Nuni. Check your connection.",
+        "network"
+      )
     }
     const data = (await response.json().catch(() => ({}))) as {
       id?: string
@@ -118,7 +127,10 @@ export class NuniApi {
       message?: string
     }
     if (!response.ok || !data.id) {
-      throw new NuniApiError(data.message ?? "Couldn't post the comment", data.code ?? "error")
+      throw new NuniApiError(
+        data.message ?? "Couldn't post the comment",
+        data.code ?? "error"
+      )
     }
     return data.id
   }
@@ -132,26 +144,54 @@ export class NuniApi {
   }
 
   editOwn(id: string, authorSecret: string, body: string) {
-    return this.run(this.client.mutation(api.comments.editOwn, { id: id as never, authorSecret, body }))
+    return this.run(
+      this.client.mutation(api.comments.editOwn, {
+        id: id as never,
+        authorSecret,
+        body,
+      })
+    )
   }
 
   deleteOwn(id: string, authorSecret: string) {
-    return this.run(this.client.mutation(api.comments.deleteOwn, { id: id as never, authorSecret }))
+    return this.run(
+      this.client.mutation(api.comments.deleteOwn, {
+        id: id as never,
+        authorSecret,
+      })
+    )
   }
 
   resolve(id: string, sessionToken: string) {
-    return this.run(this.client.mutation(api.comments.resolve, { id: id as never, sessionToken }))
+    return this.run(
+      this.client.mutation(api.comments.resolve, {
+        id: id as never,
+        sessionToken,
+      })
+    )
   }
 
   reopen(id: string, sessionToken: string) {
-    return this.run(this.client.mutation(api.comments.reopen, { id: id as never, sessionToken }))
+    return this.run(
+      this.client.mutation(api.comments.reopen, {
+        id: id as never,
+        sessionToken,
+      })
+    )
   }
 
   remove(id: string, sessionToken: string) {
-    return this.run(this.client.mutation(api.comments.remove, { id: id as never, sessionToken }))
+    return this.run(
+      this.client.mutation(api.comments.remove, {
+        id: id as never,
+        sessionToken,
+      })
+    )
   }
 
   signOut(sessionToken: string) {
-    return this.client.mutation(api.sessions.revokeOwn, { sessionToken }).catch(() => null)
+    return this.client
+      .mutation(api.sessions.revokeOwn, { sessionToken })
+      .catch(() => null)
   }
 }

@@ -1,6 +1,12 @@
 import { GithubIcon } from "@/components/icons"
 import { buttonVariants } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 
 export function SignedOut({ returnTo = "/dashboard" }: { returnTo?: string }) {
   return (
@@ -8,7 +14,8 @@ export function SignedOut({ returnTo = "/dashboard" }: { returnTo?: string }) {
       <CardHeader>
         <CardTitle className="text-xl">Your Nuni projects</CardTitle>
         <CardDescription>
-          Sign in to manage the comments on sites you have claimed. Commenters never need an account.
+          Sign in to manage the comments on sites you have claimed. Commenters
+          never need an account.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -20,7 +27,8 @@ export function SignedOut({ returnTo = "/dashboard" }: { returnTo?: string }) {
           Sign in with GitHub
         </a>
         <p className="text-xs text-muted-foreground">
-          To claim a site, open it, click the Nuni button and choose &ldquo;Claim Nuni&rdquo;.
+          To claim a site, open it, click the Nuni button and choose
+          &ldquo;Claim Nuni&rdquo;.
         </p>
       </CardContent>
     </Card>

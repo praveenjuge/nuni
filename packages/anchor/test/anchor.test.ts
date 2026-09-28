@@ -97,7 +97,9 @@ describe("selectors", () => {
 
   it("ignores attributes by prefix", () => {
     const pro = document.querySelector('[data-testid="pro"]')!
-    const selector = buildCssSelector(pro, { ignoreAttributePrefixes: ["data-testid"] })
+    const selector = buildCssSelector(pro, {
+      ignoreAttributePrefixes: ["data-testid"],
+    })
     expect(selector).not.toContain("data-testid")
   })
 })
@@ -116,7 +118,12 @@ describe("capture and resolve", () => {
     document.body.innerHTML = `<main><h1>Title</h1><p class="lead">Hello world</p></main>`
     const el = document.querySelector("p")!
     const anchor = captureAnchor(el)
-    expect(anchor).toMatchObject({ v: 1, tag: "p", text: "Hello world", classes: ["lead"] })
+    expect(anchor).toMatchObject({
+      v: 1,
+      tag: "p",
+      text: "Hello world",
+      classes: ["lead"],
+    })
     const result = resolveAnchor(anchor, document)
     expect(result.element).toBe(el)
     expect(result.confidence).not.toBe("lost")

@@ -8,13 +8,28 @@ import { Link, usePath } from "./router"
 const PROJECT_ID = (() => {
   const fromUrl = new URLSearchParams(location.search).get("project")
   if (fromUrl) sessionStorage.setItem("playground:project", fromUrl)
-  return sessionStorage.getItem("playground:project") ?? "nuni_JJHAES8DaHHYNVh4JoWWXw"
+  return (
+    sessionStorage.getItem("playground:project") ??
+    "nuni_JJHAES8DaHHYNVh4JoWWXw"
+  )
 })()
 
 const plans = [
-  { name: "Starter", price: "$0", features: ["1 project", "Community support"] },
-  { name: "Pro", price: "$20", features: ["10 projects", "Email support", "Analytics"] },
-  { name: "Team", price: "$40", features: ["Unlimited projects", "SSO", "Audit log"] },
+  {
+    name: "Starter",
+    price: "$0",
+    features: ["1 project", "Community support"],
+  },
+  {
+    name: "Pro",
+    price: "$20",
+    features: ["10 projects", "Email support", "Analytics"],
+  },
+  {
+    name: "Team",
+    price: "$40",
+    features: ["Unlimited projects", "SSO", "Audit log"],
+  },
 ]
 
 function Home() {
@@ -22,7 +37,10 @@ function Home() {
     <>
       <section className="hero">
         <h1>Build faster with Acme</h1>
-        <p className="lead">The best way to ship your product. Try pinning a comment to anything here.</p>
+        <p className="lead">
+          The best way to ship your product. Try pinning a comment to anything
+          here.
+        </p>
         <div className="hero-actions">
           <Link className="btn btn-primary" href="/pricing">
             See pricing
@@ -36,7 +54,10 @@ function Home() {
         {["Fast", "Reliable", "Friendly"].map((f) => (
           <article key={f} className="feature">
             <h3>{f}</h3>
-            <p>Acme is {f.toLowerCase()} by default, so your team can focus on the product.</p>
+            <p>
+              Acme is {f.toLowerCase()} by default, so your team can focus on
+              the product.
+            </p>
           </article>
         ))}
       </section>
@@ -72,7 +93,12 @@ function Pricing() {
 }
 
 function Tasks() {
-  const [tasks, setTasks] = useState(["Write docs", "Fix login bug", "Ship pricing page", "Review analytics"])
+  const [tasks, setTasks] = useState([
+    "Write docs",
+    "Fix login bug",
+    "Ship pricing page",
+    "Review analytics",
+  ])
   const [text, setText] = useState("")
   return (
     <section className="tasks">
@@ -85,11 +111,20 @@ function Tasks() {
           setText("")
         }}
       >
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="New task" aria-label="New task" />
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="New task"
+          aria-label="New task"
+        />
         <button className="btn" type="submit">
           Add
         </button>
-        <button className="btn" type="button" onClick={() => setTasks((t) => [...t].reverse())}>
+        <button
+          className="btn"
+          type="button"
+          onClick={() => setTasks((t) => [...t].reverse())}
+        >
           Reverse
         </button>
       </form>
@@ -106,7 +141,8 @@ function Tasks() {
 
 export function App() {
   const path = usePath()
-  const page = path === "/pricing" ? <Pricing /> : path === "/tasks" ? <Tasks /> : <Home />
+  const page =
+    path === "/pricing" ? <Pricing /> : path === "/tasks" ? <Tasks /> : <Home />
   return (
     <>
       <header className="site-header">

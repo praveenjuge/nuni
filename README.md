@@ -1,21 +1,64 @@
-# Next.js template
+# Nuni
 
-This is a Next.js template with shadcn/ui.
+Pin a comment to anything on your site. Talk it through with your team. Give your agent the context.
 
-## Adding components
+**Add → Deploy → Comment → Claim → Resolve.** A developer adds Nuni to an existing site in a couple of minutes (with no account and no secret keys), and anyone who can open the site can leave Figma-style comments on the real product.
 
-To add components to your app, run the following command:
+Site and docs: https://nuni.praveenjuge.com · Dashboard: https://nuni.praveenjuge.com/dashboard
+
+## Repository
+
+Turborepo + Bun workspaces.
+
+| Path                                          | What                                                                                     |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `apps/docs`                                   | Landing page and docs (Blume). Served at `/`. Rewrites `/dashboard` to the dashboard.    |
+| `apps/dashboard`                              | Owner dashboard (Next.js 16, `basePath: /dashboard`, WorkOS GitHub sign-in, Convex).     |
+| `apps/playground`                             | Vite + React test site and the Playwright end-to-end tests. Not deployed.                |
+| `packages/backend`                            | Convex: schema, widget and owner functions, HTTP comment endpoint, WorkOS, rate limits.  |
+| `packages/anchor`                             | The pin engine: capture, resolve and the reliability benchmark. Bundled into the widget. |
+| `packages/widget`                             | `@nuni/widget`: the embeddable widget (Shadow DOM, vanilla TS). ESM + CDN script.        |
+| `packages/react`                              | `@nuni/react`: `<Nuni project="..." />`.                                                 |
+| `packages/cli`                                | `@nuni/cli`: `npx @nuni/cli init` prints a project ID and install steps.                 |
+| `packages/shared`                             | IDs, path normalization, limits, types and the agent prompt (single source of truth).    |
+| `packages/tsconfig`, `packages/eslint-config` | Shared configs.                                                                          |
+
+## Develop
+
+Requirements: Bun 1.3+, Node 22.12+.
 
 ```bash
-npx shadcn@latest add button
+bun install
+
+# 1. Start a local Convex backend (no account needed). Keep it running.
+cd packages/backend
+CONVEX_AGENT_MODE=anonymous npx convex dev
+# first time only, in another terminal:
+npx convex env set WORKOS_CLIENT_ID client_placeholder
+npx convex env set WORKOS_API_KEY sk_test_placeholder
+npx convex env set WORKOS_WEBHOOK_SECRET placeholder
+npx convex env set NUNI_ALLOW_TESTING 1   # enables the e2e seeding helper locally
+
+# 2. In another terminal, from the repo root
+cp apps/dashboard/.env.example apps/dashboard/.env.local   # add real WorkOS keys to test sign-in
+bunx turbo run dev --filter=@nuni/playground --filter=@nuni/dashboard --filter=@nuni/widget --filter=@nuni/docs
 ```
 
-This will place the ui components in the `components` directory.
+- Playground: http://127.0.0.1:5173 (press **C** and click anything)
+- Dashboard: http://localhost:3000/dashboard
+- Docs: http://localhost:4321
 
-## Using components
+## Checks
 
-To use the components in your app, import them as follows:
-
-```tsx
-import { Button } from "@/components/ui/button";
+```bash
+bunx turbo run build lint typecheck test   # everything
+bun run bench                              # pin reliability benchmark (Playwright)
+bun run e2e                                # widget end-to-end tests (needs the local backend)
+bun run format:check && bun run readmes:check
 ```
+
+Playwright uses its own Chromium. To use a preinstalled one: `CHROMIUM_PATH=/path/to/chrome bun run bench`.
+
+## Deploy and release
+
+See [DEPLOYING.md](./DEPLOYING.md). Packages are released with Changesets (`bun run changeset`).

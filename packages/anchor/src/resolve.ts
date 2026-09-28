@@ -17,7 +17,11 @@ const THRESHOLD = { exact: 0.9, high: 0.72, low: 0.55 } as const
 const AMBIGUITY_MARGIN = 0.03
 const MAX_SCAN = 3000
 
-function safeQueryAll(root: ParentNode, selector: string | undefined, limit = 20): Element[] {
+function safeQueryAll(
+  root: ParentNode,
+  selector: string | undefined,
+  limit = 20
+): Element[] {
   if (!selector) return []
   try {
     return Array.from(root.querySelectorAll(selector)).slice(0, limit)
@@ -131,7 +135,9 @@ function scoreCandidate(
     add(1.5, jaccard(stableClasses(el), anchor.classes))
   }
 
-  const attrNames = Object.keys(anchor.attrs).filter((n) => attributeAllowed(n, options))
+  const attrNames = Object.keys(anchor.attrs).filter((n) =>
+    attributeAllowed(n, options)
+  )
   let identifyingAttrsMatch = false
   if (attrNames.length) {
     let matched = 0
@@ -155,7 +161,8 @@ function scoreCandidate(
       }
     }
     add(2, matched / attrNames.length)
-    identifyingAttrsMatch = identifying > 0 && identifyingMatched === identifying
+    identifyingAttrsMatch =
+      identifying > 0 && identifyingMatched === identifying
   }
 
   if (anchor.role) add(0.5, el.getAttribute("role") === anchor.role ? 1 : 0)
@@ -164,7 +171,11 @@ function scoreCandidate(
   }
 
   const text = elementText(el)
-  const textSim = anchor.text ? textSimilarity(text, anchor.text) : text ? 0.3 : 1
+  const textSim = anchor.text
+    ? textSimilarity(text, anchor.text)
+    : text
+      ? 0.3
+      : 1
   add(anchor.text ? 3 : 1, textSim)
 
   // Ancestor structure, plus context text from the closest ancestor whose
@@ -207,8 +218,10 @@ function scoreCandidate(
       const ay = anchor.rect.y + anchor.rect.h / 2
       const distance = Math.hypot(cx - ax, cy - ay)
       add(1.5 * geoWeight, Math.exp(-distance / 250))
-      const sw = Math.min(r.width, anchor.rect.w) / Math.max(r.width, anchor.rect.w, 1)
-      const sh = Math.min(r.height, anchor.rect.h) / Math.max(r.height, anchor.rect.h, 1)
+      const sw =
+        Math.min(r.width, anchor.rect.w) / Math.max(r.width, anchor.rect.w, 1)
+      const sh =
+        Math.min(r.height, anchor.rect.h) / Math.max(r.height, anchor.rect.h, 1)
       add(0.5 * geoWeight, sw * sh)
     }
   }
@@ -217,7 +230,8 @@ function scoreCandidate(
 
   // Same structural slot and same identifying attributes (href, name...):
   // the element's copy was edited or translated, not swapped.
-  const structural = (cssHit || !anchor.selectors.css) && pathHit && identifyingAttrsMatch
+  const structural =
+    (cssHit || !anchor.selectors.css) && pathHit && identifyingAttrsMatch
 
   // Text is identity for repeated items (list rows, cards), and a softer
   // signal for one-off elements whose copy may be edited.
@@ -271,7 +285,11 @@ function collectCandidates(
     const exact = anchor.text.toLowerCase()
     const walker = doc.createTreeWalker(doc.body ?? doc.documentElement, 1)
     let count = 0
-    for (let n = walker.nextNode(); n && count < MAX_SCAN * 3; n = walker.nextNode()) {
+    for (
+      let n = walker.nextNode();
+      n && count < MAX_SCAN * 3;
+      n = walker.nextNode()
+    ) {
       count++
       const el = n as Element
       if (el.tagName.toLowerCase() === anchor.tag) continue
@@ -298,11 +316,15 @@ export function resolveAnchor(
 
   const view = doc.defaultView
   const viewportRatio =
-    anchor.viewport.w && view?.innerWidth ? view.innerWidth / anchor.viewport.w : 1
+    anchor.viewport.w && view?.innerWidth
+      ? view.innerWidth / anchor.viewport.w
+      : 1
 
   const scored: Scored[] = []
   for (const el of candidates) {
-    scored.push(scoreCandidate(anchor, el, doc, { pathMatch, viewportRatio }, options))
+    scored.push(
+      scoreCandidate(anchor, el, doc, { pathMatch, viewportRatio }, options)
+    )
   }
 
   // When several candidates share the element's exact text ("Choose plan"
@@ -321,7 +343,10 @@ export function resolveAnchor(
   // Prefer the innermost of nested candidates with equal text (a <span> in a
   // <button> vs the button itself are both plausible; keep the better tag).
   const best = scored[0]!
-  const second = scored.find((s) => s.el !== best.el && !best.el.contains(s.el) && !s.el.contains(best.el))
+  const second = scored.find(
+    (s) =>
+      s.el !== best.el && !best.el.contains(s.el) && !s.el.contains(best.el)
+  )
 
   if (best.score < THRESHOLD.low) {
     return { element: null, confidence: "lost", score: best.score }

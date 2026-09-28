@@ -1,4 +1,8 @@
 {
   "extends": "@nuni/tsconfig/library.json",
+  "compilerOptions": {
+    // The generated Convex API types pull in backend sources that use process.env.
+    "types": ["node"]
+  },
   "include": ["src", "test"]
 }

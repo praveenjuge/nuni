@@ -3,7 +3,12 @@ import { HOUR, MINUTE, RateLimiter } from "@convex-dev/rate-limiter"
 import { components } from "./_generated/api"
 
 export const rateLimiter = new RateLimiter(components.rateLimiter, {
-  commentPerIp: { kind: "token bucket", rate: 10, period: MINUTE, capacity: 10 },
+  commentPerIp: {
+    kind: "token bucket",
+    rate: 10,
+    period: MINUTE,
+    capacity: 10,
+  },
   commentPerProject: {
     kind: "token bucket",
     rate: 60,

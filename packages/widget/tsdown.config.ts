@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs"
 
 import { defineConfig } from "tsdown"
 
-const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as {
+const pkg = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8")
+) as {
   version: string
 }
 
@@ -15,9 +17,15 @@ function env(name: string, fallback: string): string {
 }
 
 const define = {
-  __NUNI_CONVEX_URL__: JSON.stringify(env("NUNI_CONVEX_URL", "http://127.0.0.1:3210")),
-  __NUNI_CONVEX_SITE_URL__: JSON.stringify(env("NUNI_CONVEX_SITE_URL", "http://127.0.0.1:3211")),
-  __NUNI_APP_URL__: JSON.stringify(env("NUNI_APP_URL", "http://localhost:3000")),
+  __NUNI_CONVEX_URL__: JSON.stringify(
+    env("NUNI_CONVEX_URL", "http://127.0.0.1:3210")
+  ),
+  __NUNI_CONVEX_SITE_URL__: JSON.stringify(
+    env("NUNI_CONVEX_SITE_URL", "http://127.0.0.1:3211")
+  ),
+  __NUNI_APP_URL__: JSON.stringify(
+    env("NUNI_APP_URL", "http://localhost:3000")
+  ),
   __NUNI_VERSION__: JSON.stringify(pkg.version),
 }
 

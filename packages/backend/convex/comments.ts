@@ -46,7 +46,10 @@ function cleanBody(body: string): string {
   const clean = body.replace(/\r\n/g, "\n").trim()
   if (!clean) fail("invalid_body", "Comment cannot be empty")
   if (clean.length > LIMITS.bodyMaxLength) {
-    fail("invalid_body", `Comments are limited to ${LIMITS.bodyMaxLength} characters`)
+    fail(
+      "invalid_body",
+      `Comments are limited to ${LIMITS.bodyMaxLength} characters`
+    )
   }
   return clean
 }
@@ -90,11 +93,15 @@ export const pagesWithComments = query({
       )
       .order("desc")
       .take(1000)
-    const pages = new Map<string, { path: string; url: string; count: number }>()
+    const pages = new Map<
+      string,
+      { path: string; url: string; count: number }
+    >()
     for (const c of open) {
       const entry = pages.get(c.page.path)
       if (entry) entry.count++
-      else pages.set(c.page.path, { path: c.page.path, url: c.page.url, count: 1 })
+      else
+        pages.set(c.page.path, { path: c.page.path, url: c.page.url, count: 1 })
     }
     return [...pages.values()].sort((a, b) => b.count - a.count)
   },
@@ -129,7 +136,10 @@ export const createFromWidget = internalMutation({
     if (!perProject.ok) fail("rate_limited", "Too many comments right now")
 
     const project = await ensureProject(ctx, args.publicId, origin)
-    if (!project.ownerId && project.commentCount >= LIMITS.unclaimedCommentCap) {
+    if (
+      !project.ownerId &&
+      project.commentCount >= LIMITS.unclaimedCommentCap
+    ) {
       fail(
         "cap_reached",
         "This site has reached the comment limit for unclaimed projects. The owner can claim it to continue."

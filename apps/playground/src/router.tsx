@@ -14,7 +14,9 @@ export function usePath() {
   return path
 }
 
-export function Link(props: AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) {
+export function Link(
+  props: AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }
+) {
   return (
     <a
       {...props}

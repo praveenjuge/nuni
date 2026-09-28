@@ -6,7 +6,8 @@ import { init } from "../src/index"
 import { sha256 } from "../src/sha256"
 import { KEYS, read, write } from "../src/storage"
 
-const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+const hex = (bytes: Uint8Array) =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
 
 describe("sha256 fallback", () => {
   it("matches known test vectors", () => {
@@ -52,8 +53,12 @@ describe("storage", () => {
 
 describe("config", () => {
   it("uses build defaults and allows overrides", () => {
-    expect(resolveConfig({ project: "p" }).convexUrl).toBe("http://127.0.0.1:3210")
-    expect(resolveConfig({ project: "p", appUrl: "https://x.com/" }).appUrl).toBe("https://x.com")
+    expect(resolveConfig({ project: "p" }).convexUrl).toBe(
+      "http://127.0.0.1:3210"
+    )
+    expect(
+      resolveConfig({ project: "p", appUrl: "https://x.com/" }).appUrl
+    ).toBe("https://x.com")
   })
 })
 

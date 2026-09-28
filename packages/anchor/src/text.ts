@@ -1,4 +1,10 @@
-const SKIP_TEXT_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SVG"])
+const SKIP_TEXT_TAGS = new Set([
+  "SCRIPT",
+  "STYLE",
+  "NOSCRIPT",
+  "TEMPLATE",
+  "SVG",
+])
 
 export function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim()
@@ -7,7 +13,9 @@ export function normalizeText(value: string): string {
 /** Visible-ish text of an element, whitespace-normalized and truncated. */
 export function elementText(el: Element, max = 120): string {
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-    return normalizeText(el.placeholder || el.getAttribute("aria-label") || "").slice(0, max)
+    return normalizeText(
+      el.placeholder || el.getAttribute("aria-label") || ""
+    ).slice(0, max)
   }
   let out = ""
   const walk = (node: Node) => {

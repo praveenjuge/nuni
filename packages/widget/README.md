@@ -51,16 +51,20 @@ init({ project: "nuni_..." })
 Using React? Use [`@nuni/react`](https://www.npmjs.com/package/@nuni/react). No bundler? Use the script tag:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@nuni/widget@0/dist/nuni.global.js" data-project="nuni_..." defer></script>
+<script
+  src="https://cdn.jsdelivr.net/npm/@nuni/widget@0/dist/nuni.global.js"
+  data-project="nuni_..."
+  defer
+></script>
 ```
 
 ## Options
 
-| Option | Description |
-| --- | --- |
-| `project` | Your public project ID. Commit it; it is not a secret. |
-| `getPageKey(url)` | Optional. Decide which URLs share comments. Defaults to the path, ignoring query and hash. |
-| `convexUrl`, `convexSiteUrl`, `appUrl` | Optional. For self-hosting or local development. |
+| Option                                 | Description                                                                                |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `project`                              | Your public project ID. Commit it; it is not a secret.                                     |
+| `getPageKey(url)`                      | Optional. Decide which URLs share comments. Defaults to the path, ignoring query and hash. |
+| `convexUrl`, `convexSiteUrl`, `appUrl` | Optional. For self-hosting or local development.                                           |
 
 `init` returns `{ destroy() }`.
 

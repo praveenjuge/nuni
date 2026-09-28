@@ -3,12 +3,7 @@ import { LIMITS, type Anchor, type AnchorAncestor } from "@nuni/shared"
 import { reactComponentName } from "./component"
 import { clamp01, documentRect, documentSize, viewportInfo } from "./geometry"
 import { attributeAllowed, type AnchorOptions } from "./options"
-import {
-  buildCssSelector,
-  buildPath,
-  stableIdOf,
-  testIdOf,
-} from "./selector"
+import { buildCssSelector, buildPath, stableIdOf, testIdOf } from "./selector"
 import { CAPTURED_ATTRIBUTES, stableClasses } from "./stable"
 import { elementText } from "./text"
 
@@ -16,7 +11,10 @@ function capturedAttributes(el: Element, options: AnchorOptions) {
   const attrs: Record<string, string> = {}
   for (const name of CAPTURED_ATTRIBUTES) {
     if (!attributeAllowed(name, options)) continue
-    if (name === "value" && !(el instanceof HTMLButtonElement || el.getAttribute("type") === "submit")) {
+    if (
+      name === "value" &&
+      !(el instanceof HTMLButtonElement || el.getAttribute("type") === "submit")
+    ) {
       continue
     }
     const value = el.getAttribute(name)
@@ -28,7 +26,11 @@ function capturedAttributes(el: Element, options: AnchorOptions) {
 function ancestorsOf(el: Element): AnchorAncestor[] {
   const out: AnchorAncestor[] = []
   let node = el.parentElement
-  while (node && out.length < 5 && node !== node.ownerDocument.documentElement) {
+  while (
+    node &&
+    out.length < 5 &&
+    node !== node.ownerDocument.documentElement
+  ) {
     const id = stableIdOf(node)
     const entry: AnchorAncestor = {
       tag: node.tagName.toLowerCase(),
@@ -64,7 +66,9 @@ export function captureAnchor(
   const offset = point
     ? {
         x: clamp01(client.width ? (point.x - client.left) / client.width : 0.5),
-        y: clamp01(client.height ? (point.y - client.top) / client.height : 0.5),
+        y: clamp01(
+          client.height ? (point.y - client.top) / client.height : 0.5
+        ),
       }
     : { x: 0.5, y: 0.5 }
 

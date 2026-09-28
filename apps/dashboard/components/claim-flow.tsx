@@ -2,11 +2,21 @@
 
 import { api } from "@nuni/backend/api"
 import { useMutation } from "convex/react"
-import { CheckCircle2Icon, ShieldCheckIcon, TriangleAlertIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  ShieldCheckIcon,
+  TriangleAlertIcon,
+} from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { Button, buttonVariants } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { useStoreUser } from "@/components/use-store-user"
 import { hostOf } from "@/lib/format"
 
@@ -17,7 +27,13 @@ type State =
   | { step: "other"; ownerName: string }
   | { step: "error"; message: string }
 
-export function ClaimFlow({ project, origin }: { project: string; origin: string }) {
+export function ClaimFlow({
+  project,
+  origin,
+}: {
+  project: string
+  origin: string
+}) {
   const { ready } = useStoreUser()
   const claim = useMutation(api.projects.claim)
   const createSession = useMutation(api.sessions.create)
@@ -30,16 +46,24 @@ export function ClaimFlow({ project, origin }: { project: string; origin: string
     started.current = true
     claim({ publicId: project, origin })
       .then((result) => {
-        if (result.status === "claimed_by_other") setState({ step: "other", ownerName: result.ownerName })
-        else setState({ step: "confirm", claimedNow: result.status === "claimed" })
+        if (result.status === "claimed_by_other")
+          setState({ step: "other", ownerName: result.ownerName })
+        else
+          setState({ step: "confirm", claimedNow: result.status === "claimed" })
       })
-      .catch((error: unknown) => setState({ step: "error", message: errorMessage(error) }))
+      .catch((error: unknown) =>
+        setState({ step: "error", message: errorMessage(error) })
+      )
   }, [ready, claim, project, origin])
 
   async function allow() {
     setBusy(true)
     try {
-      const { token } = await createSession({ publicId: project, origin, userAgent: navigator.userAgent })
+      const { token } = await createSession({
+        publicId: project,
+        origin,
+        userAgent: navigator.userAgent,
+      })
       const opener = window.opener as Window | null
       if (opener && !opener.closed) {
         // Only the site that opened this popup, at exactly this origin, can receive it.
@@ -74,15 +98,20 @@ export function ClaimFlow({ project, origin }: { project: string; origin: string
                 {state.claimedNow ? "You own this site now" : "Welcome back"}
               </CardTitle>
               <CardDescription>
-                Allow owner tools on <strong className="text-foreground">{host}</strong>? You&apos;ll be able to
-                resolve and delete comments right on the page. Only allow sites you control.
+                Allow owner tools on{" "}
+                <strong className="text-foreground">{host}</strong>? You&apos;ll
+                be able to resolve and delete comments right on the page. Only
+                allow sites you control.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex gap-2">
               <Button onClick={allow} disabled={busy}>
                 Allow on {host}
               </Button>
-              <a className={buttonVariants({ variant: "ghost" })} href={`/dashboard/p/${project}`}>
+              <a
+                className={buttonVariants({ variant: "ghost" })}
+                href={`/dashboard/p/${project}`}
+              >
                 Open dashboard
               </a>
             </CardContent>
@@ -101,7 +130,10 @@ export function ClaimFlow({ project, origin }: { project: string; origin: string
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <a className={buttonVariants({ variant: "outline" })} href={`/dashboard/p/${project}`}>
+              <a
+                className={buttonVariants({ variant: "outline" })}
+                href={`/dashboard/p/${project}`}
+              >
                 Open dashboard
               </a>
             </CardContent>
@@ -110,11 +142,12 @@ export function ClaimFlow({ project, origin }: { project: string; origin: string
         {state.step === "other" && (
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <TriangleAlertIcon className="size-5 text-destructive" /> Already claimed
+              <TriangleAlertIcon className="size-5 text-destructive" /> Already
+              claimed
             </CardTitle>
             <CardDescription>
-              {host} is managed by {state.ownerName}. Ask them to resolve comments, or contact support if this is
-              your site.
+              {host} is managed by {state.ownerName}. Ask them to resolve
+              comments, or contact support if this is your site.
             </CardDescription>
           </CardHeader>
         )}
@@ -131,5 +164,8 @@ export function ClaimFlow({ project, origin }: { project: string; origin: string
 
 function errorMessage(error: unknown): string {
   const data = (error as { data?: { message?: string } })?.data
-  return data?.message ?? (error instanceof Error ? error.message : "Please try again.")
+  return (
+    data?.message ??
+    (error instanceof Error ? error.message : "Please try again.")
+  )
 }

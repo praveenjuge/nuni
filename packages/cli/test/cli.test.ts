@@ -4,7 +4,11 @@ import { join } from "node:path"
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { detectFramework, detectPackageManager, installCommand } from "../src/detect"
+import {
+  detectFramework,
+  detectPackageManager,
+  installCommand,
+} from "../src/detect"
 import { run } from "../src/cli"
 import { snippetFor } from "../src/snippets"
 
@@ -17,20 +21,56 @@ function project(files: Record<string, string>) {
   return dir
 }
 
-const pkg = (deps: Record<string, string>) => JSON.stringify({ dependencies: deps })
+const pkg = (deps: Record<string, string>) =>
+  JSON.stringify({ dependencies: deps })
 
 describe("detectFramework", () => {
   it.each([
-    [{ "package.json": pkg({ next: "16", react: "19" }), "app/layout.tsx": "" }, "next-app", "app/layout.tsx"],
-    [{ "package.json": pkg({ next: "16" }), "src/app/layout.tsx": "" }, "next-app", "src/app/layout.tsx"],
-    [{ "package.json": pkg({ next: "14" }), "pages/_app.tsx": "" }, "next-pages", "pages/_app.tsx"],
-    [{ "package.json": pkg({ react: "19", vite: "8" }), "src/main.tsx": "" }, "react", "src/main.tsx"],
-    [{ "package.json": pkg({ "react-router": "7" }) }, "react-router", "app/root.tsx"],
-    [{ "package.json": pkg({ "@tanstack/react-start": "1" }) }, "tanstack-start", "src/routes/__root.tsx"],
+    [
+      {
+        "package.json": pkg({ next: "16", react: "19" }),
+        "app/layout.tsx": "",
+      },
+      "next-app",
+      "app/layout.tsx",
+    ],
+    [
+      { "package.json": pkg({ next: "16" }), "src/app/layout.tsx": "" },
+      "next-app",
+      "src/app/layout.tsx",
+    ],
+    [
+      { "package.json": pkg({ next: "14" }), "pages/_app.tsx": "" },
+      "next-pages",
+      "pages/_app.tsx",
+    ],
+    [
+      { "package.json": pkg({ react: "19", vite: "8" }), "src/main.tsx": "" },
+      "react",
+      "src/main.tsx",
+    ],
+    [
+      { "package.json": pkg({ "react-router": "7" }) },
+      "react-router",
+      "app/root.tsx",
+    ],
+    [
+      { "package.json": pkg({ "@tanstack/react-start": "1" }) },
+      "tanstack-start",
+      "src/routes/__root.tsx",
+    ],
     [{ "package.json": pkg({ vue: "3" }) }, "vue", "src/main.ts"],
     [{ "package.json": pkg({ nuxt: "4" }) }, "nuxt", "plugins/nuni.client.ts"],
-    [{ "package.json": pkg({ "@sveltejs/kit": "2" }) }, "sveltekit", "src/routes/+layout.svelte"],
-    [{ "package.json": pkg({ astro: "7" }) }, "astro", "src/layouts/Layout.astro"],
+    [
+      { "package.json": pkg({ "@sveltejs/kit": "2" }) },
+      "sveltekit",
+      "src/routes/+layout.svelte",
+    ],
+    [
+      { "package.json": pkg({ astro: "7" }) },
+      "astro",
+      "src/layouts/Layout.astro",
+    ],
     [{ "index.html": "<html></html>" }, "html", "index.html"],
   ])("detects %#", (files, id, file) => {
     const fw = detectFramework(project(files as Record<string, string>))
@@ -51,7 +91,12 @@ describe("package manager", () => {
 
 describe("snippets", () => {
   it("embeds the id", () => {
-    const fw = { id: "html", name: "", kind: "script" as const, file: "index.html" }
+    const fw = {
+      id: "html",
+      name: "",
+      kind: "script" as const,
+      file: "index.html",
+    }
     expect(snippetFor(fw, "nuni_abc")).toContain('data-project="nuni_abc"')
   })
 })
@@ -61,10 +106,18 @@ describe("run", () => {
 
   it("prints json for agents", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
-    const dir = project({ "package.json": pkg({ next: "16" }), "app/layout.tsx": "", "bun.lock": "" })
+    const dir = project({
+      "package.json": pkg({ next: "16" }),
+      "app/layout.tsx": "",
+      "bun.lock": "",
+    })
     expect(run(["init", "--json", "--cwd", dir])).toBe(0)
     const out = JSON.parse(log.mock.calls[0]![0] as string)
-    expect(out).toMatchObject({ frameworkId: "next-app", package: "@nuni/react", install: "bun add @nuni/react" })
+    expect(out).toMatchObject({
+      frameworkId: "next-app",
+      package: "@nuni/react",
+      install: "bun add @nuni/react",
+    })
     expect(out.projectId).toMatch(/^nuni_/)
     expect(out.snippet).toContain(out.projectId)
   })

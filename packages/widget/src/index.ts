@@ -10,7 +10,11 @@ export interface NuniInstance {
   destroy(): void
 }
 
-let active: { project: string; widget: NuniWidget | null; timer: number } | null = null
+let active: {
+  project: string
+  widget: NuniWidget | null
+  timer: number
+} | null = null
 
 /**
  * Mount Nuni on the page. Call once on the client. Calling it again with
@@ -18,16 +22,23 @@ let active: { project: string; widget: NuniWidget | null; timer: number } | null
  */
 export function init(options: NuniOptions): NuniInstance {
   const noop = { destroy() {} }
-  if (typeof window === "undefined" || typeof document === "undefined") return noop
+  if (typeof window === "undefined" || typeof document === "undefined")
+    return noop
   if (!isProjectId(options.project)) {
-    console.warn(`[nuni] "${options.project}" is not a valid project ID. Run \`npx @nuni/cli init\` to get one.`)
+    console.warn(
+      `[nuni] "${options.project}" is not a valid project ID. Run \`npx @nuni/cli init\` to get one.`
+    )
     return noop
   }
   if (active?.project === options.project) return { destroy: destroyActive }
   destroyActive()
 
   const config = resolveConfig(options)
-  const state = { project: options.project, widget: null as NuniWidget | null, timer: 0 }
+  const state = {
+    project: options.project,
+    widget: null as NuniWidget | null,
+    timer: 0,
+  }
   active = state
 
   const mount = () => {
@@ -40,7 +51,11 @@ export function init(options: NuniOptions): NuniInstance {
     state.widget.start()
   }
   // Stay out of the way of the host page's first render.
-  const idle = (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
+  const idle = (
+    window as {
+      requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number
+    }
+  ).requestIdleCallback
   if (idle) idle(mount, { timeout: 1500 })
   else state.timer = window.setTimeout(mount, 1)
 

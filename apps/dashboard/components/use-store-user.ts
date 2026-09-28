@@ -19,5 +19,9 @@ export function useStoreUser() {
       cancelled = true
     }
   }, [isAuthenticated, store])
-  return { ready: isAuthenticated && ready, isLoading: isLoading || (isAuthenticated && !ready), isAuthenticated }
+  return {
+    ready: isAuthenticated && ready,
+    isLoading: isLoading || (isAuthenticated && !ready),
+    isAuthenticated,
+  }
 }

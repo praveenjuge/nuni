@@ -51,13 +51,15 @@ test("pin reliability benchmark", async ({ page }) => {
     const anchor = await page.evaluate(
       ({ scrollBefore, scrollContainer }) => {
         if (scrollContainer) {
-          document.querySelector(scrollContainer.selector)!.scrollTop = scrollContainer.top
+          document.querySelector(scrollContainer.selector)!.scrollTop =
+            scrollContainer.top
         }
         if (scrollBefore) window.scrollTo(0, scrollBefore)
         const el = document.querySelector("[data-bench-target]")!
         el.scrollIntoView({ block: "center" })
         const r = el.getBoundingClientRect()
-        const api = (window as never as { NuniAnchor: typeof import("../src") }).NuniAnchor
+        const api = (window as never as { NuniAnchor: typeof import("../src") })
+          .NuniAnchor
         return api.captureAnchor(
           el,
           { x: r.left + r.width / 2, y: r.top + r.height / 2 },
@@ -75,7 +77,8 @@ test("pin reliability benchmark", async ({ page }) => {
     const resolved = await page.evaluate(
       ({ anchor, scrollAfter }) => {
         window.scrollTo(0, scrollAfter ?? 0)
-        const api = (window as never as { NuniAnchor: typeof import("../src") }).NuniAnchor
+        const api = (window as never as { NuniAnchor: typeof import("../src") })
+          .NuniAnchor
         const result = api.resolveAnchor(anchor, document, {
           ignoreAttributePrefixes: ["data-bench"],
         })
@@ -126,6 +129,10 @@ test("pin reliability benchmark", async ({ page }) => {
     JSON.stringify({ rate, wrong, results }, null, 2)
   )
 
-  expect(rate, "re-anchoring success rate").toBeGreaterThanOrEqual(MIN_CORRECT_RATE)
-  expect(wrong, "pins placed on the wrong element").toBeLessThanOrEqual(MAX_WRONG)
+  expect(rate, "re-anchoring success rate").toBeGreaterThanOrEqual(
+    MIN_CORRECT_RATE
+  )
+  expect(wrong, "pins placed on the wrong element").toBeLessThanOrEqual(
+    MAX_WRONG
+  )
 })

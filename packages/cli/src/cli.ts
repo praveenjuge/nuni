@@ -1,7 +1,12 @@
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 
-import { buildAgentPrompt, DOCS_URL, generateProjectId, isProjectId } from "@nuni/shared"
+import {
+  buildAgentPrompt,
+  DOCS_URL,
+  generateProjectId,
+  isProjectId,
+} from "@nuni/shared"
 
 import { detectFramework, detectPackageManager, installCommand } from "./detect"
 import { packageFor, snippetFor } from "./snippets"
@@ -48,7 +53,9 @@ export function run(argv: string[]): number {
     return 0
   }
   if (values.id && !isProjectId(values.id)) {
-    console.error(`"${values.id}" is not a valid Nuni project ID (expected nuni_ followed by 22 characters).`)
+    console.error(
+      `"${values.id}" is not a valid Nuni project ID (expected nuni_ followed by 22 characters).`
+    )
     return 1
   }
   const projectId = values.id ?? generateProjectId()
@@ -76,7 +83,15 @@ export function run(argv: string[]): number {
   if (values.json) {
     console.log(
       JSON.stringify(
-        { projectId, framework: framework.name, frameworkId: framework.id, file: framework.file, package: pkg, install, snippet },
+        {
+          projectId,
+          framework: framework.name,
+          frameworkId: framework.id,
+          file: framework.file,
+          package: pkg,
+          install,
+          snippet,
+        },
         null,
         2
       )

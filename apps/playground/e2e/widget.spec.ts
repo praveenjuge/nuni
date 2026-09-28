@@ -8,10 +8,16 @@ function projectId() {
 }
 
 const toolbar = (page: Page) => page.locator("#nuni-root .toolbar")
-const commentButton = (page: Page) => toolbar(page).getByRole("button", { name: "Add a comment" })
+const commentButton = (page: Page) =>
+  toolbar(page).getByRole("button", { name: "Add a comment" })
 const pins = (page: Page) => page.locator("#nuni-root .pin:not(.pin-draft)")
 
-async function addComment(page: Page, target: ReturnType<Page["locator"]>, body: string, name?: string) {
+async function addComment(
+  page: Page,
+  target: ReturnType<Page["locator"]>,
+  body: string,
+  name?: string
+) {
   await commentButton(page).click()
   await target.click()
   const composer = page.locator('#nuni-root [data-card="composer"]')
@@ -22,13 +28,19 @@ async function addComment(page: Page, target: ReturnType<Page["locator"]>, body:
   await expect(page.locator("#nuni-root .toast")).toHaveText("Comment added")
 }
 
-test("comment, persist, sync live, edit own, navigate", async ({ page, browser }) => {
+test("comment, persist, sync live, edit own, navigate", async ({
+  page,
+  browser,
+}) => {
   const unique = `Make this bigger ${Date.now()}`
   const project = projectId()
   await page.goto(`/pricing?project=${project}`)
   await expect(toolbar(page)).toBeVisible()
 
-  const target = page.locator(".plan").nth(1).getByRole("button", { name: "Choose plan" })
+  const target = page
+    .locator(".plan")
+    .nth(1)
+    .getByRole("button", { name: "Choose plan" })
   const before = 0
   await addComment(page, target, unique, "Sam Tester")
 
@@ -56,7 +68,10 @@ test("comment, persist, sync live, edit own, navigate", async ({ page, browser }
   await expect(pins(page)).toHaveCount(before + 2)
 
   // Author can edit their own comment; the other visitor can't.
-  await page.locator("#nuni-root .toolbar").getByRole("button", { name: /open/ }).click()
+  await page
+    .locator("#nuni-root .toolbar")
+    .getByRole("button", { name: /open/ })
+    .click()
   await page.locator("#nuni-root .panel").getByText(unique).click()
   const thread = page.locator('#nuni-root [data-card="thread"]')
   await expect(thread).toContainText(unique)
@@ -66,12 +81,20 @@ test("comment, persist, sync live, edit own, navigate", async ({ page, browser }
   await expect(thread).toContainText("(edited)")
   await expect(otherPage.locator("#nuni-root")).toBeAttached()
 
-  await otherPage.locator("#nuni-root .toolbar").getByRole("button", { name: /open/ }).click()
-  await otherPage.locator("#nuni-root .panel").getByText(`${unique} (edited)`).click()
+  await otherPage
+    .locator("#nuni-root .toolbar")
+    .getByRole("button", { name: /open/ })
+    .click()
+  await otherPage
+    .locator("#nuni-root .panel")
+    .getByText(`${unique} (edited)`)
+    .click()
   const otherThread = otherPage.locator('#nuni-root [data-card="thread"]')
   await expect(otherThread).toBeVisible()
   await expect(otherThread.getByRole("button", { name: "Edit" })).toHaveCount(0)
-  await expect(otherThread.getByRole("button", { name: "Resolve" })).toHaveCount(0)
+  await expect(
+    otherThread.getByRole("button", { name: "Resolve" })
+  ).toHaveCount(0)
 
   // SPA navigation swaps the page's comments; other pages are listed.
   await page.keyboard.press("Escape") // closes the thread
@@ -82,16 +105,25 @@ test("comment, persist, sync live, edit own, navigate", async ({ page, browser }
   await expect(pins(page)).toHaveCount(0)
   const panel = page.locator("#nuni-root .panel")
   if (!(await panel.isVisible())) {
-    await page.locator("#nuni-root .toolbar").getByRole("button", { name: /open/ }).click()
+    await page
+      .locator("#nuni-root .toolbar")
+      .getByRole("button", { name: /open/ })
+      .click()
   }
   await expect(panel).toContainText("/pricing")
 
   // Deleting own comment removes it for everyone.
   await page.goto("/pricing")
-  await page.locator("#nuni-root .toolbar").getByRole("button", { name: /open/ }).click()
+  await page
+    .locator("#nuni-root .toolbar")
+    .getByRole("button", { name: /open/ })
+    .click()
   await page.locator("#nuni-root .panel").getByText(second).click()
   page.once("dialog", (d) => d.accept())
-  await page.locator('#nuni-root [data-card="thread"]').getByRole("button", { name: "Delete" }).click()
+  await page
+    .locator('#nuni-root [data-card="thread"]')
+    .getByRole("button", { name: "Delete" })
+    .click()
   await expect(pins(otherPage)).toHaveCount(before + 1)
   await other.close()
 })
@@ -115,7 +147,11 @@ test("clicks in comment mode don't trigger the page", async ({ page }) => {
 })
 
 test("mobile: tap to place, bottom sheet composer", async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+  })
   const page = await context.newPage()
   await page.goto("/")
   await expect(toolbar(page)).toBeVisible()

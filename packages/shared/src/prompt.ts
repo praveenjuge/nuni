@@ -4,7 +4,8 @@ export const PACKAGES = {
   cli: "@nuni/cli",
 } as const
 
-export const CDN_URL = "https://cdn.jsdelivr.net/npm/@nuni/widget@0/dist/nuni.global.js"
+export const CDN_URL =
+  "https://cdn.jsdelivr.net/npm/@nuni/widget@0/dist/nuni.global.js"
 export const DOCS_URL = "https://nuni.praveenjuge.com"
 
 /**

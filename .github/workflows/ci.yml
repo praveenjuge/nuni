@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
+jobs:
+  checks:
+    name: Build, lint, typecheck, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run format:check
+      - run: bun run readmes:check
+      - run: bunx turbo run build lint typecheck test
+      - name: Bundle size
+        run: bunx turbo run size --filter=@nuni/widget
+
+  reliability:
+    name: Pin reliability benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bunx playwright install --with-deps chromium
+        working-directory: packages/anchor
+      - run: bun run bench
+        working-directory: packages/anchor
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-report
+          path: packages/anchor/bench-report.json
+
+  e2e:
+    name: Widget end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bunx turbo run build --filter=@nuni/playground...
+      - run: bunx playwright install --with-deps chromium
+        working-directory: apps/playground
+      - name: Start local Convex backend
+        working-directory: packages/backend
+        env:
+          CONVEX_AGENT_MODE: anonymous
+        run: |
+          npx convex dev --once
+          npx convex env set WORKOS_CLIENT_ID client_ci_placeholder
+          npx convex env set WORKOS_API_KEY sk_test_ci_placeholder
+          npx convex env set WORKOS_WEBHOOK_SECRET ci_placeholder
+          npx convex env set NUNI_ALLOW_TESTING 1
+      - run: bun run e2e
+        working-directory: apps/playground
+        env:
+          CI: "1"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/playground/test-results

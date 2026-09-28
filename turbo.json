@@ -35,6 +35,17 @@
     },
     "size": {
       "dependsOn": ["build"]
+    },
+    "e2e": {
+      "dependsOn": ["^build"],
+      "cache": false
     }
-  }
+  },
+  "globalPassThroughEnv": [
+    "CI",
+    "CHROMIUM_PATH",
+    "PLAYWRIGHT_*",
+    "CONVEX_AGENT_MODE",
+    "VITE_*"
+  ]
 }

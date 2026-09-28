@@ -6,7 +6,13 @@
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/dashboard", "destination": "https://nuni-dashboard.vercel.app/dashboard" },
-    { "source": "/dashboard/:path*", "destination": "https://nuni-dashboard.vercel.app/dashboard/:path*" }
+    {
+      "source": "/dashboard",
+      "destination": "https://nuni-dashboard.vercel.app/dashboard"
+    },
+    {
+      "source": "/dashboard/:path*",
+      "destination": "https://nuni-dashboard.vercel.app/dashboard/:path*"
+    }
   ]
 }

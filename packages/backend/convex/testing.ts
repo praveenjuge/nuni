@@ -11,9 +11,14 @@ import { ensureProject, fail, parseOrigin, sha256Hex } from "./lib"
  *   npx convex run testing:seedOwner '{"publicId":"nuni_...","origin":"http://127.0.0.1:5173"}'
  */
 export const seedOwner = internalMutation({
-  args: { publicId: v.string(), origin: v.string(), name: v.optional(v.string()) },
+  args: {
+    publicId: v.string(),
+    origin: v.string(),
+    name: v.optional(v.string()),
+  },
   handler: async (ctx, { publicId, origin, name }) => {
-    if (process.env.NUNI_ALLOW_TESTING !== "1") fail("forbidden", "Testing helpers are disabled")
+    if (process.env.NUNI_ALLOW_TESTING !== "1")
+      fail("forbidden", "Testing helpers are disabled")
     const cleanOrigin = parseOrigin(origin)
     const userId = await ctx.db.insert("users", {
       workosId: `test_${randomBase58(12)}`,
