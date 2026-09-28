@@ -1,6 +1,6 @@
-# Next.js template
+# TanStack Start + shadcn/ui
 
-This is a Next.js template with shadcn/ui.
+This is a template for a new TanStack Start project with React, TypeScript, and shadcn/ui.
 
 ## Adding components
 
