@@ -1,0 +1,4 @@
+{
+  "extends": "@nuni/tsconfig/node.json",
+  "include": ["src", "test"]
+}

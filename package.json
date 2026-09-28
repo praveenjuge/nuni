@@ -19,7 +19,9 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,md,css}\"",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "turbo run build --filter=./packages/widget --filter=./packages/react --filter=./packages/cli && changeset publish"
+    "release": "turbo run build --filter=./packages/widget --filter=./packages/react --filter=./packages/cli && changeset publish",
+    "readmes": "bun scripts/sync-readmes.ts",
+    "readmes:check": "bun scripts/sync-readmes.ts --check"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",

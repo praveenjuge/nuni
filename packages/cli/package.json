@@ -11,9 +11,12 @@
     "directory": "packages/cli"
   },
   "bin": {
-    "nuni": "./dist/index.js"
+    "nuni": "./dist/index.mjs"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "engines": {
     "node": ">=18"
   },
