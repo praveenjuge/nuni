@@ -10,3 +10,4 @@ bench-report.json
 test-results
 playwright-report
 .bundle
+.convex

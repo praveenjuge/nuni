@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/convex/schemas/convex.schema.json",
+  "authKit": {
+    "preview": {
+      "configure": {
+        "redirectUris": [
+          "https://${buildEnv.VERCEL_BRANCH_URL}/dashboard/callback"
+        ],
+        "appHomepageUrl": "https://${buildEnv.VERCEL_BRANCH_URL}/dashboard"
+      }
+    },
+    "prod": {
+      "configure": {
+        "redirectUris": ["https://nuni.praveenjuge.com/dashboard/callback"],
+        "appHomepageUrl": "https://nuni.praveenjuge.com/dashboard"
+      }
+    }
+  }
+}
