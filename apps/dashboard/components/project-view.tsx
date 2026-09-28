@@ -167,7 +167,8 @@ function CommentList({
   publicId: string
   status: Status
 }) {
-  const [page, setPage] = useState("")
+  const [pageInput, setPageInput] = useState("")
+  const page = useDebounced(pageInput.trim(), 250)
   const [origin, setOrigin] = useState("")
   const [query, setQuery] = useState("")
   const search = useDebounced(query.trim(), 250)
@@ -196,7 +197,7 @@ function CommentList({
   const pages = useMemo(() => [...(filters?.paths ?? [])].sort(), [filters])
   const origins = useMemo(() => [...(filters?.origins ?? [])].sort(), [filters])
   const filtered = comments ?? []
-  const hasFilters = Boolean(page || origin || search)
+  const hasFilters = Boolean(pageInput || origin || query)
 
   if (comments === undefined) return <Skeleton className="h-40 rounded-3xl" />
 
@@ -211,19 +212,20 @@ function CommentList({
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Search comments"
           />
-          <select
-            className="h-8 rounded-2xl border bg-background px-3 text-sm"
-            value={page}
-            onChange={(e) => setPage(e.target.value)}
-            aria-label="Filter by page"
-          >
-            <option value="">All pages</option>
+          {/* Free text with suggestions, so paths beyond the suggestion list still work. */}
+          <Input
+            className="max-w-xs"
+            placeholder="All pages"
+            list={`nuni-pages-${status}`}
+            value={pageInput}
+            onChange={(e) => setPageInput(e.target.value)}
+            aria-label="Filter by page path"
+          />
+          <datalist id={`nuni-pages-${status}`}>
             {pages.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
+              <option key={p} value={p} />
             ))}
-          </select>
+          </datalist>
           {origins.length > 1 && (
             <select
               className="h-8 rounded-2xl border bg-background px-3 text-sm"

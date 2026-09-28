@@ -39,6 +39,8 @@ export default defineSchema({
     anchor: anchorValidator,
     viewport: viewportValidator,
     userAgent: v.string(),
+    /** Body plus author name, for dashboard search. */
+    searchText: v.optional(v.string()),
     createdAt: v.number(),
     editedAt: v.optional(v.number()),
     resolvedAt: v.optional(v.number()),
@@ -52,8 +54,8 @@ export default defineSchema({
       "createdAt",
     ])
     .index("by_project_status", ["projectId", "status", "createdAt"])
-    .searchIndex("search_body", {
-      searchField: "body",
+    .searchIndex("search_text", {
+      searchField: "searchText",
       filterFields: ["projectId", "status"],
     }),
 

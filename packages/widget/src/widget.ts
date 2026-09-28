@@ -763,7 +763,15 @@ export class NuniWidget {
         : null
     if (!action) return
     // Keep the thread open on failure so the error stays visible.
-    void this.act(c._id, action, "Deleted").then((ok) => ok && this.closeCard())
+    void this.act(c._id, action, "Deleted").then((ok) => {
+      if (!ok) return
+      // The deep-link fallback is not part of the live subscription, so drop
+      // it by hand or its pin would linger until the next navigation.
+      if (this.extraComment?._id === c._id) this.extraComment = null
+      this.comments = this.comments.filter((x) => x._id !== c._id)
+      this.placements.delete(c._id)
+      this.closeCard()
+    })
   }
 
   private saveEdit(c: WidgetComment, body: string) {

@@ -65,6 +65,10 @@ function cleanName(name: string): string {
   return clean
 }
 
+function searchTextFor(body: string, authorName: string) {
+  return `${authorName}\n${body}`
+}
+
 function originOf(url: string): string | null {
   try {
     return new URL(url).origin
@@ -172,6 +176,7 @@ export const createFromWidget = internalMutation({
       body,
       authorName,
       authorKeyHash: await sha256Hex(args.authorSecret),
+      searchText: searchTextFor(body, authorName),
       page: {
         ...args.page,
         origin,
@@ -220,8 +225,13 @@ async function loadOwnComment(
 export const editOwn = mutation({
   args: { id: v.id("comments"), authorSecret: v.string(), body: v.string() },
   handler: async (ctx, { id, authorSecret, body }) => {
-    await loadOwnComment(ctx, id, authorSecret)
-    await ctx.db.patch(id, { body: cleanBody(body), editedAt: Date.now() })
+    const comment = await loadOwnComment(ctx, id, authorSecret)
+    const clean = cleanBody(body)
+    await ctx.db.patch(id, {
+      body: clean,
+      searchText: searchTextFor(clean, comment.authorName),
+      editedAt: Date.now(),
+    })
   },
 })
 
@@ -325,9 +335,9 @@ export const listForOwner = query({
     const base = search
       ? ctx.db
           .query("comments")
-          .withSearchIndex("search_body", (q) =>
+          .withSearchIndex("search_text", (q) =>
             q
-              .search("body", search)
+              .search("searchText", search)
               .eq("projectId", project._id)
               .eq("status", args.status)
           )
@@ -390,31 +400,62 @@ export const getById = query({
 })
 
 /**
- * One-off: rebuild per-page open counts from the comments table. Run once
- * after deploying a version that introduced pageStats onto existing data:
+ * One-off maintenance: recompute per-page open counts (and search text) from
+ * the comments table. Each project is rebuilt inside a single transaction,
+ * so comments written concurrently are never counted twice; projects are
+ * processed one after another by the scheduler.
  *   npx convex run comments:rebuildPageStats
  */
 export const rebuildPageStats = internalMutation({
   args: { cursor: v.optional(v.union(v.string(), v.null())) },
   handler: async (ctx, { cursor }) => {
-    if (!cursor) {
-      for (const row of await ctx.db.query("pageStats").collect()) {
-        await ctx.db.delete(row._id)
-      }
-    }
     const batch = await ctx.db
-      .query("comments")
-      .paginate({ numItems: 500, cursor: cursor ?? null })
-    for (const c of batch.page) {
-      if (c.status === "open")
-        await bumpPageOpen(ctx, c.projectId, c.page.path, 1)
-      else await bumpPageOpen(ctx, c.projectId, c.page.path, 0)
+      .query("projects")
+      .paginate({ numItems: 1, cursor: cursor ?? null })
+    for (const project of batch.page) {
+      const counts = new Map<string, number>()
+      for (const status of ["open", "resolved"] as const) {
+        const comments = await ctx.db
+          .query("comments")
+          .withIndex("by_project_status", (q) =>
+            q.eq("projectId", project._id).eq("status", status)
+          )
+          .collect()
+        for (const c of comments) {
+          counts.set(
+            c.page.path,
+            (counts.get(c.page.path) ?? 0) + (status === "open" ? 1 : 0)
+          )
+          if (c.searchText === undefined) {
+            await ctx.db.patch(c._id, {
+              searchText: searchTextFor(c.body, c.authorName),
+            })
+          }
+        }
+      }
+      const existing = await ctx.db
+        .query("pageStats")
+        .withIndex("by_project_path", (q) => q.eq("projectId", project._id))
+        .collect()
+      for (const row of existing) {
+        const openCount = counts.get(row.path) ?? 0
+        if (row.openCount !== openCount)
+          await ctx.db.patch(row._id, { openCount })
+        counts.delete(row.path)
+      }
+      for (const [path, openCount] of counts) {
+        await ctx.db.insert("pageStats", {
+          projectId: project._id,
+          path,
+          openCount,
+        })
+      }
     }
     if (!batch.isDone) {
       await ctx.scheduler.runAfter(0, internal.comments.rebuildPageStats, {
         cursor: batch.continueCursor,
       })
     }
-    return { processed: batch.page.length, done: batch.isDone }
+    return { projects: batch.page.length, done: batch.isDone }
   },
 })

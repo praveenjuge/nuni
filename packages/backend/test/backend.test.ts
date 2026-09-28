@@ -550,6 +550,46 @@ describe("claiming and owner actions", () => {
     )
   })
 
+  it("rebuilds exactly, even when run twice or over wrong counts", async () => {
+    const t = setup()
+    const a = generateProjectId()
+    const b = generateProjectId()
+    await addComment(t, a)
+    await addComment(t, b, { path: "/b" })
+    await t.run(async (ctx) => {
+      for (const row of await ctx.db.query("pageStats").collect())
+        await ctx.db.patch(row._id, { openCount: 7 })
+    })
+    for (let i = 0; i < 2; i++) {
+      await t.mutation(internal.comments.rebuildPageStats, {})
+      await t.finishAllScheduledFunctions(() => {})
+    }
+    expect(
+      await t.query(api.comments.pagesWithComments, { publicId: a })
+    ).toEqual([{ path: "/pricing", count: 1 }])
+    expect(
+      await t.query(api.comments.pagesWithComments, { publicId: b })
+    ).toEqual([{ path: "/b", count: 1 }])
+  })
+
+  it("searches by author name as well as body", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId)
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    const search = (q: string) =>
+      alice.query(api.comments.listForOwner, {
+        publicId,
+        status: "open",
+        search: q,
+        paginationOpts: { numItems: 10, cursor: null },
+      })
+    expect((await search("Sam")).page).toHaveLength(1)
+    expect((await search("bigger")).page).toHaveLength(1)
+    expect((await search("nobody")).page).toHaveLength(0)
+  })
+
   it("keeps cleaning up while expired sessions remain", async () => {
     const t = setup()
     const publicId = generateProjectId()
