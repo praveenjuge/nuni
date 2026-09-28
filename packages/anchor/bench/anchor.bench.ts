@@ -31,7 +31,7 @@ test.beforeAll(async () => {
     platform: "browser",
     dts: false,
     logLevel: "silent",
-    noExternal: [/.*/],
+    deps: { alwaysBundle: [/.*/], onlyBundle: false },
   })
   const { readFileSync, readdirSync } = await import("node:fs")
   const file = readdirSync(outDir).find((f) => f.startsWith("engine"))!

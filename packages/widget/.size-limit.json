@@ -1,0 +1,4 @@
+[
+  { "name": "CDN script (IIFE)", "path": "dist/nuni.global.js", "limit": "60 KB" },
+  { "name": "ESM entry", "path": "dist/index.js", "import": "{ init }", "limit": "60 KB" }
+]

@@ -13,7 +13,8 @@
     "codegen": "convex codegen",
     "lint": "eslint .",
     "typecheck": "tsc",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:local": "CONVEX_AGENT_MODE=anonymous convex dev"
   },
   "dependencies": {
     "@convex-dev/rate-limiter": "^0.4.0",
