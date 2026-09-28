@@ -1,0 +1,24 @@
+---
+title: FAQ
+description: Common questions about Nuni.
+sidebar:
+  order: 6
+---
+
+<Accordion>
+  <AccordionItem title="Do commenters need an account?">
+    No. They type their name once and it is remembered in their browser.
+  </AccordionItem>
+  <AccordionItem title="Is the project ID a secret?">
+    No. It is public and meant to be committed. It only connects comments to your site.
+  </AccordionItem>
+  <AccordionItem title="Will it slow down my site?">
+    Nuni loads after the page is idle, renders in a Shadow DOM, and the script is about 37 KB gzipped.
+  </AccordionItem>
+  <AccordionItem title="Can I hide it in production?">
+    Not yet in v1. Render the component conditionally if you need to, for example only when an env var is set.
+  </AccordionItem>
+  <AccordionItem title="What is not in v1?">
+    Replies, teams and roles, screenshots, notifications, widget customization, GitHub issue sync and the MCP/agent integration. They are next: the big goal is Nuni comment, exact UI context, coding agent, fix.
+  </AccordionItem>
+</Accordion>

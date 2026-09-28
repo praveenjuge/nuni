@@ -1,0 +1,20 @@
+---
+title: Script tag
+description: Add Nuni to any site without a build step, including WordPress, Webflow and static HTML.
+sidebar:
+  order: 3
+---
+
+Add this before `</body>` on every page:
+
+```html
+<script
+  src="https://cdn.jsdelivr.net/npm/@nuni/widget@0/dist/nuni.global.js"
+  data-project="nuni_..."
+  defer
+></script>
+```
+
+The script is served by jsDelivr straight from npm, about 37 KB gzipped, and loads after your page is idle.
+
+`window.Nuni.init(options)` is also available if you want to start it yourself.

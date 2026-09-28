@@ -1,0 +1,58 @@
+---
+title: Quickstart
+description: Add Nuni to an existing site and leave your first comment.
+sidebar:
+  order: 1
+---
+
+## With a coding agent
+
+Copy the prompt from the [home page](/) (it includes a project ID) and paste it into Codex, Claude Code, Cursor or any other agent. It installs the right package for your framework and mounts Nuni once, globally.
+
+## By hand
+
+<Steps>
+  <Step title="Get a project ID">
+    ```bash
+    npx @nuni/cli init
+    ```
+    It detects your framework and package manager, prints a new project ID and shows the exact snippet and file to put it in. Add `--json` for machine-readable output.
+  </Step>
+  <Step title="Install">
+    ```bash
+    npm install @nuni/react   # React, Next.js, Remix, TanStack Start
+    npm install @nuni/widget  # Vue, Svelte, Astro, Angular, anything else
+    ```
+    No bundler? Use the [script tag](/install/script-tag) instead.
+  </Step>
+  <Step title="Mount it once">
+    ```tsx app/layout.tsx
+    import { Nuni } from "@nuni/react"
+
+    export default function RootLayout({ children }: { children: React.ReactNode }) {
+      return (
+        <html lang="en">
+          <body>
+            {children}
+            <Nuni project="nuni_..." />
+          </body>
+        </html>
+      )
+    }
+    ```
+  </Step>
+  <Step title="Comment">
+    Start your dev server and open the site. The Nuni toolbar sits in the bottom-right corner. Press <kbd>C</kbd>, click any element and write your comment.
+  </Step>
+</Steps>
+
+:::tip
+Commit the project ID. It is public by design, like a publishable key, and the same ID should be used on localhost, previews and production so everyone sees the same comments.
+:::
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Claim your site" href="/guides/claiming" icon="shield-check">Sign in with GitHub to resolve and delete comments.</Card>
+  <Card title="Environments" href="/guides/environments" icon="layers">How comments are shared across localhost, preview and production.</Card>
+</CardGroup>

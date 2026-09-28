@@ -35,5 +35,5 @@ Steps:
 7. If the site sends a Content-Security-Policy, allow connect-src https://*.convex.cloud wss://*.convex.cloud https://*.convex.site (and script-src cdn.jsdelivr.net for the script tag).
 8. Start the dev server, open the site, and confirm the Nuni button appears in the bottom-right corner.
 
-Docs: ${DOCS_URL}/docs/quickstart`
+Docs: ${DOCS_URL}/quickstart`
 }

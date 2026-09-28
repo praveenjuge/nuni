@@ -1,0 +1,31 @@
+---
+title: Privacy and security
+description: What Nuni stores, who can see it, and how to lock it down.
+sidebar:
+  order: 5
+---
+
+## Who can see comments
+
+The widget is visible to **everyone** who can open your site, and comments are readable by anyone who knows the project ID (which is in your page source). Treat comments like a public issue tracker: don't put passwords, customer data or secrets in them.
+
+## What is stored
+
+For each comment: the text, the author name (as typed), a hash of the commenter's browser key (used to let them edit and delete their own comments), the page URL and title, the element details described in [How pins stay put](/guides/how-pins-work), the viewport size and the browser user agent. No cookies are set on your site and no IP addresses are stored (they are used briefly for rate limiting).
+
+For owners: the name, email and avatar from GitHub via WorkOS.
+
+## Abuse protection
+
+Comment creation is rate limited per IP and per project, and unclaimed projects are capped at 500 comments. Comment text is always rendered as plain text, never HTML.
+
+## Content Security Policy
+
+If your site sends a CSP, allow:
+
+```
+connect-src https://*.convex.cloud wss://*.convex.cloud https://*.convex.site;
+script-src https://cdn.jsdelivr.net;   /* only for the script tag */
+```
+
+The widget renders inside a Shadow DOM, so its styles never touch your page and your styles never break it.
