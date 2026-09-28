@@ -399,7 +399,10 @@ export const getById = query({
   },
 })
 
-/** Most open comments counted for one page by the rebuild (stays well inside transaction limits). */
+/**
+ * Most open comments the rebuild reads for one page, to stay well inside
+ * transaction limits. At the cap the count is only a lower bound.
+ */
 const REBUILD_PATH_CAP = 4000
 
 /**
@@ -450,11 +453,14 @@ export const rebuildProjectStats = internalMutation({
     stage: v.optional(v.union(v.literal("paths"), v.literal("stale"))),
     afterPath: v.optional(v.string()),
     statsCursor: v.optional(v.union(v.string(), v.null())),
+    /** Overrides REBUILD_PATH_CAP (tests only). */
+    pathCap: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const next = (rest: Record<string, unknown>) =>
       ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {
         projectCursor: args.projectCursor ?? null,
+        pathCap: args.pathCap,
         ...rest,
       })
 
@@ -466,12 +472,14 @@ export const rebuildProjectStats = internalMutation({
       if (!project) return
       await ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {
         projectCursor: batch.isDone ? undefined : batch.continueCursor,
+        pathCap: args.pathCap,
         projectId: project._id,
         stage: "paths",
       })
       return
     }
     const projectId = args.projectId
+    const cap = args.pathCap ?? REBUILD_PATH_CAP
 
     if (args.stage !== "stale") {
       const { afterPath } = args
@@ -496,8 +504,8 @@ export const rebuildProjectStats = internalMutation({
             .eq("page.path", path)
             .eq("status", "open")
         )
-        .take(REBUILD_PATH_CAP)
-      await setPageOpen(ctx, projectId, path, open.length)
+        .take(cap)
+      await setPageOpen(ctx, projectId, path, open.length, open.length >= cap)
       await next({ projectId, stage: "paths", afterPath: path })
       return
     }
@@ -525,6 +533,7 @@ export const rebuildProjectStats = internalMutation({
     } else if (args.projectCursor) {
       await ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {
         projectCursor: args.projectCursor,
+        pathCap: args.pathCap,
       })
     }
   },
@@ -534,7 +543,8 @@ async function setPageOpen(
   ctx: MutationCtx,
   projectId: Id<"projects">,
   path: string,
-  openCount: number
+  openCount: number,
+  capped: boolean
 ) {
   const row = await ctx.db
     .query("pageStats")
@@ -543,6 +553,7 @@ async function setPageOpen(
     )
     .unique()
   if (!row) await ctx.db.insert("pageStats", { projectId, path, openCount })
-  else if (row.openCount !== openCount)
+  // A capped read is only a lower bound, so it may raise a count, never lower it.
+  else if (capped ? row.openCount < openCount : row.openCount !== openCount)
     await ctx.db.patch(row._id, { openCount })
 }

@@ -607,6 +607,26 @@ describe("claiming and owner actions", () => {
     expect(comments.every((c) => c.searchText?.includes("Sam"))).toBe(true)
   })
 
+  it("never lowers a page count from a capped read", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    for (let i = 0; i < 3; i++) await addComment(t, publicId)
+    const set = (openCount: number) =>
+      t.run(async (ctx) => {
+        const row = (await ctx.db.query("pageStats").collect())[0]!
+        await ctx.db.patch(row._id, { openCount })
+      })
+    const rebuild = async () => {
+      await t.mutation(internal.comments.rebuildProjectStats, { pathCap: 2 })
+      await t.finishAllScheduledFunctions(() => {})
+      return (await t.run((ctx) => ctx.db.query("pageStats").collect()))[0]!
+        .openCount
+    }
+    expect(await rebuild()).toBe(3)
+    await set(1)
+    expect(await rebuild()).toBe(2)
+  })
+
   it("searches by author name as well as body", async () => {
     const t = setup()
     const publicId = generateProjectId()
