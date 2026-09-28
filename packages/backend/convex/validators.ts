@@ -16,6 +16,7 @@ export const anchorValidator = v.object({
     path: v.string(),
   }),
   tag: v.string(),
+  classes: v.optional(v.array(v.string())),
   role: v.optional(v.string()),
   text: v.string(),
   attrs: v.record(v.string(), v.string()),

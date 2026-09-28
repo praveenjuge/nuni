@@ -22,6 +22,8 @@ export interface Anchor {
     path: string
   }
   tag: string
+  /** Stable, human-authored classes on the element itself. */
+  classes?: string[]
   role?: string
   text: string
   attrs: Record<string, string>
