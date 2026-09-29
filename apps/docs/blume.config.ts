@@ -17,6 +17,25 @@ export default defineConfig({
       href: "https://nuni.praveenjuge.com/dashboard/sign-in",
     },
   },
+  github: {
+    owner: "praveenjuge",
+    repo: "nuni",
+    branch: "master",
+    dir: "apps/docs",
+  },
+  lastModified: "git",
+  seo: {
+    software: {
+      license: "MIT",
+      price: 0,
+      sameAs: [
+        "https://github.com/praveenjuge/nuni",
+        "https://www.npmjs.com/package/@nuniapp/widget",
+        "https://www.npmjs.com/package/@nuniapp/react",
+        "https://www.npmjs.com/package/@nuniapp/cli",
+      ],
+    },
+  },
   agents: { llmsTxt: true },
   deployment: { site: "https://nuni.praveenjuge.com" },
 })
