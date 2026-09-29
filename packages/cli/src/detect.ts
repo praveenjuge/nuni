@@ -41,13 +41,13 @@ export function detectPackageManager(cwd: string): PackageManager {
 export function installCommand(pm: PackageManager, pkg: string): string {
   switch (pm) {
     case "bun":
-      return `bun add ${pkg}`
+      return `bun add ${pkg}@latest`
     case "pnpm":
-      return `pnpm add ${pkg}`
+      return `pnpm add ${pkg}@latest`
     case "yarn":
-      return `yarn add ${pkg}`
+      return `yarn add ${pkg}@latest`
     default:
-      return `npm install ${pkg}`
+      return `npm install ${pkg}@latest`
   }
 }
 

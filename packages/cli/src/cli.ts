@@ -18,9 +18,9 @@ const VERSION = packageJson.version
 const HELP = `nuni ${VERSION}: pinned comments on your live site
 
 Usage
-  npx @nuniapp/cli init [--id <project-id>] [--cwd <dir>] [--json]
-  npx @nuniapp/cli prompt [--id <project-id>]
-  npx @nuniapp/cli id
+  npx @nuniapp/cli@latest init [--id <project-id>] [--cwd <dir>] [--json]
+  npx @nuniapp/cli@latest prompt [--id <project-id>]
+  npx @nuniapp/cli@latest id
 
 Commands
   init     Generate a project ID and print the install steps for this project
