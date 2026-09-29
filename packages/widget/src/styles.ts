@@ -23,6 +23,7 @@ export const STYLES = /* css */ `
   font-size: 14px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 @media (prefers-color-scheme: dark) {
   :host {
