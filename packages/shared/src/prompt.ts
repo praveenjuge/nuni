@@ -1,11 +1,11 @@
 export const PACKAGES = {
-  widget: "@nuni/widget",
-  react: "@nuni/react",
-  cli: "@nuni/cli",
+  widget: "@nuniapp/widget",
+  react: "@nuniapp/react",
+  cli: "@nuniapp/cli",
 } as const
 
 export const CDN_URL =
-  "https://cdn.jsdelivr.net/npm/@nuni/widget@0/dist/nuni.global.js"
+  "https://cdn.jsdelivr.net/npm/@nuniapp/widget@0/dist/nuni.global.js"
 export const DOCS_URL = "https://nuni.praveenjuge.com"
 
 /**

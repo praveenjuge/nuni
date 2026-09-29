@@ -49,7 +49,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@nuni/shared": "workspace:*",
-        "@nuni/widget": "workspace:*",
+        "@nuniapp/widget": "workspace:*",
         "blume": "^2.0.3",
         "react": "19.2.8",
         "react-dom": "19.2.8",
@@ -62,7 +62,7 @@
       "name": "@nuni/playground",
       "version": "0.0.0",
       "dependencies": {
-        "@nuni/react": "workspace:*",
+        "@nuniapp/react": "workspace:*",
         "react": "19.2.8",
         "react-dom": "19.2.8",
       },
@@ -114,13 +114,14 @@
         "@types/node": "^22",
         "convex-test": "^0.0.60",
         "eslint": "^10.11.0",
+        "react": "19.2.8",
         "typescript": "^5.9.3",
         "vite": "^8.3.1",
         "vitest": "^5.0.2",
       },
     },
     "packages/cli": {
-      "name": "@nuni/cli",
+      "name": "@nuniapp/cli",
       "version": "0.1.0",
       "bin": {
         "nuni": "./dist/index.mjs",
@@ -147,10 +148,10 @@
       },
     },
     "packages/react": {
-      "name": "@nuni/react",
+      "name": "@nuniapp/react",
       "version": "0.1.0",
       "dependencies": {
-        "@nuni/widget": "workspace:^",
+        "@nuniapp/widget": "workspace:^",
       },
       "devDependencies": {
         "@nuni/eslint-config": "workspace:*",
@@ -181,7 +182,7 @@
       "version": "0.0.0",
     },
     "packages/widget": {
-      "name": "@nuni/widget",
+      "name": "@nuniapp/widget",
       "version": "0.1.0",
       "devDependencies": {
         "@nuni/anchor": "workspace:*",
@@ -651,8 +652,6 @@
 
     "@nuni/backend": ["@nuni/backend@workspace:packages/backend"],
 
-    "@nuni/cli": ["@nuni/cli@workspace:packages/cli"],
-
     "@nuni/dashboard": ["@nuni/dashboard@workspace:apps/dashboard"],
 
     "@nuni/docs": ["@nuni/docs@workspace:apps/docs"],
@@ -661,13 +660,15 @@
 
     "@nuni/playground": ["@nuni/playground@workspace:apps/playground"],
 
-    "@nuni/react": ["@nuni/react@workspace:packages/react"],
-
     "@nuni/shared": ["@nuni/shared@workspace:packages/shared"],
 
     "@nuni/tsconfig": ["@nuni/tsconfig@workspace:packages/tsconfig"],
 
-    "@nuni/widget": ["@nuni/widget@workspace:packages/widget"],
+    "@nuniapp/cli": ["@nuniapp/cli@workspace:packages/cli"],
+
+    "@nuniapp/react": ["@nuniapp/react@workspace:packages/react"],
+
+    "@nuniapp/widget": ["@nuniapp/widget@workspace:packages/widget"],
 
     "@orama/orama": ["@orama/orama@3.1.18", "", {}, "sha512-a61ljmRVVyG5MC/698C8/FfFDw5a8LOIvyOLW5fztgUXqUpc1jOfQzOitSCbge657OgXXThmY3Tk8fpiDb4UcA=="],
 

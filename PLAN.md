@@ -4,8 +4,8 @@
 
 Nuni lets anyone leave Figma-style pinned comments on a real website, with no commenter accounts, and lets the developer claim the site with GitHub and manage comments. The repo today is a bare Next.js 16.3 + shadcn (Base UI, `base-rhea`, mauve) template on bun (history: tried Vite/TanStack, reverted). The goal is to turn it into a Turborepo monorepo that ships:
 
-- an embeddable widget (`@nuni/widget`, `@nuni/react`, CDN script),
-- a CLI (`@nuni/cli`),
+- an embeddable widget (`@nuniapp/widget`, `@nuniapp/react`, CDN script),
+- a CLI (`@nuniapp/cli`),
 - a Convex backend,
 - a Next.js dashboard with WorkOS (GitHub) auth,
 - a Blume docs and landing site, all deployed on Vercel at `nuni.praveenjuge.com`.
@@ -23,14 +23,14 @@ Pin reliability is the #1 technical priority. It gets its own engine package and
 | Widget tech        | Vanilla TS in a Shadow DOM. CSS is compiled with Tailwind v4 into the shadow stylesheet.                                                                                          |
 | Integrations       | React component, vanilla `init()`, and a script tag via jsDelivr. No framework auto-edit in the CLI; the agent edits files.                                                       |
 | Transport          | Convex browser client, realtime over websocket. Comment creation goes through an HTTP action so we get the client IP for rate limits.                                             |
-| npm                | `@nuni/widget`, `@nuni/react`, `@nuni/cli`. Unscoped `nuni` is an npm security holding package.                                                                                   |
+| npm                | `@nuniapp/widget`, `@nuniapp/react`, `@nuniapp/cli`. Unscoped `nuni` is an npm security holding package.                                                                          |
 | Owner actions      | Resolve, reopen and delete both in the dashboard and in the widget, using a revocable widget session token.                                                                       |
 | Commenters         | Post, plus edit and delete their own comments (tracked by a local secret). Only the owner resolves.                                                                               |
 | Sign-in            | WorkOS with `provider: "GitHubOAuth"`, which skips the hosted AuthKit screen.                                                                                                     |
 | Unclaimed projects | Kept forever. Rate limited, with a 500-comment cap until claimed.                                                                                                                 |
 | Hosting            | Blume site at `nuni.praveenjuge.com` (landing + docs). The Next.js dashboard is at `/dashboard` through a Vercel rewrite (Next `basePath: "/dashboard"`).                         |
 | Package manager    | Bun workspaces + Turborepo.                                                                                                                                                       |
-| Prompt             | Available from: the site's "Copy prompt" button (ID baked in), `@nuni/cli init` output, llms.txt, and the npm README.                                                             |
+| Prompt             | Available from: the site's "Copy prompt" button (ID baked in), `@nuniapp/cli init` output, llms.txt, and the npm README.                                                          |
 | Reliability        | Playwright benchmark gate in CI (95% or better correct, near-zero wrong), plus Vitest unit tests.                                                                                 |
 | Mobile             | Pins viewable on touch devices, and comments can be placed there too (tap-select, bottom-sheet composer).                                                                         |
 
@@ -44,9 +44,9 @@ apps/
 packages/
   backend/      Convex: convex/ (schema, functions, http, auth.config, convex.config)
   anchor/       @nuni/anchor (internal, bundled): capture + resolve + track engine
-  widget/       @nuni/widget: init(), Shadow DOM UI, ESM build + IIFE build for CDN
-  react/        @nuni/react: <Nuni project="..." /> ("use client"), thin wrapper
-  cli/          @nuni/cli: `nuni init` (bin), prints prompt + snippets
+  widget/       @nuniapp/widget: init(), Shadow DOM UI, ESM build + IIFE build for CDN
+  react/        @nuniapp/react: <Nuni project="..." /> ("use client"), thin wrapper
+  cli/          @nuniapp/cli: `nuni init` (bin), prints prompt + snippets
   shared/       internal: ID gen/validation, URL/path normalization, prompt text, types, limits
   tsconfig/     shared tsconfig bases (base, nextjs, library, vite)
   eslint-config/ shared flat configs
@@ -159,7 +159,7 @@ Build tooling: tsdown for library packages (ESM + d.ts, plus an IIFE for the wid
 
 - `init({ project, apiUrl?, getPageKey? })` returns `{ destroy }`.
 - The IIFE build auto-inits from `<script ... data-project="nuni_...">`.
-- `@nuni/react`: `<Nuni project />`, a `"use client"` component that calls `init` in an effect and `destroy` on unmount.
+- `@nuniapp/react`: `<Nuni project />`, a `"use client"` component that calls `init` in an effect and `destroy` on unmount.
 - The Convex URLs and app URL are baked in at publish time from CI env (`NUNI_CONVEX_URL`, `NUNI_CONVEX_SITE_URL`, `NUNI_APP_URL`). The playground overrides them with `apiUrl` to point at the dev deployment.
 
 **Loading:** a tiny loader mounts the Shadow DOM host (max z-index, `all: initial`), then lazily imports the UI chunk and the Convex client on `requestIdleCallback`. Budget: loader under 5 KB gz, total under 60 KB gz, enforced by size-limit. The IIFE ships as a single file.
@@ -184,13 +184,13 @@ Build tooling: tsdown for library packages (ESM + d.ts, plus an IIFE for the wid
 
 ## Phase 4: CLI + prompt (packages/cli, packages/shared)
 
-- `npx @nuni/cli init`:
+- `npx @nuniapp/cli init`:
   1. Detects the framework from package.json and files (Next app/pages router, Vite React, Remix/React Router, TanStack Start, Astro, SvelteKit, Vue/Nuxt, plain HTML).
   2. Generates a project ID.
   3. Prints the exact install command and snippet for that framework, plus where to place it (root layout or entry).
   - It doesn't edit files; the agent does. The `--id <existing>` flag reuses an ID, and `--json` gives machine-readable output.
 - A single prompt template lives in `packages/shared/prompt.ts` and is used by the CLI, the docs island, and the READMEs (generated at build time), so they never drift apart. The prompt tells the agent to:
-  - install `@nuni/widget` (or `@nuni/react`) and mount it once globally,
+  - install `@nuniapp/widget` (or `@nuniapp/react`) and mount it once globally,
   - use the given ID, or run the CLI to get one,
   - leave the ID committed in the code (it's public).
 
@@ -243,7 +243,7 @@ Build tooling: tsdown for library packages (ESM + d.ts, plus an IIFE for the wid
 **GitHub Actions:**
 
 - `ci.yml`: bun install, then `turbo lint typecheck test build`, size-limit, and the Playwright benchmark.
-- `release.yml`: Changesets opens a version PR, then publishes the 3 packages to npm with provenance (trusted publishing). jsDelivr serves `@nuni/widget@1` automatically.
+- `release.yml`: Changesets opens a version PR, then publishes the 3 packages to npm with provenance (trusted publishing). jsDelivr serves `@nuniapp/widget@1` automatically.
 
 **Your setup checklist:**
 

@@ -17,9 +17,9 @@ Turborepo + Bun workspaces.
 | `apps/playground`                             | Vite + React test site and the Playwright end-to-end tests. Not deployed.                |
 | `packages/backend`                            | Convex: schema, widget and owner functions, HTTP comment endpoint, WorkOS, rate limits.  |
 | `packages/anchor`                             | The pin engine: capture, resolve and the reliability benchmark. Bundled into the widget. |
-| `packages/widget`                             | `@nuni/widget`: the embeddable widget (Shadow DOM, vanilla TS). ESM + CDN script.        |
-| `packages/react`                              | `@nuni/react`: `<Nuni project="..." />`.                                                 |
-| `packages/cli`                                | `@nuni/cli`: `npx @nuni/cli init` prints a project ID and install steps.                 |
+| `packages/widget`                             | `@nuniapp/widget`: the embeddable widget (Shadow DOM, vanilla TS). ESM + CDN script.     |
+| `packages/react`                              | `@nuniapp/react`: `<Nuni project="..." />`.                                              |
+| `packages/cli`                                | `@nuniapp/cli`: `npx @nuniapp/cli init` prints a project ID and install steps.           |
 | `packages/shared`                             | IDs, path normalization, limits, types and the agent prompt (single source of truth).    |
 | `packages/tsconfig`, `packages/eslint-config` | Shared configs.                                                                          |
 
@@ -41,7 +41,7 @@ npx convex env set NUNI_ALLOW_TESTING 1   # enables the e2e seeding helper local
 
 # 2. In another terminal, from the repo root
 cp apps/dashboard/.env.example apps/dashboard/.env.local   # add real WorkOS keys to test sign-in
-bunx turbo run dev --filter=@nuni/playground --filter=@nuni/dashboard --filter=@nuni/widget --filter=@nuni/docs
+bunx turbo run dev --filter=@nuni/playground --filter=@nuni/dashboard --filter=@nuniapp/widget --filter=@nuni/docs
 ```
 
 - Playground: http://127.0.0.1:5173 (press **C** and click anything)

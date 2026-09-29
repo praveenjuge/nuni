@@ -1,0 +1,7 @@
+.turbo
+**/.blume
+**/.astro
+**/node_modules
+**/.next
+**/dist
+**/.env*

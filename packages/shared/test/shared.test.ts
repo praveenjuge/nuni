@@ -75,6 +75,6 @@ describe("buildAgentPrompt", () => {
   })
 
   it("points to the CLI without an id", () => {
-    expect(buildAgentPrompt()).toContain("npx @nuni/cli@latest init")
+    expect(buildAgentPrompt()).toContain("npx @nuniapp/cli@latest init")
   })
 })

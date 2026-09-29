@@ -30,7 +30,7 @@ jobs:
       - run: bun run readmes:check
       - run: bunx turbo run build lint typecheck test
       - name: Bundle size
-        run: bunx turbo run size --filter=@nuni/widget
+        run: bunx turbo run size --filter=@nuniapp/widget
 
   reliability:
     name: Pin reliability benchmark

@@ -1,4 +1,4 @@
-import { init } from "@nuni/widget"
+import { init } from "@nuniapp/widget"
 import { useEffect } from "react"
 
 export const client = "only"

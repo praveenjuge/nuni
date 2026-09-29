@@ -31,7 +31,7 @@ export function init(options: NuniOptions): NuniInstance {
     return noop
   if (!isProjectId(options.project)) {
     console.warn(
-      `[nuni] "${options.project}" is not a valid project ID. Run \`npx @nuni/cli init\` to get one.`
+      `[nuni] "${options.project}" is not a valid project ID. Run \`npx @nuniapp/cli init\` to get one.`
     )
     return noop
   }
