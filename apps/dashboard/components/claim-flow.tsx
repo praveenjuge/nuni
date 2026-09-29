@@ -89,7 +89,7 @@ export function ClaimFlow({
 
   return (
     <main className="mx-auto grid min-h-svh max-w-md place-items-center p-6">
-      <Card className="w-full">
+      <Card className="w-full min-w-0 [overflow-wrap:anywhere]">
         {view.step === "loading" && (
           <CardHeader>
             <CardTitle>Checking {host}…</CardTitle>
@@ -98,10 +98,12 @@ export function ClaimFlow({
         )}
         {view.step === "confirm" && (
           <>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ShieldCheckIcon className="size-5 text-primary" />
-                {view.mine ? "Welcome back" : `Claim ${host}?`}
+            <CardHeader className="min-w-0">
+              <CardTitle className="flex items-start gap-2">
+                <ShieldCheckIcon className="mt-0.5 size-5 shrink-0 text-primary" />
+                <span className="min-w-0">
+                  {view.mine ? "Welcome back" : `Claim ${host}?`}
+                </span>
               </CardTitle>
               <CardDescription>
                 {view.mine ? (
@@ -118,13 +120,13 @@ export function ClaimFlow({
                   </>
                 )}
               </CardDescription>
-              <code className="w-fit rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+              <code className="w-fit max-w-full rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                 {project}
               </code>
             </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
+            <CardContent className="grid gap-2">
               <Button onClick={confirm} disabled={busy}>
-                {view.mine ? `Allow on ${host}` : `Claim and allow on ${host}`}
+                {view.mine ? "Allow on this site" : "Claim and allow"}
               </Button>
               <Button
                 variant="ghost"

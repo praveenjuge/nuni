@@ -86,7 +86,7 @@ describe("package manager", () => {
     expect(detectPackageManager(project({ "yarn.lock": "" }))).toBe("yarn")
     expect(detectPackageManager(project({}))).toBe("npm")
     expect(installCommand("pnpm", "@nuniapp/react")).toBe(
-      "pnpm add @nuniapp/react"
+      "pnpm add @nuniapp/react@latest"
     )
   })
 })
@@ -118,7 +118,7 @@ describe("run", () => {
     expect(out).toMatchObject({
       frameworkId: "next-app",
       package: "@nuniapp/react",
-      install: "bun add @nuniapp/react",
+      install: "bun add @nuniapp/react@latest",
     })
     expect(out.projectId).toMatch(/^nuni_/)
     expect(out.snippet).toContain(out.projectId)

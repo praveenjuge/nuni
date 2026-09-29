@@ -5,7 +5,7 @@ export const PACKAGES = {
 } as const
 
 export const CDN_URL =
-  "https://cdn.jsdelivr.net/npm/@nuniapp/widget@0/dist/nuni.global.js"
+  "https://cdn.jsdelivr.net/npm/@nuniapp/widget@latest/dist/nuni.global.js"
 export const DOCS_URL = "https://nuni.praveenjuge.com"
 
 /**
@@ -24,10 +24,10 @@ ${idLine}
 Steps:
 1. Detect the framework and package manager.
 2. If the app uses React (Next.js, Vite, Remix, React Router, TanStack Start, etc.):
-   - Install ${PACKAGES.react}.
+   - Install ${PACKAGES.react}@latest.
    - Render <Nuni project="PROJECT_ID" /> once, globally, in the root layout or app entry (for Next.js App Router: app/layout.tsx, inside <body>). It is already a client component.
 3. Otherwise, if there is a bundler (Vue, Svelte, Astro, Angular, etc.):
-   - Install ${PACKAGES.widget}.
+   - Install ${PACKAGES.widget}@latest.
    - Call init({ project: "PROJECT_ID" }) once on the client, in the app entry or root layout. import { init } from "${PACKAGES.widget}".
 4. If there is no bundler (plain HTML, WordPress, Webflow): add this before </body> on every page:
    <script src="${CDN_URL}" data-project="PROJECT_ID" defer></script>

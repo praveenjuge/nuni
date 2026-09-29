@@ -19,7 +19,7 @@ Turborepo + Bun workspaces.
 | `packages/anchor`                             | The pin engine: capture, resolve and the reliability benchmark. Bundled into the widget. |
 | `packages/widget`                             | `@nuniapp/widget`: the embeddable widget (Shadow DOM, vanilla TS). ESM + CDN script.     |
 | `packages/react`                              | `@nuniapp/react`: `<Nuni project="..." />`.                                              |
-| `packages/cli`                                | `@nuniapp/cli`: `npx @nuniapp/cli init` prints a project ID and install steps.           |
+| `packages/cli`                                | `@nuniapp/cli`: `npx @nuniapp/cli@latest init` prints a project ID and install steps.    |
 | `packages/shared`                             | IDs, path normalization, limits, types and the agent prompt (single source of truth).    |
 | `packages/tsconfig`, `packages/eslint-config` | Shared configs.                                                                          |
 
