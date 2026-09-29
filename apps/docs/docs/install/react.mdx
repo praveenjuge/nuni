@@ -6,7 +6,7 @@ sidebar:
 ---
 
 ```bash
-npm install @nuni/react
+npm install @nuniapp/react
 ```
 
 Render `<Nuni />` **once**, as high as possible in the tree. It is a client component, so it works in Next.js Server Component layouts.
@@ -14,7 +14,7 @@ Render `<Nuni />` **once**, as high as possible in the tree. It is a client comp
 <Tabs>
   <Tab title="Next.js App Router">
     ```tsx app/layout.tsx
-    import { Nuni } from "@nuni/react"
+    import { Nuni } from "@nuniapp/react"
 
     export default function RootLayout({ children }: { children: React.ReactNode }) {
       return (
@@ -30,7 +30,7 @@ Render `<Nuni />` **once**, as high as possible in the tree. It is a client comp
   </Tab>
   <Tab title="Next.js Pages Router">
     ```tsx pages/_app.tsx
-    import { Nuni } from "@nuni/react"
+    import { Nuni } from "@nuniapp/react"
     import type { AppProps } from "next/app"
 
     export default function App({ Component, pageProps }: AppProps) {
@@ -45,7 +45,7 @@ Render `<Nuni />` **once**, as high as possible in the tree. It is a client comp
   </Tab>
   <Tab title="Vite / React">
     ```tsx src/main.tsx
-    import { Nuni } from "@nuni/react"
+    import { Nuni } from "@nuniapp/react"
 
     createRoot(document.getElementById("root")!).render(
       <StrictMode>
@@ -57,7 +57,7 @@ Render `<Nuni />` **once**, as high as possible in the tree. It is a client comp
   </Tab>
   <Tab title="React Router / Remix">
     ```tsx app/root.tsx
-    import { Nuni } from "@nuni/react"
+    import { Nuni } from "@nuniapp/react"
 
     export default function App() {
       return (

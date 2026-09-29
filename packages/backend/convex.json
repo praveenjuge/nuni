@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/convex/schemas/convex.schema.json",
+  "authKit": {
+    "dev": {
+      "configure": {
+        "redirectUris": ["http://localhost:3000/dashboard/callback"],
+        "appHomepageUrl": "http://localhost:3000/dashboard",
+        "corsOrigins": ["http://localhost:3000"]
+      },
+      "localEnvVars": {
+        "WORKOS_CLIENT_ID": "${authEnv.WORKOS_CLIENT_ID}",
+        "WORKOS_API_KEY": "${authEnv.WORKOS_API_KEY}"
+      }
+    },
+    "prod": {
+      "environmentType": "production",
+      "configure": {
+        "redirectUris": ["https://nuni.praveenjuge.com/dashboard/callback"],
+        "appHomepageUrl": "https://nuni.praveenjuge.com/dashboard",
+        "corsOrigins": ["https://nuni.praveenjuge.com"]
+      }
+    }
+  }
+}

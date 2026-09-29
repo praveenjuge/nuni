@@ -12,7 +12,7 @@ Two environments only:
 
 Vercel only builds `master` (production). Preview deployments are skipped by `ignoreCommand` in both `vercel.json` files.
 
-Sign-in goes straight to GitHub: the dashboard uses the AuthKit PKCE flow with `provider=GitHubOAuth`, which is how the WorkOS GitHub OAuth docs say to skip the AuthKit screen.
+Sign-in uses hosted AuthKit, where users choose GitHub. WorkOS handles the email verification that new OAuth users may need before a session is created.
 
 ---
 
@@ -21,7 +21,7 @@ Sign-in goes straight to GitHub: the dashboard uses the AuthKit PKCE flow with `
 ### 1. Accounts
 
 - [ ] Convex account (https://dashboard.convex.dev)
-- [ ] WorkOS account (https://dashboard.workos.com). Use the **Staging** environment for everything below.
+- [ ] WorkOS account (https://dashboard.workos.com). Convex creates and manages a dedicated **Staging** environment for this deployment.
 
 ### 2. Convex dev deployment
 
@@ -32,13 +32,12 @@ npx convex dev
 ```
 
 - [ ] Log in, create the project (for example `nuni`).
-- [ ] When asked about a Convex-managed WorkOS team, answer **No**. You are using your own WorkOS team.
-- [ ] The first push fails until the WorkOS variables exist (step 4). That is expected.
+- [ ] Choose the Convex-managed WorkOS team. Convex provisions AuthKit and sets `WORKOS_CLIENT_ID` and `WORKOS_API_KEY` on the dev deployment. The redirect URI, homepage, and CORS origins are declared in `packages/backend/convex.json`.
 - [ ] Note the dev URLs from `packages/backend/.env.local` or the Convex dashboard: `https://<dev>.convex.cloud` and `https://<dev>.convex.site`.
 
 ### 3. WorkOS staging
 
-- [ ] **API Keys**: copy the Client ID (`client_01...`) and API key (`sk_test_...`).
+- [ ] In Convex → Settings → Integrations → WorkOS AuthKit, open the managed staging environment. Copy its Client ID and API key for the dashboard's local env file. Managed API key prefixes may differ from `sk_test_`.
 - [ ] **Authentication → OAuth providers → GitHub → Manage**: enable it with the WorkOS default credentials.
 - [ ] **Redirects** (Applications → your app → Redirects):
   - Redirect URI: `http://localhost:3000/dashboard/callback` (mark as default)
@@ -50,10 +49,8 @@ npx convex dev
 
 ```bash
 cd packages/backend
-npx convex env set WORKOS_CLIENT_ID client_01...   # staging
-npx convex env set WORKOS_API_KEY sk_test_...
 npx convex env set WORKOS_WEBHOOK_SECRET <signing secret>
-npx convex env set NUNI_ALLOW_TESTING 1            # only for the e2e tests; never in production
+npx convex env set NUNI_ALLOW_TESTING 1            # optional for e2e tests; never in production
 npx convex dev                                     # now pushes successfully; keep it running
 ```
 
@@ -62,8 +59,8 @@ npx convex dev                                     # now pushes successfully; ke
 `apps/dashboard/.env.local`:
 
 ```bash
-WORKOS_CLIENT_ID=client_01...        # staging
-WORKOS_API_KEY=sk_test_...
+WORKOS_CLIENT_ID=client_01...        # managed staging environment
+WORKOS_API_KEY=<managed staging API key>
 WORKOS_COOKIE_PASSWORD=<32+ random chars: openssl rand -base64 32>
 NEXT_PUBLIC_WORKOS_REDIRECT_URI=http://localhost:3000/dashboard/callback
 NEXT_PUBLIC_APP_URL=http://localhost:3000
@@ -89,7 +86,7 @@ export NUNI_APP_URL=http://localhost:3000
 ### 6. Run and check
 
 ```bash
-bunx turbo run dev --filter=@nuni/dashboard --filter=@nuni/playground --filter=@nuni/widget --filter=@nuni/docs
+bunx turbo run dev --filter=@nuni/dashboard --filter=@nuni/playground --filter=@nuniapp/widget --filter=@nuni/docs
 ```
 
 - [ ] http://127.0.0.1:5173: press C, click something, post a comment. Reload; the pin comes back.
@@ -115,8 +112,8 @@ WorkOS default GitHub credentials only work in staging.
 
 ### 2. WorkOS production
 
-- [ ] Unlock the Production environment by adding billing details (GitHub/OAuth sign-ins are free).
-- [ ] Copy the production Client ID and API key (`sk_live_...`).
+- [ ] Add billing details to unlock Production, then in Convex → Production → Settings → Integrations → WorkOS AuthKit create the managed **Production** environment. Convex sets its Client ID and API key on the production deployment. WorkOS states OAuth connections are free and AuthKit is free up to 1 million monthly active users; other products and usage above that tier can incur charges.
+- [ ] Copy the managed production Client ID and API key for Vercel. Do not infer the environment from the API key prefix.
 - [ ] **Redirects**:
   - Redirect URI: `https://nuni.praveenjuge.com/dashboard/callback` (default; production requires HTTPS)
   - Sign-in endpoint: `https://nuni.praveenjuge.com/dashboard/sign-in`
@@ -126,11 +123,7 @@ WorkOS default GitHub credentials only work in staging.
 
 ### 3. Convex production
 
-- [ ] Convex dashboard → project → **Production** deployment → Settings → Environment Variables:
-  - `WORKOS_CLIENT_ID` (production)
-  - `WORKOS_API_KEY` (`sk_live_...`)
-  - `WORKOS_WEBHOOK_SECRET`
-  - Do not set `NUNI_ALLOW_TESTING`.
+- [ ] Convex dashboard → project → **Production** deployment → Settings → Environment Variables: verify the managed `WORKOS_CLIENT_ID` and `WORKOS_API_KEY`, and set `WORKOS_WEBHOOK_SECRET`. Do not set `NUNI_ALLOW_TESTING`.
 - [ ] Production deployment → Settings → **Generate Production Deploy Key** with the `deployment:deploy` permission.
 - [ ] Note `https://<prod>.convex.cloud` and `https://<prod>.convex.site`.
 
@@ -143,7 +136,7 @@ WorkOS default GitHub credentials only work in staging.
 | --------------------------------- | ------------------------------------------------- |
 | `CONVEX_DEPLOY_KEY`               | production deploy key                             |
 | `WORKOS_CLIENT_ID`                | production client ID                              |
-| `WORKOS_API_KEY`                  | `sk_live_...`                                     |
+| `WORKOS_API_KEY`                  | managed production API key                        |
 | `WORKOS_COOKIE_PASSWORD`          | 32+ random characters                             |
 | `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | `https://nuni.praveenjuge.com/dashboard/callback` |
 | `NEXT_PUBLIC_APP_URL`             | `https://nuni.praveenjuge.com`                    |
@@ -159,22 +152,22 @@ WorkOS default GitHub credentials only work in staging.
   - `NUNI_CONVEX_URL=https://<prod>.convex.cloud`
   - `NUNI_CONVEX_SITE_URL=https://<prod>.convex.site`
   - `NUNI_APP_URL=https://nuni.praveenjuge.com`
-- [ ] **Domains**: add `nuni.praveenjuge.com`. At your DNS provider for `praveenjuge.com`, add the record Vercel shows (normally `CNAME nuni → cname.vercel-dns.com`).
+- [ ] **Domains**: add `nuni.praveenjuge.com`. In Cloudflare, add the CNAME target Vercel shows and leave **Proxy status off (DNS only)**. Verify that Vercel issues a certificate and the HTTPS site loads.
 
 ### 6. npm packages and releases
 
-- [ ] Create the npm organization `@nuni` (if taken, choose another scope and rename `@nuni/widget`, `@nuni/react`, `@nuni/cli`).
+- [ ] Use the free public-package npm organization `@nuniapp` for `@nuniapp/widget`, `@nuniapp/react`, and `@nuniapp/cli`.
+- [ ] In each package's npm **Settings → Trusted Publisher**, allow direct `npm publish` from GitHub Actions, repository `praveenjuge/nuni`, workflow filename `release.yml`. No npm token is needed.
 - [ ] GitHub repo → Settings → Secrets and variables → Actions:
-  - Secret `NPM_TOKEN`: npm token with publish rights to `@nuni`.
-  - Variables `NUNI_CONVEX_URL` and `NUNI_CONVEX_SITE_URL`: the production Convex URLs. The release job stays off until these exist.
+  - Variables `NUNI_CONVEX_URL` and `NUNI_CONVEX_SITE_URL`: the production Convex URLs. The release job stays off until these exist. No release secret is needed.
   - Optional: secret `TURBO_TOKEN` and variable `TURBO_TEAM` for remote caching.
-- [ ] First release: `bun run changeset` (pick minor, "Initial release"), commit, merge to `master`, then merge the "Version packages" PR the workflow opens. jsDelivr then serves `https://cdn.jsdelivr.net/npm/@nuni/widget@0/dist/nuni.global.js`.
+- [ ] To release, change only `version` in the root `package.json` to a new semver value and merge it to `master`. The release workflow syncs all three public package versions and the React widget dependency, commits the updated manifests and lockfile, builds them, and publishes each new version through npm trusted publishing. Check the GitHub Actions run and npm package pages before using the new version. jsDelivr serves `https://cdn.jsdelivr.net/npm/@nuniapp/widget@0/dist/nuni.global.js`.
 
 ### 7. Production smoke test
 
 - [ ] `https://nuni.praveenjuge.com` loads; the Nuni toolbar appears; "Copy prompt" works.
-- [ ] `https://nuni.praveenjuge.com/dashboard` → Sign in with GitHub → back on the dashboard, signed in.
-- [ ] In a fresh app: `npx @nuni/cli@latest init`, add the snippet, deploy it anywhere, comment, reload, open in a second browser.
+- [ ] `https://nuni.praveenjuge.com/dashboard` → Sign in → GitHub in AuthKit → complete email verification if prompted → back on the dashboard, signed in.
+- [ ] In a fresh app: `npx @nuniapp/cli@latest init`, add the snippet, deploy it anywhere, comment, reload, open in a second browser.
 - [ ] Claim from the widget, allow owner tools, resolve a comment; the dashboard updates live; **Jump to comment** works.
 - [ ] WorkOS → Webhooks shows successful deliveries; Convex (prod) → Data → `users` has your row.
 

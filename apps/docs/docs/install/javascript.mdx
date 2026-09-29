@@ -1,16 +1,16 @@
 ---
 title: Any JavaScript app
-description: Use init() from @nuni/widget in Vue, Nuxt, Svelte, SvelteKit, Astro, Angular or plain bundled JavaScript.
+description: Use init() from @nuniapp/widget in Vue, Nuxt, Svelte, SvelteKit, Astro, Angular or plain bundled JavaScript.
 sidebar:
   order: 2
 ---
 
 ```bash
-npm install @nuni/widget
+npm install @nuniapp/widget
 ```
 
 ```ts
-import { init } from "@nuni/widget"
+import { init } from "@nuniapp/widget"
 
 const nuni = init({ project: "nuni_..." })
 // later, if you ever need to: nuni.destroy()
@@ -21,7 +21,7 @@ Call `init` once, on the client. Calling it again with the same project does not
 <Tabs>
   <Tab title="Vue">
     ```ts src/main.ts
-    import { init } from "@nuni/widget"
+    import { init } from "@nuniapp/widget"
 
     createApp(App).mount("#app")
     init({ project: "nuni_..." })
@@ -29,7 +29,7 @@ Call `init` once, on the client. Calling it again with the same project does not
   </Tab>
   <Tab title="Nuxt">
     ```ts plugins/nuni.client.ts
-    import { init } from "@nuni/widget"
+    import { init } from "@nuniapp/widget"
 
     export default defineNuxtPlugin(() => {
       init({ project: "nuni_..." })
@@ -40,7 +40,7 @@ Call `init` once, on the client. Calling it again with the same project does not
     ```svelte src/routes/+layout.svelte
     <script>
       import { onMount } from "svelte"
-      import { init } from "@nuni/widget"
+      import { init } from "@nuniapp/widget"
 
       onMount(() => init({ project: "nuni_..." }).destroy)
     </script>
@@ -51,7 +51,7 @@ Call `init` once, on the client. Calling it again with the same project does not
   <Tab title="Astro">
     ```astro src/layouts/Layout.astro
     <script>
-      import { init } from "@nuni/widget"
+      import { init } from "@nuniapp/widget"
       init({ project: "nuni_..." })
     </script>
     ```

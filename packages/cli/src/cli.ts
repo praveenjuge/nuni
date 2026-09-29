@@ -1,6 +1,8 @@
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 
+import packageJson from "../package.json"
+
 import {
   buildAgentPrompt,
   DOCS_URL,
@@ -11,14 +13,14 @@ import {
 import { detectFramework, detectPackageManager, installCommand } from "./detect"
 import { packageFor, snippetFor } from "./snippets"
 
-const VERSION = "0.1.0"
+const VERSION = packageJson.version
 
 const HELP = `nuni ${VERSION}: pinned comments on your live site
 
 Usage
-  npx @nuni/cli init [--id <project-id>] [--cwd <dir>] [--json]
-  npx @nuni/cli prompt [--id <project-id>]
-  npx @nuni/cli id
+  npx @nuniapp/cli init [--id <project-id>] [--cwd <dir>] [--json]
+  npx @nuniapp/cli prompt [--id <project-id>]
+  npx @nuniapp/cli id
 
 Commands
   init     Generate a project ID and print the install steps for this project

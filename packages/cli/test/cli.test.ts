@@ -85,7 +85,9 @@ describe("package manager", () => {
     expect(detectPackageManager(project({ "pnpm-lock.yaml": "" }))).toBe("pnpm")
     expect(detectPackageManager(project({ "yarn.lock": "" }))).toBe("yarn")
     expect(detectPackageManager(project({}))).toBe("npm")
-    expect(installCommand("pnpm", "@nuni/react")).toBe("pnpm add @nuni/react")
+    expect(installCommand("pnpm", "@nuniapp/react")).toBe(
+      "pnpm add @nuniapp/react"
+    )
   })
 })
 
@@ -115,8 +117,8 @@ describe("run", () => {
     const out = JSON.parse(log.mock.calls[0]![0] as string)
     expect(out).toMatchObject({
       frameworkId: "next-app",
-      package: "@nuni/react",
-      install: "bun add @nuni/react",
+      package: "@nuniapp/react",
+      install: "bun add @nuniapp/react",
     })
     expect(out.projectId).toMatch(/^nuni_/)
     expect(out.snippet).toContain(out.projectId)

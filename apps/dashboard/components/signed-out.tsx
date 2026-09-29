@@ -1,4 +1,3 @@
-import { GithubIcon } from "@/components/icons"
 import { buttonVariants } from "@/components/ui/button"
 import {
   Card,
@@ -23,8 +22,7 @@ export function SignedOut({ returnTo = "/dashboard" }: { returnTo?: string }) {
           className={buttonVariants({ size: "lg" })}
           href={`/dashboard/sign-in?returnTo=${encodeURIComponent(returnTo)}`}
         >
-          <GithubIcon />
-          Sign in with GitHub
+          Sign in to Nuni
         </a>
         <p className="text-xs text-muted-foreground">
           To claim a site, open it, click the Nuni button and choose

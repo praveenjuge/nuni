@@ -1,5 +1,5 @@
 {
-  "name": "@nuni/react",
+  "name": "@nuniapp/react",
   "version": "0.1.0",
   "description": "React component for Nuni: pinned comments on your live site.",
   "license": "MIT",
@@ -35,7 +35,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@nuni/widget": "workspace:^"
+    "@nuniapp/widget": "^0.1.0"
   },
   "peerDependencies": {
     "react": ">=18"

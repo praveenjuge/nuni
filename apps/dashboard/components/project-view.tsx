@@ -354,7 +354,7 @@ function InstallCard({ publicId }: { publicId: string }) {
       </CardHeader>
       <CardContent className="grid gap-3 text-sm">
         <div className="grid gap-1.5">
-          <span className="text-muted-foreground">React (@nuni/react)</span>
+          <span className="text-muted-foreground">React (@nuniapp/react)</span>
           <pre className="overflow-x-auto rounded-xl bg-muted p-3 font-mono text-xs">
             {react}
           </pre>

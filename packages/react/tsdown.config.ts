@@ -6,6 +6,6 @@ export default defineConfig({
   platform: "browser",
   target: "es2020",
   dts: true,
-  deps: { neverBundle: ["react", "@nuni/widget"] },
+  deps: { neverBundle: ["react", "@nuniapp/widget"] },
   clean: true,
 })

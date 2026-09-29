@@ -1,6 +1,6 @@
 "use client"
 
-import { init, type NuniOptions } from "@nuni/widget"
+import { init, type NuniOptions } from "@nuniapp/widget"
 import { useEffect } from "react"
 
 export type NuniProps = NuniOptions

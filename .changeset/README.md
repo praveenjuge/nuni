@@ -1,5 +1,5 @@
-# Changesets
+# Historical changesets
 
-Published packages: `@nuni/widget`, `@nuni/react`, `@nuni/cli` (versioned together).
+Published packages: `@nuniapp/widget`, `@nuniapp/react`, `@nuniapp/cli` (versioned together).
 
-Add a changeset with `bun run changeset` in any PR that changes them. Merging to `master` opens a "Version packages" PR; merging that publishes to npm.
+Changesets were used before the root-version release workflow. Existing changeset files are historical; the workflow no longer reads them. To release, increase the root `package.json` version and merge to `master`. See [DEPLOYING.md](../DEPLOYING.md#6-npm-packages-and-releases).

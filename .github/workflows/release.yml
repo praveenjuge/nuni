@@ -8,12 +8,10 @@ concurrency: release-${{ github.ref }}
 
 permissions:
   contents: write
-  pull-requests: write
   id-token: write # npm provenance / trusted publishing
 
 jobs:
   release:
-    # Skipped until production is configured (see DEPLOYING.md, step 5).
     if: ${{ vars.NUNI_CONVEX_URL != '' }}
     runs-on: ubuntu-latest
     steps:
@@ -23,22 +21,38 @@ jobs:
           bun-version: 1.3.11
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
       - run: bun install --frozen-lockfile
-      - name: Version PR or publish
-        uses: changesets/action@v1
-        with:
-          version: bun run version-packages
-          publish: bun run release
-          title: Version packages
-          commit: Version packages
+      - name: Sync package versions from root
+        run: |
+          bun run version-packages
+          bun install
+          if ! git diff --quiet -- package.json packages/widget/package.json packages/react/package.json packages/cli/package.json bun.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package.json packages/widget/package.json packages/react/package.json packages/cli/package.json bun.lock
+            git commit -m "Sync Nuni package versions"
+            git push
+          fi
+      - name: Build public packages
+        run: bunx turbo run build --filter=@nuniapp/widget --filter=@nuniapp/react --filter=@nuniapp/cli
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # Baked into the published widget (see packages/widget/tsdown.config.ts)
           NUNI_RELEASE: "1"
           NUNI_CONVEX_URL: ${{ vars.NUNI_CONVEX_URL }}
           NUNI_CONVEX_SITE_URL: ${{ vars.NUNI_CONVEX_SITE_URL }}
           NUNI_APP_URL: https://nuni.praveenjuge.com
+      - name: Publish new versions with npm trusted publishing
+        run: |
+          for package_dir in packages/widget packages/react packages/cli; do
+            package_name=$(node -p "require('./${package_dir}/package.json').name")
+            package_version=$(node -p "require('./${package_dir}/package.json').version")
+            if lookup_output=$(npm view "$package_name@$package_version" version 2>&1); then
+              echo "$package_name@$package_version is already published"
+            elif [[ "$lookup_output" == *"npm error code E404"* ]]; then
+              (cd "$package_dir" && npm publish --access public)
+            else
+              printf '%s\n' "$lookup_output" >&2
+              exit 1
+            fi
+          done

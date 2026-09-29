@@ -1,5 +1,5 @@
 {
-  "name": "@nuni/cli",
+  "name": "@nuniapp/cli",
   "version": "0.1.0",
   "description": "Set up Nuni in any project: generates a project ID and prints the install snippet.",
   "license": "MIT",
@@ -11,7 +11,7 @@
     "directory": "packages/cli"
   },
   "bin": {
-    "nuni": "./dist/index.mjs"
+    "nuni": "dist/index.mjs"
   },
   "files": [
     "dist",

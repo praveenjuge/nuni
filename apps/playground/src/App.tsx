@@ -1,4 +1,4 @@
-import { Nuni } from "@nuni/react"
+import { Nuni } from "@nuniapp/react"
 import { useState } from "react"
 
 import { Link, usePath } from "./router"
