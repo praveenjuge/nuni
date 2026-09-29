@@ -35,7 +35,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@nuniapp/widget": "workspace:^"
+    "@nuniapp/widget": "^0.1.0"
   },
   "peerDependencies": {
     "react": ">=18"

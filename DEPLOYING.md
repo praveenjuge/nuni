@@ -157,11 +157,11 @@ WorkOS default GitHub credentials only work in staging.
 ### 6. npm packages and releases
 
 - [ ] Use the free public-package npm organization `@nuniapp` for `@nuniapp/widget`, `@nuniapp/react`, and `@nuniapp/cli`.
+- [ ] In each package's npm **Settings → Trusted Publisher**, allow direct `npm publish` from GitHub Actions, repository `praveenjuge/nuni`, workflow filename `release.yml`. No npm token is needed.
 - [ ] GitHub repo → Settings → Secrets and variables → Actions:
-  - Secret `NPM_TOKEN`: granular npm token with publish rights limited to `@nuniapp`. Renew it before expiry; after the first release, configure npm trusted publishing for the three packages so CI can stop using a long-lived token.
-  - Variables `NUNI_CONVEX_URL` and `NUNI_CONVEX_SITE_URL`: the production Convex URLs. The release job stays off until these exist.
+  - Variables `NUNI_CONVEX_URL` and `NUNI_CONVEX_SITE_URL`: the production Convex URLs. The release job stays off until these exist. No release secret is needed.
   - Optional: secret `TURBO_TOKEN` and variable `TURBO_TEAM` for remote caching.
-- [ ] First release: `bun run changeset` (pick minor, "Initial release"), commit, merge to `master`, then merge the "Version packages" PR the workflow opens. jsDelivr then serves `https://cdn.jsdelivr.net/npm/@nuniapp/widget@0/dist/nuni.global.js`.
+- [ ] To release, change only `version` in the root `package.json` to a new semver value and merge it to `master`. The release workflow syncs all three public package versions and the React widget dependency, commits the updated manifests and lockfile, builds them, and publishes each new version through npm trusted publishing. Check the GitHub Actions run and npm package pages before using the new version. jsDelivr serves `https://cdn.jsdelivr.net/npm/@nuniapp/widget@0/dist/nuni.global.js`.
 
 ### 7. Production smoke test
 
