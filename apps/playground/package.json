@@ -9,7 +9,8 @@
     "preview": "vite preview --port 5173",
     "typecheck": "tsc",
     "lint": "eslint .",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "smoke:release": "playwright test -c playwright.release.config.ts"
   },
   "dependencies": {
     "@nuniapp/react": "workspace:*",
