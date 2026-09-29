@@ -100,7 +100,6 @@ test("owner resolves and deletes from the widget; visitors see it live", async (
     0
   )
 
-  await thread.getByRole("button", { name: "Close" }).click()
   await postComment(visitor, "Second open comment")
   await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("1")
 
