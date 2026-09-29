@@ -1,6 +1,6 @@
 {
   "name": "@nuniapp/widget",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Pin comments to anything on your site. Talk it through with your team.",
   "license": "MIT",
   "type": "module",
