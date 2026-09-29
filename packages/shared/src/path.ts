@@ -92,3 +92,18 @@ export function withoutQuery(input: string, base?: string): string {
 export function stripUrlQueries(text: string): string {
   return text.replace(/(\bhttps?:\/\/[^\s?#"'<>]+)[?#][^\s"'<>]*/gi, "$1")
 }
+
+const URL_ATTRIBUTES =
+  /(\s(?:href|src|srcset|action|formaction|poster|cite|ping|data|background)\s*=\s*)("[^"]*"|'[^']*')/gi
+
+/**
+ * Remove query strings and hashes from URL attributes in serialized HTML
+ * (links, images, srcset lists), relative or absolute.
+ */
+export function stripHtmlUrlQueries(html: string): string {
+  return html.replace(URL_ATTRIBUTES, (_all, name: string, quoted: string) => {
+    const quote = quoted[0]
+    const value = quoted.slice(1, -1).replace(/[?#][^\s,]*/g, "")
+    return `${name}${quote}${value}${quote}`
+  })
+}

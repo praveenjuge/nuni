@@ -143,6 +143,8 @@ export class NuniWidget {
   /** The open thread with its owner-only context, while an owner is signed in. */
   private ownerDetail: OwnerComment | null = null
   private ownerDetailId: string | null = null
+  /** The subscription answered (possibly null), so the copy is complete. */
+  private ownerDetailLoaded = false
   private ownerDetailUnsub: (() => void) | null = null
 
   private layoutFrame = 0
@@ -327,11 +329,13 @@ export class NuniWidget {
     this.ownerDetailUnsub?.()
     this.ownerDetailUnsub = null
     this.ownerDetail = null
+    this.ownerDetailLoaded = false
     this.ownerDetailId = id
     if (!id || !token) return
     this.ownerDetailUnsub = this.api.onOwnerComment(id, token, (comment) => {
       if (this.ownerDetailId !== id) return
       this.ownerDetail = comment
+      this.ownerDetailLoaded = true
       this.render()
     })
   }
@@ -1536,6 +1540,9 @@ export class NuniWidget {
         )
       }
       actions.push(h("span", { class: "spacer" }))
+      // Owners copy the full context, so wait until it has loaded.
+      const contextPending =
+        owner && !(this.ownerDetailLoaded && this.ownerDetailId === comment._id)
       actions.push(
         h(
           "button",
@@ -1543,7 +1550,10 @@ export class NuniWidget {
             class: "btn btn-ghost btn-icon",
             type: "button",
             "aria-label": "Copy for agent",
-            title: "Copy for your coding agent",
+            title: contextPending
+              ? "Loading page context…"
+              : "Copy for your coding agent",
+            disabled: contextPending,
             onclick: () => this.copyForAgent(comment),
           },
           icon(ICONS.bot)

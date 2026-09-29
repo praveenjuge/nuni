@@ -5,6 +5,7 @@ import {
   buildCommentPrompt,
   commentUrl,
   describeLocation,
+  stripHtmlUrlQueries,
   stripUrlQueries,
   withoutQuery,
   generateProjectId,
@@ -183,5 +184,17 @@ describe("URL secrets", () => {
         "GET https://a.com/me?key=abc failed, see http://b.io/x#t and done?"
       )
     ).toBe("GET https://a.com/me failed, see http://b.io/x and done?")
+  })
+})
+
+describe("stripHtmlUrlQueries", () => {
+  it("removes queries and hashes from URL attributes only", () => {
+    expect(
+      stripHtmlUrlQueries(
+        `<a href="/reset?token=abc#x" title="a?b">Go</a><img src='https://cdn.a.com/i.png?sig=1' srcset="a.png?x=1 1x, b.png?y=2 2x">`
+      )
+    ).toBe(
+      `<a href="/reset" title="a?b">Go</a><img src='https://cdn.a.com/i.png' srcset="a.png 1x, b.png 2x">`
+    )
   })
 })

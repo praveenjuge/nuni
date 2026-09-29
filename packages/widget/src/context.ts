@@ -1,6 +1,7 @@
 import {
   LIMITS,
   MASK_ATTRIBUTE,
+  stripHtmlUrlQueries,
   stripUrlQueries,
   withoutQuery,
   type ConsoleEntry,
@@ -324,7 +325,7 @@ export function domContext(el: Element): DomContext {
         : shallowClone(el, Math.max(0, depth))
     if (depth < 0) copy.setAttribute(MASK_ATTRIBUTE, "")
     scrub(copy)
-    html = copy.outerHTML
+    html = stripHtmlUrlQueries(copy.outerHTML)
     if (html.length <= max) break
   }
   if (html.length > max) html = `${html.slice(0, max - 1)}…`

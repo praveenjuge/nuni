@@ -65,6 +65,37 @@ function errorResponse(request: Request, error: unknown, invalid: string) {
   })
 }
 
+/**
+ * Read the body, stopping as soon as it passes `max` bytes, so a request
+ * without (or with a false) Content-Length can't make us buffer it all.
+ */
+async function readLimited(
+  request: Request,
+  max: number
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!request.body) return new Uint8Array(0)
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > max) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
+}
+
 /** The real image type from the file's first bytes, whatever the header says. */
 function sniffImage(bytes: Uint8Array): string | null {
   const at = (i: number, ...values: number[]) =>
@@ -143,8 +174,8 @@ http.route({
     if (declared > LIMITS.screenshotMaxBytes) {
       return json(request, 413, { code: "too_large", message: "Too large" })
     }
-    const bytes = new Uint8Array(await request.arrayBuffer())
-    if (bytes.byteLength > LIMITS.screenshotMaxBytes) {
+    const bytes = await readLimited(request, LIMITS.screenshotMaxBytes)
+    if (!bytes) {
       return json(request, 413, { code: "too_large", message: "Too large" })
     }
     const type = sniffImage(bytes)

@@ -724,7 +724,10 @@ describe("captured context and screenshots", () => {
       },
     ],
     dom: {
-      html: "<button>" + "y".repeat(9000) + "</button>",
+      html:
+        '<a href="/reset?token=secret">Reset</a><button>' +
+        "y".repeat(9000) +
+        "</button>",
       styles: { "font-size": "14px", color: "rgb(0, 0, 0)" },
     },
   }
@@ -757,6 +760,7 @@ describe("captured context and screenshots", () => {
     // Stripped on the server, whatever the client sent.
     expect(mine?.context?.network?.[0]?.url).toBe("https://api.example.com/v1")
     expect(mine?.context?.dom?.html).toHaveLength(LIMITS.domSnippetMaxLength)
+    expect(mine?.context?.dom?.html).toContain('<a href="/reset">')
     expect(mine?.screenshotUrl).toBeNull()
 
     const { token } = await alice.mutation(api.sessions.create, {
@@ -829,6 +833,26 @@ describe("captured context and screenshots", () => {
       new Uint8Array(LIMITS.screenshotMaxBytes + 1)
     )
     expect(tooBig.status).toBe(413)
+
+    // Without a Content-Length, the body is still cut off at the limit.
+    const chunked = await t.fetch("/widget/screenshot", {
+      method: "POST",
+      headers: {
+        "Content-Type": "image/webp",
+        "X-Nuni-Project": publicId,
+        "X-Nuni-Comment": id,
+        "X-Nuni-Author": secret,
+      },
+      body: new ReadableStream({
+        start(controller) {
+          for (let i = 0; i < 4; i++)
+            controller.enqueue(new Uint8Array(LIMITS.screenshotMaxBytes / 2))
+          controller.close()
+        },
+      }),
+      duplex: "half",
+    } as RequestInit)
+    expect(chunked.status).toBe(413)
 
     const ok = await uploadScreenshot(t, { publicId, id, secret })
     expect(ok.status).toBe(201)

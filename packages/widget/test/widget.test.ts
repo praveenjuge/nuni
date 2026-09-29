@@ -199,6 +199,7 @@ describe("domContext", () => {
       <textarea>private notes</textarea>
       <script>secret()</script>
       <button type="submit">Send</button>
+      <a href="/reset?token=abc">Reset</a>
     </form>`
     const form = document.getElementById("f")!
     const { html, styles } = domContext(form)
@@ -206,6 +207,7 @@ describe("domContext", () => {
     expect(html).not.toContain("me@example.com")
     expect(html).not.toContain("private notes")
     expect(html).not.toContain("secret()")
+    expect(html).not.toContain("token")
     // The page itself is untouched.
     expect(form.querySelector("input")?.getAttribute("value")).toBe(
       "me@example.com"

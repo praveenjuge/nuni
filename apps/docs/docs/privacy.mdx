@@ -24,7 +24,7 @@ To help you, or your coding agent, act on a comment, the widget also attaches wh
 - **Failed requests**: method, status and the URL's origin and path.
 - **Element**: the element's markup and a few computed styles (font, color, spacing and size).
 
-Query strings and hashes are removed from every URL, in failed requests and in console messages, since they often carry tokens. The server removes them again, whatever the browser sent.
+Query strings and hashes are removed from every URL, in failed requests, console messages and the element's markup (links, images), since they often carry tokens. The server removes them again, whatever the browser sent.
 
 Unlike the comment itself, this context is **only visible to the project owner**, in the dashboard and in the widget's owner tools. It is deleted with the comment.
 

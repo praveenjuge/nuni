@@ -1,4 +1,9 @@
-import { LIMITS, stripUrlQueries, withoutQuery } from "@nuni/shared"
+import {
+  LIMITS,
+  stripHtmlUrlQueries,
+  stripUrlQueries,
+  withoutQuery,
+} from "@nuni/shared"
 import { paginationOptsValidator } from "convex/server"
 import { v } from "convex/values"
 
@@ -100,7 +105,10 @@ function cleanContext(context: CommentContext | undefined) {
       styles[clampString(name, 40)] = clampString(value, 200)
     }
     out.dom = {
-      html: clampString(context.dom.html, LIMITS.domSnippetMaxLength),
+      html: clampString(
+        stripHtmlUrlQueries(context.dom.html),
+        LIMITS.domSnippetMaxLength
+      ),
       styles,
     }
   }
