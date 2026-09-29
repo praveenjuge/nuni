@@ -35,8 +35,8 @@ const MAX_RENDER = 4096
 const MARGIN = 48
 const MASK_COLOR = "#a1a1aa"
 const MASKED_INPUT_TYPES = new Set([
-  "",
   "text",
+  "file",
   "email",
   "tel",
   "url",
@@ -158,10 +158,8 @@ export function maskedBoxes(frame: Element): Box[] {
     }
     const tag = el.tagName
     if (
-      (tag === "INPUT" &&
-        MASKED_INPUT_TYPES.has(
-          (el.getAttribute("type") ?? "").toLowerCase()
-        )) ||
+      // The browser-normalized type: unknown or misspelled types act as text.
+      (el instanceof HTMLInputElement && MASKED_INPUT_TYPES.has(el.type)) ||
       tag === "TEXTAREA" ||
       tag === "SELECT"
     )

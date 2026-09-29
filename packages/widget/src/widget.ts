@@ -560,9 +560,13 @@ export class NuniWidget {
       const blob = capture
         ? await capture(draft.element, { exclude: this.host, accent })
         : null
-      if (!blob || !this.isComposing(draft)) return
-      draft.screenshot = { blob, preview: await dataUrl(blob) }
-      if (this.isComposing(draft)) this.render()
+      // Only attach what the commenter can still see and remove: a capture
+      // that finishes after Post was clicked is dropped.
+      if (!blob || !this.isComposing(draft) || draft.sending) return
+      const preview = await dataUrl(blob)
+      if (!this.isComposing(draft) || draft.sending) return
+      draft.screenshot = { blob, preview }
+      this.render()
     } catch {
       // No screenshot then; the comment still works.
     }
@@ -767,6 +771,8 @@ export class NuniWidget {
     this.render()
 
     const loc = describeLocation(location.href)
+    // The screenshot shown when Post was clicked, and nothing that lands later.
+    const shot = draft.screenshot
     try {
       const id = await this.api.createComment({
         body: cleanBody,
@@ -785,8 +791,7 @@ export class NuniWidget {
         },
         context: this.collectContext(draft),
       })
-      if (draft.screenshot)
-        void this.attachScreenshot(id, draft.screenshot.blob)
+      if (shot) void this.attachScreenshot(id, shot.blob)
       // Show the new pin exactly where it was dropped until it syncs.
       this.placements.set(id, { element: draft.element, confidence: "exact" })
       if (this.card?.kind === "composer" && this.card.draft === draft)

@@ -67,7 +67,10 @@ export function commentUrl(
   id: string
 ): string {
   const [pathname, hashRoute] = page.path.split("#")
-  const url = new URL(pathname ?? "/", page.origin)
+  const origin = new URL(page.origin).origin
+  let url = new URL(pathname ?? "/", origin)
+  // Paths come from visitors: "//other.host/x" must not leave the page's origin.
+  if (url.origin !== origin) url = new URL("/", origin)
   const params = new URLSearchParams(page.search ?? "")
   params.set("nuni", id)
   url.search = params.toString()

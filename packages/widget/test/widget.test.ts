@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { resolveConfig } from "../src/config"
 import { domContext, safeUrl, startCollectors } from "../src/context"
 import { CAPTURE_MARK } from "../src/mark"
+import { maskedBoxes } from "../src/screenshot"
 import { colorFor, h, icon, initials, timeAgo } from "../src/dom"
 import { ICONS } from "../src/icons"
 import { init } from "../src/index"
@@ -229,6 +230,15 @@ describe("domContext", () => {
     const inner = domContext(document.getElementById("inner")!).html
     expect(inner).not.toContain("Pay")
     expect(inner.startsWith("<button")).toBe(true)
+  })
+
+  it("masks every text-like field and file inputs in screenshots", () => {
+    document.body.innerHTML = `<form id="f">
+      <input type="Text " value="a"><input type="nmber" value="b">
+      <input type="file"><input type="email"><textarea></textarea><select></select>
+      <input type="checkbox"><button>Send</button>
+    </form>`
+    expect(maskedBoxes(document.getElementById("f")!)).toHaveLength(6)
   })
 
   it("keeps big elements within the snippet limit", () => {

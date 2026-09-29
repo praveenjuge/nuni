@@ -95,6 +95,14 @@ describe("commentUrl", () => {
       commentUrl({ origin: "https://a.com", path: "/#/settings" }, "c2")
     ).toBe("https://a.com/?nuni=c2#/settings")
   })
+
+  it("never leaves the page's origin", () => {
+    for (const path of ["//evil.example/login", "https://evil.example/x"]) {
+      expect(commentUrl({ origin: "https://a.com", path }, "c3")).toBe(
+        "https://a.com/?nuni=c3"
+      )
+    }
+  })
 })
 
 describe("buildCommentPrompt", () => {

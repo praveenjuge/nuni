@@ -146,11 +146,12 @@ test("production backend serves this release", async ({ request }) => {
 
 test("CLI", () => {
   const cli = `@nuniapp/cli@${VERSION}`
-  expect(run("npx", ["-y", cli, "--version"])).toBe(VERSION)
+  // Outside the workspace, so npx runs the published package, not a local link.
   const dir = mkdtempSync(join(tmpdir(), "nuni-cli-"))
   try {
+    expect(run("npx", ["-y", cli, "--version"], dir)).toBe(VERSION)
     const init = JSON.parse(
-      run("npx", ["-y", cli, "init", "--json", "--cwd", dir])
+      run("npx", ["-y", cli, "init", "--json", "--cwd", dir], dir)
     ) as { projectId: string }
     expect(init.projectId).toMatch(/^nuni_[1-9A-HJ-NP-Za-km-z]{22}$/)
   } finally {
