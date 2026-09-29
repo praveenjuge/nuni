@@ -15,6 +15,21 @@ For each comment: the text, the author name (as typed), a hash of the commenter'
 
 For owners: the name, email and avatar from GitHub via WorkOS.
 
+## Page context (owner only)
+
+To help you, or your coding agent, act on a comment, the widget also attaches what it saw when the comment was left:
+
+- **Screenshot** of the element and its surroundings, with the element outlined. Nuni's own UI is left out.
+- **Console**: the latest console errors and warnings, and uncaught errors.
+- **Failed requests**: method, status and the URL's origin and path. Query strings and hashes are never kept, since they often carry tokens.
+- **Element**: the element's markup with form values removed, and a few computed styles (font, color, spacing and size).
+
+Unlike the comment itself, this context is **only visible to the project owner**, in the dashboard and in the widget's owner tools. It is deleted with the comment. Turn any of it off with the [`capture` option](/reference/options):
+
+```ts
+init({ project: "nuni_...", capture: { screenshot: false, console: false } })
+```
+
 ## Abuse protection
 
 Comment creation is rate limited per IP and per project, and unclaimed projects are capped at 500 comments. Comment text is always rendered as plain text, never HTML.

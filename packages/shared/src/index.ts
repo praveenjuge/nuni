@@ -1,3 +1,4 @@
+export * from "./comment-prompt"
 export * from "./id"
 export * from "./limits"
 export * from "./path"

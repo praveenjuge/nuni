@@ -201,6 +201,14 @@ button { cursor: pointer; }
 }
 .badge-ok { background: rgba(31,157,85,0.14); color: var(--n-ok); }
 .comment-body { white-space: pre-wrap; word-break: break-word; }
+.shot {
+  display: block;
+  border: 1px solid var(--n-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--n-bg-subtle);
+}
+.shot img { display: block; width: 100%; max-height: 160px; object-fit: cover; object-position: top; }
 .field {
   width: 100%;
   padding: 8px 10px;

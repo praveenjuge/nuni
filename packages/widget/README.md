@@ -60,11 +60,12 @@ Using React? Use [`@nuniapp/react`](https://www.npmjs.com/package/@nuniapp/react
 
 ## Options
 
-| Option                                 | Description                                                                                |
-| -------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `project`                              | Your public project ID. Commit it; it is not a secret.                                     |
-| `getPageKey(url)`                      | Optional. Decide which URLs share comments. Defaults to the path, ignoring query and hash. |
-| `convexUrl`, `convexSiteUrl`, `appUrl` | Optional. For self-hosting or local development.                                           |
+| Option                                 | Description                                                                                                |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `project`                              | Your public project ID. Commit it; it is not a secret.                                                     |
+| `getPageKey(url)`                      | Optional. Decide which URLs share comments. Defaults to the path, ignoring query and hash.                 |
+| `convexUrl`, `convexSiteUrl`, `appUrl` | Optional. For self-hosting or local development.                                                           |
+| `capture`                              | Optional. Owner-only page context per comment: `{ console, network, dom, screenshot }`, all on by default. |
 
 `init` returns `{ destroy() }`.
 

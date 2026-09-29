@@ -21,6 +21,12 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     period: MINUTE,
     capacity: 100,
   },
+  screenshotPerIp: {
+    kind: "token bucket",
+    rate: 10,
+    period: MINUTE,
+    capacity: 10,
+  },
   editPerAuthor: { kind: "token bucket", rate: 30, period: MINUTE },
   sessionPerUser: { kind: "token bucket", rate: 20, period: HOUR },
 })

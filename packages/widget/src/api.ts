@@ -1,5 +1,10 @@
 import { api } from "@nuni/backend/api"
-import type { Anchor, WidgetComment } from "@nuni/shared"
+import type {
+  Anchor,
+  CommentContext,
+  OwnerComment,
+  WidgetComment,
+} from "@nuni/shared"
 import { ConvexClient } from "convex/browser"
 
 import type { ResolvedConfig } from "./config"
@@ -23,6 +28,7 @@ export interface NewComment {
   page: WidgetComment["page"]
   anchor: Anchor
   viewport: WidgetComment["viewport"]
+  context?: CommentContext
 }
 
 export class NuniApiError extends Error {
@@ -106,6 +112,20 @@ export class NuniApi {
     )
   }
 
+  /** A comment with the owner-only context (screenshot, console, DOM). */
+  onOwnerComment(
+    id: string,
+    sessionToken: string,
+    cb: (comment: OwnerComment | null) => void
+  ) {
+    return this.client.onUpdate(
+      api.comments.getForOwner,
+      { publicId: this.config.project, id, sessionToken },
+      (comment) => cb(comment as OwnerComment | null),
+      () => {}
+    )
+  }
+
   /** One comment by id, for deep links outside the page listing window. */
   getComment(id: string): Promise<WidgetComment | null> {
     return this.client
@@ -140,6 +160,33 @@ export class NuniApi {
       )
     }
     return data.id
+  }
+
+  /** Attach a screenshot to the author's own, just-posted comment. */
+  async uploadScreenshot(id: string, authorSecret: string, image: Blob) {
+    const response = await fetch(
+      `${this.config.convexSiteUrl}/widget/screenshot`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": image.type,
+          "X-Nuni-Project": this.config.project,
+          "X-Nuni-Comment": id,
+          "X-Nuni-Author": authorSecret,
+        },
+        body: image,
+      }
+    )
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as {
+        code?: string
+        message?: string
+      }
+      throw new NuniApiError(
+        data.message ?? "Couldn't attach the screenshot",
+        data.code ?? "error"
+      )
+    }
   }
 
   private async run<T>(promise: Promise<T>): Promise<T> {

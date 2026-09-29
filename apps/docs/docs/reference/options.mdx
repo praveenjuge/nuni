@@ -16,20 +16,58 @@ instance.destroy()
 
 <TypeTable
   type={{
-    project: { type: "string", description: "Your public project ID. Commit it; it is not a secret.", required: true },
-    getPageKey: { type: "(url: URL) => string", description: "Which URLs share comments. Defaults to the normalized path." },
-    convexUrl: { type: "string", description: "Self-hosting or local development: the Convex deployment URL." },
-    convexSiteUrl: { type: "string", description: "Self-hosting or local development: the Convex HTTP actions URL." },
-    appUrl: { type: "string", description: "Self-hosting or local development: where the dashboard is served." },
+    project: {
+      type: "string",
+      description: "Your public project ID. Commit it; it is not a secret.",
+      required: true,
+    },
+    getPageKey: {
+      type: "(url: URL) => string",
+      description:
+        "Which URLs share comments. Defaults to the normalized path.",
+    },
+    convexUrl: {
+      type: "string",
+      description:
+        "Self-hosting or local development: the Convex deployment URL.",
+    },
+    convexSiteUrl: {
+      type: "string",
+      description:
+        "Self-hosting or local development: the Convex HTTP actions URL.",
+    },
+    appUrl: {
+      type: "string",
+      description:
+        "Self-hosting or local development: where the dashboard is served.",
+    },
+    capture: {
+      type: "{ console?, network?, dom?, screenshot? }",
+      description:
+        "Page context attached to each comment for the owner. All on by default; set a key to false to turn it off.",
+    },
   }}
 />
 
 `<Nuni />` from `@nuniapp/react` takes the same props.
 
+## Page context
+
+Each comment carries context that only the project owner can see (details on the [privacy page](/privacy)):
+
+| Key          | What is captured                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------- |
+| `screenshot` | An image of the element and its surroundings, loaded on demand so the widget stays small |
+| `console`    | The latest console errors and warnings                                                   |
+| `network`    | The latest failed requests (method, status, origin and path)                             |
+| `dom`        | The element's markup, without form values, and key computed styles                       |
+
+With the script tag, use data attributes: `data-capture-screenshot="false"`, `data-capture-console="false"`, `data-capture-network="false"` and `data-capture-dom="false"`.
+
 ## Keyboard
 
-| Key | Action |
-| --- | --- |
-| <kbd>C</kbd> | Start or stop adding a comment |
-| <kbd>Esc</kbd> | Cancel, close the comment, then the panel |
-| <kbd>Cmd</kbd> + <kbd>Enter</kbd> | Post the comment |
+| Key                               | Action                                    |
+| --------------------------------- | ----------------------------------------- |
+| <kbd>C</kbd>                      | Start or stop adding a comment            |
+| <kbd>Esc</kbd>                    | Cancel, close the comment, then the panel |
+| <kbd>Cmd</kbd> + <kbd>Enter</kbd> | Post the comment                          |

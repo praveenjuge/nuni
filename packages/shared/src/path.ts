@@ -60,3 +60,17 @@ export function isLocalOrigin(origin: string): boolean {
     return false
   }
 }
+
+/** URL that opens the page with the comment focused by the widget. */
+export function commentUrl(
+  page: { origin: string; path: string; search?: string },
+  id: string
+): string {
+  const [pathname, hashRoute] = page.path.split("#")
+  const url = new URL(pathname ?? "/", page.origin)
+  const params = new URLSearchParams(page.search ?? "")
+  params.set("nuni", id)
+  url.search = params.toString()
+  if (hashRoute) url.hash = hashRoute
+  return url.toString()
+}

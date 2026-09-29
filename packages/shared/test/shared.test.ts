@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 
 import {
   buildAgentPrompt,
+  buildCommentPrompt,
+  commentUrl,
   describeLocation,
   generateProjectId,
   isLocalOrigin,
@@ -76,5 +78,84 @@ describe("buildAgentPrompt", () => {
 
   it("points to the CLI without an id", () => {
     expect(buildAgentPrompt()).toContain("npx @nuniapp/cli@latest init")
+  })
+})
+
+describe("commentUrl", () => {
+  it("adds the deep link and keeps the query and hash route", () => {
+    expect(
+      commentUrl(
+        { origin: "https://a.com", path: "/pricing", search: "?ref=x" },
+        "c1"
+      )
+    ).toBe("https://a.com/pricing?ref=x&nuni=c1")
+    expect(
+      commentUrl({ origin: "https://a.com", path: "/#/settings" }, "c2")
+    ).toBe("https://a.com/?nuni=c2#/settings")
+  })
+})
+
+describe("buildCommentPrompt", () => {
+  const comment = {
+    _id: "c1",
+    _creationTime: 0,
+    status: "open" as const,
+    body: "Make this bigger\nand bolder",
+    authorName: "Sam",
+    authorKeyHash: "hash",
+    page: { origin: "https://a.com", path: "/pricing", title: "Pricing" },
+    anchor: {
+      v: 1 as const,
+      selectors: { path: "body > main > button", testId: "data-testid=buy" },
+      tag: "button",
+      text: "Buy now",
+      attrs: { type: "button" },
+      ancestors: [],
+      siblingIndex: 0,
+      siblingCount: 1,
+      componentName: "PricingCard",
+      rect: { x: 0, y: 0, w: 10, h: 10 },
+      offset: { x: 0.5, y: 0.5 },
+      viewport: { w: 1280, h: 800, dpr: 2, scrollX: 0, scrollY: 0 },
+      docSize: { w: 1280, h: 2000 },
+    },
+    viewport: { w: 1280, h: 800, dpr: 2 },
+    createdAt: Date.UTC(2026, 0, 2),
+    userAgent: "Mozilla/5.0 Test",
+    context: {
+      dom: {
+        html: '<button type="button">Buy ```now```</button>',
+        styles: { "font-size": "14px" },
+      },
+      console: [{ level: "error" as const, message: "Boom", at: 1 }],
+      network: [
+        { method: "GET", url: "https://api.a.com/prices", status: 500, at: 1 },
+      ],
+    },
+    screenshotUrl: "https://files.example.com/shot.webp",
+  }
+
+  it("includes the comment, element and owner context", () => {
+    const prompt = buildCommentPrompt(comment)
+    expect(prompt).toContain("> Make this bigger\n> and bolder")
+    expect(prompt).toContain("From Sam on 2026-01-02")
+    expect(prompt).toContain("https://a.com/pricing?nuni=c1")
+    expect(prompt).toContain("React component: PricingCard")
+    expect(prompt).toContain("Test ID: `data-testid=buy`")
+    expect(prompt).toContain("font-size: 14px;")
+    expect(prompt).toContain("[error] Boom")
+    expect(prompt).toContain("GET https://api.a.com/prices → 500")
+    expect(prompt).toContain("https://files.example.com/shot.webp")
+    expect(prompt).toContain("Browser: Mozilla/5.0 Test")
+    // The HTML fence is longer than the backticks inside it.
+    expect(prompt).toContain("````html\n<button")
+  })
+
+  it("leaves out owner context when asked", () => {
+    const prompt = buildCommentPrompt(comment, { includeContext: false })
+    expect(prompt).not.toContain("Boom")
+    expect(prompt).not.toContain("shot.webp")
+    expect(prompt).not.toContain("Mozilla")
+    expect(prompt).toContain("Buy now")
   })
 })

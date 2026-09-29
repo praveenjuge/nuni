@@ -58,4 +58,29 @@ export const viewportValidator = v.object({
   dpr: v.number(),
 })
 
+export const contextValidator = v.object({
+  console: v.optional(
+    v.array(
+      v.object({
+        level: v.union(v.literal("error"), v.literal("warn")),
+        message: v.string(),
+        at: v.number(),
+      })
+    )
+  ),
+  network: v.optional(
+    v.array(
+      v.object({
+        method: v.string(),
+        url: v.string(),
+        status: v.number(),
+        at: v.number(),
+      })
+    )
+  ),
+  dom: v.optional(
+    v.object({ html: v.string(), styles: v.record(v.string(), v.string()) })
+  ),
+})
+
 export const statusValidator = v.union(v.literal("open"), v.literal("resolved"))

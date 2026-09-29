@@ -69,3 +69,26 @@ export function colorFor(name: string): string {
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
   return `oklch(0.62 0.17 ${hash % 360})`
 }
+
+/** Copy text, falling back to execCommand where the async clipboard is off (plain http previews). */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // fall through
+  }
+  const area = document.createElement("textarea")
+  area.value = text
+  area.setAttribute("readonly", "")
+  area.style.cssText = "position:fixed;top:0;left:0;opacity:0"
+  document.body.appendChild(area)
+  area.select()
+  try {
+    return document.execCommand("copy")
+  } catch {
+    return false
+  } finally {
+    area.remove()
+  }
+}

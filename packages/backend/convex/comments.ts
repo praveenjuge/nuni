@@ -9,8 +9,10 @@ import {
   mutation,
   query,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server"
 import {
+  actingOwner,
   bumpPageOpen,
   ensureProject,
   fail,
@@ -23,6 +25,7 @@ import {
 import { rateLimiter } from "./rateLimits"
 import {
   anchorValidator,
+  contextValidator,
   pageValidator,
   statusValidator,
   viewportValidator,
@@ -45,6 +48,57 @@ function toPublic(c: Doc<"comments">) {
     editedAt: c.editedAt,
     resolvedAt: c.resolvedAt,
   }
+}
+
+/** Full shape for the owner: page URL, user agent and captured context. */
+async function toOwner(ctx: QueryCtx, c: Doc<"comments">) {
+  return {
+    ...toPublic(c),
+    page: c.page,
+    userAgent: c.userAgent,
+    context: c.context,
+    screenshotUrl: c.screenshotId
+      ? await ctx.storage.getUrl(c.screenshotId)
+      : null,
+  }
+}
+
+type CommentContext = NonNullable<Doc<"comments">["context"]>
+
+/** Clamp everything the commenter's browser sent, entry by entry. */
+function cleanContext(context: CommentContext | undefined) {
+  if (!context) return undefined
+  const max = LIMITS.contextEntryMax
+  const text = (value: string) =>
+    clampString(value, LIMITS.contextMessageMaxLength)
+  const out: CommentContext = {}
+  if (context.console?.length) {
+    out.console = context.console
+      .slice(-max)
+      .map((e) => ({ level: e.level, message: text(e.message), at: e.at }))
+  }
+  if (context.network?.length) {
+    out.network = context.network.slice(-max).map((e) => ({
+      method: clampString(e.method.toUpperCase(), 10),
+      url: text(e.url),
+      status: Math.trunc(e.status),
+      at: e.at,
+    }))
+  }
+  if (context.dom) {
+    const styles: Record<string, string> = {}
+    for (const [name, value] of Object.entries(context.dom.styles).slice(
+      0,
+      30
+    )) {
+      styles[clampString(name, 40)] = clampString(value, 200)
+    }
+    out.dom = {
+      html: clampString(context.dom.html, LIMITS.domSnippetMaxLength),
+      styles,
+    }
+  }
+  return out.console || out.network || out.dom ? out : undefined
 }
 
 function cleanBody(body: string): string {
@@ -138,6 +192,7 @@ export const createFromWidget = internalMutation({
     page: pageValidator,
     anchor: anchorValidator,
     viewport: viewportValidator,
+    context: v.optional(contextValidator),
     userAgent: v.string(),
   },
   handler: async (ctx, args) => {
@@ -192,6 +247,7 @@ export const createFromWidget = internalMutation({
         ancestors: args.anchor.ancestors.slice(0, 6),
       },
       viewport: args.viewport,
+      context: cleanContext(args.context),
       userAgent: clampString(args.userAgent, 400),
       createdAt: now,
     })
@@ -237,6 +293,7 @@ export const editOwn = mutation({
 
 async function removeComment(ctx: MutationCtx, comment: Doc<"comments">) {
   await ctx.db.delete(comment._id)
+  if (comment.screenshotId) await ctx.storage.delete(comment.screenshotId)
   if (comment.status === "open") {
     await bumpPageOpen(ctx, comment.projectId, comment.page.path, -1)
   }
@@ -356,12 +413,8 @@ export const listForOwner = query({
     const result = await filtered.paginate(args.paginationOpts)
     return {
       ...result,
-      // The owner sees the full page location for Jump to comment.
-      page: result.page.map((c) => ({
-        ...toPublic(c),
-        page: c.page,
-        userAgent: c.userAgent,
-      })),
+      // The owner sees the full page location and the captured context.
+      page: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
     }
   },
 })
@@ -398,6 +451,93 @@ export const getById = query({
     return toPublic(comment)
   },
 })
+
+/**
+ * One comment with the owner-only fields, for the owner tools in the widget
+ * (session token) and the dashboard (JWT). Null for anyone else.
+ */
+export const getForOwner = query({
+  args: {
+    publicId: v.string(),
+    id: v.string(),
+    sessionToken: v.optional(v.string()),
+  },
+  handler: async (ctx, { publicId, id, sessionToken }) => {
+    const project = await projectByPublicId(ctx, publicId)
+    const commentId = ctx.db.normalizeId("comments", id)
+    if (!project || !commentId) return null
+    if (!(await actingOwner(ctx, project, { sessionToken }))) return null
+    const comment = await ctx.db.get(commentId)
+    if (!comment || comment.projectId !== project._id) return null
+    return toOwner(ctx, comment)
+  },
+})
+
+const SCREENSHOT_TYPES = new Set(["image/webp", "image/jpeg", "image/png"])
+
+/**
+ * Screenshot upload, step 1 (from the HTTP action): check the author and
+ * rate limit before anything is stored. Returns the comment id.
+ */
+export const checkScreenshot = internalMutation({
+  args: {
+    publicId: v.string(),
+    commentId: v.string(),
+    authorSecret: v.string(),
+    ip: v.string(),
+    contentType: v.string(),
+    size: v.number(),
+  },
+  handler: async (ctx, args) => {
+    if (!SCREENSHOT_TYPES.has(args.contentType)) {
+      fail("invalid_type", "Screenshots must be WebP, JPEG or PNG")
+    }
+    if (args.size <= 0 || args.size > LIMITS.screenshotMaxBytes) {
+      fail("too_large", "Screenshot is too large")
+    }
+    const { ok } = await rateLimiter.limit(ctx, "screenshotPerIp", {
+      key: args.ip,
+    })
+    if (!ok) fail("rate_limited", "Slow down a little")
+    const comment = await screenshotTarget(ctx, args)
+    return comment._id
+  },
+})
+
+/** Screenshot upload, step 2: attach the stored file, or report why not. */
+export const attachScreenshot = internalMutation({
+  args: {
+    publicId: v.string(),
+    commentId: v.string(),
+    authorSecret: v.string(),
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    const comment = await screenshotTarget(ctx, args)
+    await ctx.db.patch(comment._id, { screenshotId: args.storageId })
+  },
+})
+
+/** The author's own, recent comment that has no screenshot yet. */
+async function screenshotTarget(
+  ctx: MutationCtx,
+  args: { publicId: string; commentId: string; authorSecret: string }
+) {
+  const project = await projectByPublicId(ctx, args.publicId)
+  const id = ctx.db.normalizeId("comments", args.commentId)
+  const comment = id ? await ctx.db.get(id) : null
+  if (!project || !comment || comment.projectId !== project._id) {
+    fail("not_found", "Comment not found")
+  }
+  if ((await sha256Hex(args.authorSecret)) !== comment.authorKeyHash) {
+    fail("forbidden", "You can only add a screenshot to your own comment")
+  }
+  if (comment.screenshotId) fail("conflict", "This comment has a screenshot")
+  if (Date.now() - comment.createdAt > LIMITS.screenshotUploadWindowMs) {
+    fail("expired", "Too late to add a screenshot")
+  }
+  return comment
+}
 
 /**
  * Most open comments the rebuild reads for one page, to stay well inside
