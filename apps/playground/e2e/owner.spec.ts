@@ -81,8 +81,10 @@ test("owner resolves and deletes from the widget; visitors see it live", async (
   const owner = await ownerContext.newPage()
   await owner.goto(`/pricing?project=${project}`)
   await openPanel(owner)
-  await expect(owner.locator("#nuni-root .panel")).toContainText("Owner")
-  await expect(owner.locator("#nuni-root .panel")).toContainText("Olive Owner")
+  await expect(owner.locator("#nuni-root .panel-foot")).toHaveCount(0)
+  await expect(
+    owner.locator("#nuni-root .panel input[type=checkbox]")
+  ).toHaveCount(0)
 
   await owner
     .locator("#nuni-root .panel")
@@ -103,6 +105,20 @@ test("owner resolves and deletes from the widget; visitors see it live", async (
     .locator("#nuni-root .panel")
     .getByRole("tab", { name: /Resolved/ })
     .click()
+  await expect(
+    owner.locator("#nuni-root .pin[data-status=resolved]")
+  ).toHaveCount(1)
+  await owner
+    .locator("#nuni-root .panel")
+    .getByRole("tab", { name: /Open/ })
+    .click()
+  await expect(
+    owner.locator("#nuni-root .pin[data-status=resolved]")
+  ).toHaveCount(0)
+  await owner
+    .locator("#nuni-root .panel")
+    .getByRole("tab", { name: /Resolved/ })
+    .click()
   await owner
     .locator("#nuni-root .panel")
     .getByText("Typo in the plan name")
@@ -119,14 +135,7 @@ test("owner resolves and deletes from the widget; visitors see it live", async (
     .click()
   await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("0")
 
-  // Sign out removes owner tools.
-  await owner
-    .locator("#nuni-root .panel")
-    .getByRole("button", { name: "Sign out" })
-    .click()
-  await expect(owner.locator("#nuni-root .panel")).toContainText(
-    "Managed by Olive Owner"
-  )
+  await expect(owner.locator("#nuni-root .panel-foot")).toHaveCount(0)
 })
 
 test("claim popup hands the owner session to the widget", async ({
@@ -137,9 +146,7 @@ test("claim popup hands the owner session to the widget", async ({
   const token = seedOwner(project)
   await page.goto(`/pricing?project=${project}`)
   await openPanel(page)
-  await expect(page.locator("#nuni-root .panel")).toContainText(
-    "Managed by Olive Owner"
-  )
+  await expect(page.locator("#nuni-root .panel-foot")).toHaveCount(0)
 
   // A message from any other origin is ignored.
   await page.evaluate(
@@ -148,7 +155,7 @@ test("claim popup hands the owner session to the widget", async ({
     [project, token]
   )
   await page.waitForTimeout(300)
-  await expect(page.locator("#nuni-root .panel")).not.toContainText("Sign out")
+  await expect(page.locator("#nuni-root .panel-foot")).toHaveCount(0)
 
   // The dashboard popup (app origin) posts the token back to its opener.
   const popupPromise = context.waitForEvent("page")
@@ -169,7 +176,7 @@ test("claim popup hands the owner session to the widget", async ({
   await expect(page.locator("#nuni-root .toast")).toHaveText(
     "You're signed in as the owner"
   )
-  await expect(page.locator("#nuni-root .panel")).toContainText("Sign out")
+  await expect(page.locator("#nuni-root .panel-foot")).toHaveCount(0)
 })
 
 test("deep link opens the comment", async ({ page, browser }) => {

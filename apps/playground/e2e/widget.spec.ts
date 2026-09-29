@@ -129,8 +129,13 @@ test("comment, persist, sync live, edit own, navigate", async ({
 })
 
 test("keyboard shortcut and escape", async ({ page }) => {
-  await page.goto("/")
+  await page.goto(`/?project=${projectId()}`)
   await expect(toolbar(page)).toBeVisible()
+  await toolbar(page).getByRole("button", { name: /open/ }).click()
+  const panel = page.locator("#nuni-root .panel")
+  await expect(panel.getByRole("button", { name: "Claim Nuni" })).toBeVisible()
+  await expect(panel.locator("input[type=checkbox]")).toHaveCount(0)
+  await panel.getByRole("button", { name: "Close" }).click()
   await page.keyboard.press("c")
   await expect(page.locator("#nuni-root .pick-hint")).toBeVisible()
   await page.keyboard.press("Escape")

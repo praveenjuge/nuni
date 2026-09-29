@@ -1,6 +1,6 @@
 {
   "name": "@nuniapp/cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Set up Nuni in any project: generates a project ID and prints the install snippet.",
   "license": "MIT",
   "type": "module",

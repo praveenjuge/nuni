@@ -11,11 +11,11 @@ export default defineConfig({
     mode: "system",
     fonts: { display: "geist", body: "geist", mono: "geist-mono" },
   },
-  banner: {
-    content: "Nuni v1 is here: Figma-style comments on your real site.",
-    link: { text: "Get started", href: "/quickstart" },
-    dismissible: true,
-    id: "v1",
+  navigation: {
+    cta: {
+      label: "Sign in",
+      href: "https://nuni.praveenjuge.com/dashboard/sign-in",
+    },
   },
   agents: { llmsTxt: true },
   deployment: { site: "https://nuni.praveenjuge.com" },

@@ -93,18 +93,12 @@ export class NuniWidget {
   private loaded = false
   private placements = new Map<string, Placement>()
   private pins = new Map<string, HTMLButtonElement>()
-  private status: ProjectStatus = {
-    exists: false,
-    claimed: false,
-    ownerName: null,
-    openCount: 0,
-  }
+  private status: ProjectStatus | null = null
   private pages: PageSummary[] = []
 
   private picking = false
   private panelOpen = false
   private tab: "open" | "resolved" = "open"
-  private showResolved = read(KEYS.showResolved) === "1"
   private card: Card = null
   private activeId: string | null = null
   private hoverEl: Element | null = null
@@ -296,7 +290,12 @@ export class NuniWidget {
   }
 
   private visibleComments() {
-    return this.comments.filter((c) => c.status === "open" || this.showResolved)
+    return this.comments.filter(
+      (c) =>
+        c.status === "open" ||
+        (this.panelOpen && this.tab === "resolved") ||
+        (this.card?.kind === "thread" && this.card.id === c._id)
+    )
   }
 
   // ------------------------------------------------------------ anchoring
@@ -578,16 +577,6 @@ export class NuniWidget {
     this.showToast("You're signed in as the owner")
   }
 
-  private signOut() {
-    if (this.ownerToken) void this.api.signOut(this.ownerToken)
-    write(KEYS.session(this.config.project), null)
-    this.ownerToken = null
-    this.ownerName = null
-    this.sessionUnsub?.()
-    this.sessionUnsub = null
-    this.render()
-  }
-
   // ------------------------------------------------------------ deep links
 
   private readDeepLink() {
@@ -625,10 +614,6 @@ export class NuniWidget {
   }
 
   private focusDeepLinked(comment: WidgetComment) {
-    if (comment.status === "resolved" && !this.showResolved) {
-      this.showResolved = true
-      this.renderPins()
-    }
     this.focusComment(comment._id)
   }
 
@@ -738,7 +723,7 @@ export class NuniWidget {
       (ok) => {
         if (
           ok &&
-          !this.showResolved &&
+          !(this.panelOpen && this.tab === "resolved") &&
           this.card?.kind === "thread" &&
           this.card.id === c._id
         )
@@ -955,13 +940,7 @@ export class NuniWidget {
         {
           class: "item",
           type: "button",
-          onclick: () => {
-            if (c.status === "resolved" && !this.showResolved) {
-              this.showResolved = true
-              write(KEYS.showResolved, "1")
-            }
-            this.focusComment(c._id)
-          },
+          onclick: () => this.focusComment(c._id),
         },
         h(
           "div",
@@ -1078,67 +1057,17 @@ export class NuniWidget {
         )
       ),
       h("div", { class: "panel-list" }, ...children),
-      this.renderPanelFooter()
+      this.status && !this.status.claimed && !this.isOwner
+        ? this.renderPanelFooter()
+        : null
     )
   }
 
   private renderPanelFooter() {
-    const resolvedToggle = h(
-      "label",
-      { class: "toggle" },
-      h("input", {
-        type: "checkbox",
-        checked: this.showResolved,
-        onchange: (e: Event) => {
-          this.showResolved = (e.target as HTMLInputElement).checked
-          write(KEYS.showResolved, this.showResolved ? "1" : null)
-          this.render()
-        },
-      }),
-      "Show resolved pins"
-    )
-    let ownership: Node
-    if (this.isOwner) {
-      ownership = h(
-        "div",
-        { class: "row" },
-        h("span", { class: "badge badge-ok" }, icon(ICONS.check), "Owner"),
-        h("span", { class: "meta" }, this.ownerName ?? ""),
-        h("span", { class: "spacer" }),
-        h(
-          "a",
-          {
-            class: "link",
-            href: `${this.config.appUrl}/dashboard/p/${this.config.project}`,
-            target: "_blank",
-            rel: "noopener",
-          },
-          "Dashboard"
-        ),
-        h(
-          "button",
-          { class: "link", type: "button", onclick: () => this.signOut() },
-          "Sign out"
-        )
-      )
-    } else if (this.status.claimed) {
-      ownership = h(
-        "div",
-        { class: "row" },
-        h(
-          "span",
-          { class: "meta" },
-          `Managed by ${this.status.ownerName ?? "the owner"}`
-        ),
-        h("span", { class: "spacer" }),
-        h(
-          "button",
-          { class: "link", type: "button", onclick: () => this.openClaim() },
-          "Owner sign in"
-        )
-      )
-    } else {
-      ownership = h(
+    return h(
+      "div",
+      { class: "panel-foot" },
+      h(
         "div",
         { class: "row" },
         h("span", { class: "meta" }, "Own this website?"),
@@ -1150,8 +1079,7 @@ export class NuniWidget {
           "Claim Nuni"
         )
       )
-    }
-    return h("div", { class: "panel-foot" }, resolvedToggle, ownership)
+    )
   }
 
   private renderCard(): HTMLElement | null {

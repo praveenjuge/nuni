@@ -287,7 +287,6 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
 .link { border: 0; background: none; padding: 0; color: var(--n-accent); font-weight: 600; text-decoration: none; }
 .link:hover { text-decoration: underline; }
 a.item { color: inherit; text-decoration: none; }
-.toggle { display: flex; align-items: center; gap: 8px; color: var(--n-fg-muted); font-size: 13px; }
 
 .toast {
   position: fixed;
