@@ -19,12 +19,31 @@ For owners: the name, email and avatar from GitHub via WorkOS.
 
 To help you, or your coding agent, act on a comment, the widget also attaches what it saw when the comment was left:
 
-- **Screenshot** of the element and its surroundings, with the element outlined. Nuni's own UI is left out.
+- **Screenshot** of the element with a small margin around it (not the rest of the page), with the element outlined. Nuni's own UI is left out.
 - **Console**: the latest console errors and warnings, and uncaught errors.
-- **Failed requests**: method, status and the URL's origin and path. Query strings and hashes are never kept, since they often carry tokens.
-- **Element**: the element's markup with form values removed, and a few computed styles (font, color, spacing and size).
+- **Failed requests**: method, status and the URL's origin and path.
+- **Element**: the element's markup and a few computed styles (font, color, spacing and size).
 
-Unlike the comment itself, this context is **only visible to the project owner**, in the dashboard and in the widget's owner tools. It is deleted with the comment. Turn any of it off with the [`capture` option](/reference/options):
+Query strings and hashes are removed from every URL, in failed requests and in console messages, since they often carry tokens. The server removes them again, whatever the browser sent.
+
+Unlike the comment itself, this context is **only visible to the project owner**, in the dashboard and in the widget's owner tools. It is deleted with the comment.
+
+### What is never captured
+
+- **Form values**: text fields, text areas and selects are painted over in the screenshot, and their values and option lists are removed from the markup.
+- **Areas you mark private**: add `data-nuni-mask` to any element (an account summary, a card number). It is painted over in the screenshot and its contents are removed from the markup, including for elements inside it.
+
+```html
+<div class="account" data-nuni-mask>Balance: $1,234</div>
+```
+
+### The commenter decides
+
+The screenshot is shown in the comment box before posting, with a **Remove** button. Only a screenshot the commenter saw is uploaded.
+
+### Turning it off
+
+Turn any of it off with the [`capture` option](/reference/options):
 
 ```ts
 init({ project: "nuni_...", capture: { screenshot: false, console: false } })

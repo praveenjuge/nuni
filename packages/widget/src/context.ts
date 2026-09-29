@@ -1,9 +1,13 @@
 import {
   LIMITS,
+  stripUrlQueries,
+  withoutQuery,
   type ConsoleEntry,
   type DomContext,
   type NetworkEntry,
 } from "@nuni/shared"
+
+import { CAPTURE_MARK, MASK_ATTRIBUTE } from "./mark"
 
 export interface CaptureOptions {
   console: boolean
@@ -13,8 +17,6 @@ export interface CaptureOptions {
 export interface Collectors {
   console(): ConsoleEntry[]
   network(): NetworkEntry[]
-  /** Run `fn` without recording its own console output or requests. */
-  quiet<T>(fn: () => Promise<T>): Promise<T>
   stop(): void
 }
 
@@ -41,12 +43,7 @@ function clip(text: string): string {
 
 /** Origin + path only: query strings and hashes often carry tokens. */
 export function safeUrl(input: string): string {
-  try {
-    const url = new URL(input, location.href)
-    return clip(`${url.origin}${url.pathname}`)
-  } catch {
-    return clip(input.split(/[?#]/)[0] ?? "")
-  }
+  return clip(withoutQuery(input, location.href))
 }
 
 class Ring<T> {
@@ -69,18 +66,16 @@ export function startCollectors(
   const logs = new Ring<ConsoleEntry>()
   const requests = new Ring<NetworkEntry>()
   const undo: (() => void)[] = []
-  let quiet = 0
 
   const log = (level: ConsoleEntry["level"], args: unknown[]) => {
-    if (quiet) return
     logs.push({
       level,
-      message: clip(args.map(describeValue).join(" ")),
+      message: clip(stripUrlQueries(args.map(describeValue).join(" "))),
       at: Date.now(),
     })
   }
   const failed = (method: string, url: string, status: number) => {
-    if (quiet || ignore(url)) return
+    if (ignore(url)) return
     requests.push({
       method: method.toUpperCase(),
       url: safeUrl(url),
@@ -123,6 +118,9 @@ export function startCollectors(
     const originalFetch = window.fetch
     if (typeof originalFetch === "function") {
       const wrappedFetch: typeof fetch = async (input, init) => {
+        // Nuni's own screenshot requests (see mark.ts) are not the page's.
+        if (init && (init as Record<symbol, unknown>)[CAPTURE_MARK])
+          return originalFetch.call(window, input, init)
         const url =
           typeof input === "string"
             ? input
@@ -177,12 +175,18 @@ export function startCollectors(
       const wrappedSend = function (this: XMLHttpRequest, body) {
         const request = info.get(this)
         if (request) {
+          // Per-send listeners, removed when this request ends, so a reused
+          // XHR never reports an earlier request again.
           let aborted = false
-          this.addEventListener("abort", () => (aborted = true))
-          this.addEventListener("loadend", () => {
+          const onAbort = () => (aborted = true)
+          const onEnd = () => {
+            this.removeEventListener("abort", onAbort)
+            this.removeEventListener("loadend", onEnd)
             if (!aborted && (this.status === 0 || this.status >= 400))
               failed(request.method, request.url, this.status)
-          })
+          }
+          this.addEventListener("abort", onAbort)
+          this.addEventListener("loadend", onEnd)
         }
         return send.call(this, body)
       } as typeof proto.send
@@ -197,14 +201,6 @@ export function startCollectors(
   return {
     console: () => [...logs.items],
     network: () => [...requests.items],
-    async quiet(fn) {
-      quiet++
-      try {
-        return await fn()
-      } finally {
-        quiet--
-      }
-    },
     stop() {
       for (const fn of undo.splice(0)) fn()
     },
@@ -236,7 +232,15 @@ const STYLE_PROPS = [
 const ATTR_MAX = 200
 const TEXT_MAX = 200
 
-/** Remove what should never leave the page (form values) and trim the rest. */
+/** Replace an element's contents with a short note. */
+function redact(el: Element, note: string) {
+  el.replaceChildren(el.ownerDocument.createComment(` ${note} `))
+}
+
+/**
+ * Remove what should never leave the page (form values, option lists and
+ * masked areas) and trim the rest.
+ */
 function scrub(root: Element) {
   const walker = root.ownerDocument.createTreeWalker(root, 1 | 4)
   const drop: Node[] = []
@@ -253,11 +257,27 @@ function scrub(root: Element) {
       drop.push(el)
       continue
     }
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+    if (el.hasAttribute(MASK_ATTRIBUTE)) {
+      for (const attr of Array.from(el.attributes)) {
+        if (
+          attr.name !== "id" &&
+          attr.name !== "class" &&
+          attr.name !== MASK_ATTRIBUTE
+        )
+          el.removeAttribute(attr.name)
+      }
+      redact(el, "masked")
+      continue
+    }
+    if (tag === "INPUT" || tag === "TEXTAREA") {
       el.removeAttribute("value")
       if (tag === "TEXTAREA") el.textContent = ""
     }
-    if (tag === "OPTION") el.removeAttribute("selected")
+    // Options can be the visitor's own data (saved addresses, accounts).
+    if (tag === "SELECT" || tag === "DATALIST") {
+      const count = el.getElementsByTagName("option").length
+      redact(el, `${count} options`)
+    }
     for (const attr of Array.from(el.attributes)) {
       if (attr.value.length > ATTR_MAX)
         el.setAttribute(attr.name, `${attr.value.slice(0, ATTR_MAX)}…`)
@@ -289,11 +309,14 @@ function shallowClone(el: Element, depth: number): Element {
 export function domContext(el: Element): DomContext {
   const max = LIMITS.domSnippetMaxLength
   let html = ""
-  for (const depth of [Infinity, 3, 1, 0]) {
+  // depth -1: inside a masked area, only the bare tag is kept.
+  const inMasked = Boolean(el.parentElement?.closest(`[${MASK_ATTRIBUTE}]`))
+  for (const depth of inMasked ? [-1] : [Infinity, 3, 1, 0]) {
     const copy =
       depth === Infinity
         ? (el.cloneNode(true) as Element)
-        : shallowClone(el, depth)
+        : shallowClone(el, Math.max(0, depth))
+    if (depth < 0) copy.setAttribute(MASK_ATTRIBUTE, "")
     scrub(copy)
     html = copy.outerHTML
     if (html.length <= max) break

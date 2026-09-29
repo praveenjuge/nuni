@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { resolveConfig } from "../src/config"
 import { domContext, safeUrl, startCollectors } from "../src/context"
+import { CAPTURE_MARK } from "../src/mark"
 import { colorFor, h, icon, initials, timeAgo } from "../src/dom"
 import { ICONS } from "../src/icons"
 import { init } from "../src/index"
@@ -99,6 +100,10 @@ describe("context collectors", () => {
       () => false
     )
     console.error("Boom", new Error("bad"), { a: 1 })
+    console.error("GET https://api.a.com/me?token=abc#x failed")
+    expect(collectors.console().at(-1)?.message).toBe(
+      "GET https://api.a.com/me failed"
+    )
     for (let i = 0; i < 30; i++) console.error(`e${i}`)
     const logs = collectors.console()
     expect(logs).toHaveLength(20)
@@ -129,7 +134,10 @@ describe("context collectors", () => {
     await fetch("https://api.example.com/down", { method: "post" }).catch(
       () => {}
     )
-    await collectors.quiet(() => fetch("https://api.example.com/missing"))
+    // Nuni's own screenshot requests carry a marker and are skipped.
+    await fetch("https://api.example.com/missing", {
+      [CAPTURE_MARK]: true,
+    } as RequestInit)
     expect(collectors.network()).toEqual([
       expect.objectContaining({
         method: "GET",
@@ -141,6 +149,41 @@ describe("context collectors", () => {
     collectors.stop()
     expect(window.fetch).toBe(mock)
     window.fetch = originalFetch
+  })
+
+  it("records a reused XHR once per request, under the right URL", () => {
+    const originalXhr = window.XMLHttpRequest
+    // A minimal XHR that finishes synchronously with a chosen status.
+    class FakeXhr extends EventTarget {
+      status = 0
+      next = 0
+      open(_method: string, url: string) {
+        this.next = url.includes("fail") ? 500 : 200
+      }
+      send() {
+        this.status = this.next
+        this.dispatchEvent(new Event("loadend"))
+      }
+    }
+    window.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest
+    const collectors = startCollectors(
+      { console: false, network: true },
+      () => false
+    )
+    const xhr = new window.XMLHttpRequest()
+    xhr.open("GET", "https://api.example.com/first")
+    xhr.send()
+    xhr.open("POST", "https://api.example.com/fail?secret=1")
+    xhr.send()
+    expect(collectors.network()).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        url: "https://api.example.com/fail",
+        status: 500,
+      }),
+    ])
+    collectors.stop()
+    window.XMLHttpRequest = originalXhr
   })
 
   it("strips query strings and hashes from URLs", () => {
@@ -167,6 +210,25 @@ describe("domContext", () => {
       "me@example.com"
     )
     expect(styles.padding).toBe("4px")
+  })
+
+  it("removes select options and masked areas", () => {
+    document.body.innerHTML = `<div id="d">
+      <select name="address"><option value="a1">12 Private Road</option><option>Work</option></select>
+      <p data-nuni-mask title="secret">Balance: $1,234</p>
+      <section data-nuni-mask><button id="inner">Pay</button></section>
+    </div>`
+    const { html } = domContext(document.getElementById("d")!)
+    expect(html).toContain("<!-- 2 options -->")
+    expect(html).not.toContain("Private Road")
+    expect(html).not.toContain("a1")
+    expect(html).not.toContain("1,234")
+    expect(html).not.toContain("secret")
+    expect(html).toContain("<!-- masked -->")
+    // An element inside a masked area keeps only its tag.
+    const inner = domContext(document.getElementById("inner")!).html
+    expect(inner).not.toContain("Pay")
+    expect(inner.startsWith("<button")).toBe(true)
   })
 
   it("keeps big elements within the snippet limit", () => {

@@ -716,7 +716,12 @@ describe("captured context and screenshots", () => {
       })),
     ],
     network: [
-      { method: "get", url: "https://api.example.com/v1", status: 500, at: 2 },
+      {
+        method: "get",
+        url: "https://api.example.com/v1?token=secret#frag",
+        status: 500,
+        at: 2,
+      },
     ],
     dom: {
       html: "<button>" + "y".repeat(9000) + "</button>",
@@ -749,6 +754,8 @@ describe("captured context and screenshots", () => {
     expect(mine?.context?.console).toHaveLength(LIMITS.contextEntryMax)
     expect(mine?.context?.console?.[0]?.message).toBe("warn 10")
     expect(mine?.context?.network?.[0]?.method).toBe("GET")
+    // Stripped on the server, whatever the client sent.
+    expect(mine?.context?.network?.[0]?.url).toBe("https://api.example.com/v1")
     expect(mine?.context?.dom?.html).toHaveLength(LIMITS.domSnippetMaxLength)
     expect(mine?.screenshotUrl).toBeNull()
 
@@ -770,6 +777,28 @@ describe("captured context and screenshots", () => {
       paginationOpts: { numItems: 10, cursor: null },
     })
     expect(listed.page[0]?.context?.dom?.styles).toEqual(context.dom.styles)
+  })
+
+  it("strips query strings from console messages on the server", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId, {
+      context: {
+        console: [
+          {
+            level: "error",
+            message: "GET https://api.example.com/me?key=abc#x failed",
+            at: 1,
+          },
+        ],
+      },
+    })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    const mine = await alice.query(api.comments.getForOwner, { publicId, id })
+    expect(mine?.context?.console?.[0]?.message).toBe(
+      "GET https://api.example.com/me failed"
+    )
   })
 
   it("lets the author attach one screenshot to their fresh comment", async () => {

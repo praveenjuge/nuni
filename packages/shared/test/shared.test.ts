@@ -5,6 +5,8 @@ import {
   buildCommentPrompt,
   commentUrl,
   describeLocation,
+  stripUrlQueries,
+  withoutQuery,
   generateProjectId,
   isLocalOrigin,
   isProjectId,
@@ -157,5 +159,21 @@ describe("buildCommentPrompt", () => {
     expect(prompt).not.toContain("shot.webp")
     expect(prompt).not.toContain("Mozilla")
     expect(prompt).toContain("Buy now")
+  })
+})
+
+describe("URL secrets", () => {
+  it("keeps only origin and path", () => {
+    expect(withoutQuery("https://a.com/p?token=1#x")).toBe("https://a.com/p")
+    expect(withoutQuery("/api?x=1", "https://a.com")).toBe("https://a.com/api")
+    expect(withoutQuery("not a url?x=1")).toBe("not a url")
+  })
+
+  it("strips queries from every URL in a log line", () => {
+    expect(
+      stripUrlQueries(
+        "GET https://a.com/me?key=abc failed, see http://b.io/x#t and done?"
+      )
+    ).toBe("GET https://a.com/me failed, see http://b.io/x and done?")
   })
 })

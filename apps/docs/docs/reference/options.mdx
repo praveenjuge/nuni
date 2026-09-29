@@ -57,12 +57,18 @@ Each comment carries context that only the project owner can see (details on the
 
 | Key          | What is captured                                                                         |
 | ------------ | ---------------------------------------------------------------------------------------- |
-| `screenshot` | An image of the element and its surroundings, loaded on demand so the widget stays small |
+| `screenshot` | An image of the element with a small margin, shown to the commenter before posting. Loaded on demand so the widget stays small |
 | `console`    | The latest console errors and warnings                                                   |
 | `network`    | The latest failed requests (method, status, origin and path)                             |
 | `dom`        | The element's markup, without form values, and key computed styles                       |
 
 With the script tag, use data attributes: `data-capture-screenshot="false"`, `data-capture-console="false"`, `data-capture-network="false"` and `data-capture-dom="false"`.
+
+Form fields are always painted over, and any element with `data-nuni-mask` is hidden from the screenshot and the markup:
+
+```html
+<section data-nuni-mask>…private details…</section>
+```
 
 ## Keyboard
 

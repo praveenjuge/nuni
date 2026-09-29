@@ -209,6 +209,18 @@ button { cursor: pointer; }
   background: var(--n-bg-subtle);
 }
 .shot img { display: block; width: 100%; max-height: 160px; object-fit: cover; object-position: top; }
+.shot-preview { display: grid; gap: 4px; }
+.shot-preview img {
+  display: block;
+  width: 100%;
+  max-height: 120px;
+  object-fit: cover;
+  object-position: top;
+  border: 1px solid var(--n-border);
+  border-radius: 8px;
+  background: var(--n-bg-subtle);
+}
+.shot-note { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--n-fg-muted); }
 .field {
   width: 100%;
   padding: 8px 10px;

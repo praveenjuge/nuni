@@ -45,8 +45,12 @@ interface Draft {
   anchor: Anchor
   element: Element
   dom?: DomContext
-  /** Started when the element is picked, uploaded after posting. */
-  screenshot?: Promise<Blob | null>
+  /**
+   * Taken while the person types and shown in the composer, so they see
+   * exactly what is attached (and can remove it). Only a screenshot that was
+   * shown before posting is uploaded.
+   */
+  screenshot?: { blob: Blob; preview: string }
   error?: string
   sending?: boolean
 }
@@ -78,6 +82,15 @@ function isTypingTarget(target: EventTarget | null) {
     target.tagName === "TEXTAREA" ||
     target.tagName === "SELECT"
   )
+}
+
+function dataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
 }
 
 function describeElement(el: Element): string {
@@ -527,28 +540,36 @@ export class NuniWidget {
         // Context is a bonus; never block a comment on it.
       }
     }
-    draft.screenshot = this.startScreenshot(element)
     this.card = { kind: "composer", draft }
     this.render()
     this.focusComposer()
+    void this.takeScreenshot(draft)
   }
 
   /** Capture while the person types, so posting stays instant. */
-  private startScreenshot(el: Element): Promise<Blob | null> | undefined {
+  private async takeScreenshot(draft: Draft) {
     const load = this.runtime.loadScreenshot
-    if (!load) return undefined
+    if (!load) return
     const accent =
       getComputedStyle(this.host).getPropertyValue("--n-accent").trim() ||
       "#d6246e"
-    return new Promise((resolve) => setTimeout(resolve, 60))
-      .then(() =>
-        // The capture fetches fonts and images; keep that out of the context.
-        this.runtime.collectors.quiet(async () => {
-          const capture = await load()
-          return capture ? capture(el, { exclude: this.host, accent }) : null
-        })
-      )
-      .catch(() => null)
+    try {
+      // Let the composer paint first; the capture clones part of the page.
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      const capture = await load()
+      const blob = capture
+        ? await capture(draft.element, { exclude: this.host, accent })
+        : null
+      if (!blob || !this.isComposing(draft)) return
+      draft.screenshot = { blob, preview: await dataUrl(blob) }
+      if (this.isComposing(draft)) this.render()
+    } catch {
+      // No screenshot then; the comment still works.
+    }
+  }
+
+  private isComposing(draft: Draft) {
+    return this.card?.kind === "composer" && this.card.draft === draft
   }
 
   private collectContext(draft: Draft): CommentContext | undefined {
@@ -562,9 +583,7 @@ export class NuniWidget {
     return Object.keys(context).length ? context : undefined
   }
 
-  private async attachScreenshot(id: string, shot: Promise<Blob | null>) {
-    const image = await shot
-    if (!image) return
+  private async attachScreenshot(id: string, image: Blob) {
     try {
       await this.api.uploadScreenshot(id, this.secret, image)
     } catch {
@@ -766,7 +785,8 @@ export class NuniWidget {
         },
         context: this.collectContext(draft),
       })
-      if (draft.screenshot) void this.attachScreenshot(id, draft.screenshot)
+      if (draft.screenshot)
+        void this.attachScreenshot(id, draft.screenshot.blob)
       // Show the new pin exactly where it was dropped until it syncs.
       this.placements.set(id, { element: draft.element, confidence: "exact" })
       if (this.card?.kind === "composer" && this.card.draft === draft)
@@ -1273,6 +1293,38 @@ export class NuniWidget {
                 )
               ),
           textarea,
+          draft.screenshot
+            ? h(
+                "div",
+                { class: "shot-preview" },
+                h("img", {
+                  src: draft.screenshot.preview,
+                  alt: "Screenshot that will be attached",
+                }),
+                h(
+                  "div",
+                  { class: "shot-note" },
+                  h(
+                    "span",
+                    {},
+                    "Screenshot attached. Only the site owner sees it."
+                  ),
+                  h("span", { class: "spacer" }),
+                  h(
+                    "button",
+                    {
+                      class: "link",
+                      type: "button",
+                      onclick: () => {
+                        draft.screenshot = undefined
+                        this.render()
+                      },
+                    },
+                    "Remove"
+                  )
+                )
+              )
+            : null,
           draft.error
             ? h("div", { class: "error", role: "alert" }, draft.error)
             : null,

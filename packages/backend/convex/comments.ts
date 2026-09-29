@@ -1,4 +1,4 @@
-import { LIMITS } from "@nuni/shared"
+import { LIMITS, stripUrlQueries, withoutQuery } from "@nuni/shared"
 import { paginationOptsValidator } from "convex/server"
 import { v } from "convex/values"
 
@@ -65,7 +65,11 @@ async function toOwner(ctx: QueryCtx, c: Doc<"comments">) {
 
 type CommentContext = NonNullable<Doc<"comments">["context"]>
 
-/** Clamp everything the commenter's browser sent, entry by entry. */
+/**
+ * Clamp everything the commenter's browser sent, entry by entry. Query
+ * strings and hashes are removed here too, not only by the widget, since
+ * anyone can call the endpoint directly.
+ */
 function cleanContext(context: CommentContext | undefined) {
   if (!context) return undefined
   const max = LIMITS.contextEntryMax
@@ -73,14 +77,16 @@ function cleanContext(context: CommentContext | undefined) {
     clampString(value, LIMITS.contextMessageMaxLength)
   const out: CommentContext = {}
   if (context.console?.length) {
-    out.console = context.console
-      .slice(-max)
-      .map((e) => ({ level: e.level, message: text(e.message), at: e.at }))
+    out.console = context.console.slice(-max).map((e) => ({
+      level: e.level,
+      message: text(stripUrlQueries(e.message)),
+      at: e.at,
+    }))
   }
   if (context.network?.length) {
     out.network = context.network.slice(-max).map((e) => ({
       method: clampString(e.method.toUpperCase(), 10),
-      url: text(e.url),
+      url: text(withoutQuery(e.url)),
       status: Math.trunc(e.status),
       at: e.at,
     }))

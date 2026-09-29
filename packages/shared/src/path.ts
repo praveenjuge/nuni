@@ -74,3 +74,18 @@ export function commentUrl(
   if (hashRoute) url.hash = hashRoute
   return url.toString()
 }
+
+/** Origin + path only: query strings and hashes often carry tokens. */
+export function withoutQuery(input: string, base?: string): string {
+  try {
+    const url = new URL(input, base)
+    return `${url.origin}${url.pathname}`
+  } catch {
+    return input.split(/[?#]/)[0] ?? ""
+  }
+}
+
+/** Remove query strings and hashes from every URL inside free text (log lines). */
+export function stripUrlQueries(text: string): string {
+  return text.replace(/(\bhttps?:\/\/[^\s?#"'<>]+)[?#][^\s"'<>]*/gi, "$1")
+}
