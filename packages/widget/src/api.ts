@@ -195,10 +195,4 @@ export class NuniApi {
       })
     )
   }
-
-  signOut(sessionToken: string) {
-    return this.client
-      .mutation(api.sessions.revokeOwn, { sessionToken })
-      .catch(() => null)
-  }
 }

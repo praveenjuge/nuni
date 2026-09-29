@@ -23,5 +23,4 @@ export const KEYS = {
   name: "nuni:name",
   secret: "nuni:author-secret",
   session: (project: string) => `nuni:session:${project}`,
-  showResolved: "nuni:show-resolved",
 } as const

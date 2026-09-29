@@ -1,6 +1,6 @@
 {
   "name": "nuni-monorepo",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.2",
@@ -18,15 +18,12 @@
     "size": "turbo run size",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,json,md,css}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,json,md,css}\"",
-    "changeset": "changeset",
     "version-packages": "bun scripts/sync-package-versions.ts",
-    "release": "turbo run build --filter=./packages/widget --filter=./packages/react --filter=./packages/cli && changeset publish",
     "readmes": "bun scripts/sync-readmes.ts",
     "readmes:check": "bun scripts/sync-readmes.ts --check",
     "e2e": "turbo run e2e"
   },
   "devDependencies": {
-    "@changesets/cli": "^3.0.3",
     "prettier": "^3.9.9",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "turbo": "^2.11.5",

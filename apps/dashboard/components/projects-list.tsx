@@ -3,12 +3,14 @@
 import { api } from "@nuni/backend/api"
 import { DOCS_URL } from "@nuni/shared"
 import { useQuery } from "convex/react"
-import { ArrowRightIcon, MessageSquareIcon } from "lucide-react"
+import { ArrowRightIcon, FolderOpenIcon, MessageSquareIcon } from "lucide-react"
 import Link from "next/link"
 
 import { Badge } from "@/components/ui/badge"
+import { buttonVariants } from "@/components/ui/button"
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -23,53 +25,65 @@ export function ProjectsList() {
   const projects = useQuery(api.projects.listMine, ready ? {} : "skip")
 
   return (
-    <div className="grid gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-        <p className="text-sm text-muted-foreground">
-          Sites you have claimed. Comments update live.
-        </p>
-      </div>
+    <section className="grid gap-8" aria-labelledby="projects-heading">
+      <h1
+        id="projects-heading"
+        className="text-2xl font-semibold tracking-tight"
+      >
+        Projects
+      </h1>
       {projects === undefined ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Skeleton className="h-32 rounded-3xl" />
-          <Skeleton className="h-32 rounded-3xl" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Skeleton className="h-40 rounded-3xl" />
+          <Skeleton className="h-40 rounded-3xl" />
         </div>
       ) : projects.length === 0 ? (
-        <Card>
-          <CardHeader>
+        <Card className="items-center gap-4 py-10 text-center shadow-none">
+          <div className="flex size-11 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+            <FolderOpenIcon className="size-5" aria-hidden="true" />
+          </div>
+          <CardHeader className="w-full gap-1.5 text-center">
             <CardTitle>No projects yet</CardTitle>
             <CardDescription>
-              Add Nuni to a site, open it, click the Nuni button and choose
-              &ldquo;Claim Nuni&rdquo;. It will show up here.
+              Add Nuni to your site, then claim it from the widget.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <a
               href={`${DOCS_URL}/quickstart`}
-              className="text-sm font-medium text-primary hover:underline"
+              className={buttonVariants({ size: "sm" })}
             >
-              Read the quickstart
+              Add Nuni to a site <ArrowRightIcon aria-hidden="true" />
             </a>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           {projects.map((p) => (
-            <Link key={p._id} href={`/p/${p.publicId}`} className="group">
-              <Card className="h-full transition-shadow group-hover:shadow-md">
+            <Link
+              key={p._id}
+              href={`/p/${p.publicId}`}
+              className="group rounded-3xl outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+            >
+              <Card
+                size="sm"
+                className="h-full transition-shadow group-hover:shadow-md"
+              >
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    {p.name}
-                    <ArrowRightIcon className="ml-auto size-4 opacity-0 transition-opacity group-hover:opacity-100" />
-                  </CardTitle>
+                  <CardTitle className="truncate">{p.name}</CardTitle>
                   <CardDescription className="truncate">
                     {p.origins.slice(0, 3).map(hostOf).join(" · ")}
                   </CardDescription>
+                  <CardAction>
+                    <ArrowRightIcon
+                      className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                      aria-hidden="true"
+                    />
+                  </CardAction>
                 </CardHeader>
                 <CardContent className="flex items-center gap-2 text-sm">
                   <Badge variant={p.openCount ? "default" : "secondary"}>
-                    <MessageSquareIcon />
+                    <MessageSquareIcon aria-hidden="true" />
                     {p.openCount} open
                   </Badge>
                   <span className="text-muted-foreground">
@@ -84,6 +98,6 @@ export function ProjectsList() {
           ))}
         </div>
       )}
-    </div>
+    </section>
   )
 }

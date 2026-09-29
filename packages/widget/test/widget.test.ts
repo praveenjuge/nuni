@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { resolveConfig } from "../src/config"
-import { colorFor, h, initials, timeAgo } from "../src/dom"
+import { colorFor, h, icon, initials, timeAgo } from "../src/dom"
+import { ICONS } from "../src/icons"
 import { init } from "../src/index"
 import { sha256 } from "../src/sha256"
 import { KEYS, read, write } from "../src/storage"
@@ -25,6 +26,16 @@ describe("sha256 fallback", () => {
 })
 
 describe("dom helpers", () => {
+  it("creates renderable SVG icons", () => {
+    for (const markup of Object.values(ICONS)) {
+      const svg = icon(markup).firstElementChild
+      expect(svg?.namespaceURI).toBe("http://www.w3.org/2000/svg")
+      expect(svg?.firstElementChild?.namespaceURI).toBe(
+        "http://www.w3.org/2000/svg"
+      )
+    }
+  })
+
   it("never interprets strings as HTML", () => {
     const el = h("div", {}, "<img src=x onerror=alert(1)>")
     expect(el.querySelector("img")).toBeNull()

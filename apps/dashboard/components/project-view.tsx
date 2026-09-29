@@ -2,13 +2,12 @@
 
 import { api } from "@nuni/backend/api"
 import type { Id } from "@nuni/backend/dataModel"
-import { buildAgentPrompt, CDN_URL } from "@nuni/shared"
+import { buildAgentPrompt } from "@nuni/shared"
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react"
 import {
   ArrowLeftIcon,
   CheckIcon,
   ExternalLinkIcon,
-  MonitorSmartphoneIcon,
   RotateCcwIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -16,6 +15,7 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 
 import { CopyButton } from "@/components/copy-button"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
@@ -26,6 +26,13 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useStoreUser } from "@/components/use-store-user"
@@ -77,7 +84,13 @@ export function ProjectView({ publicId }: { publicId: string }) {
         >
           <ArrowLeftIcon className="size-4" /> Projects
         </Link>
-        <ProjectName projectId={project._id} name={project.name} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <ProjectName projectId={project._id} name={project.name} />
+          <CopyButton
+            value={buildAgentPrompt({ projectId: publicId })}
+            label="Copy agent prompt"
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs">
             {project.publicId}
@@ -101,11 +114,6 @@ export function ProjectView({ publicId }: { publicId: string }) {
         </Tabs>
         <CommentList publicId={publicId} status={status} />
       </section>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <InstallCard publicId={publicId} />
-        <SessionsCard publicId={publicId} />
-      </div>
     </div>
   )
 }
@@ -123,9 +131,9 @@ function ProjectName({
   if (!editing) {
     return (
       <h1 className="text-2xl font-semibold tracking-tight">
-        <button
-          type="button"
-          className="rounded-md text-left hover:bg-muted"
+        <Button
+          variant="ghost"
+          className="h-auto px-0 text-2xl font-semibold tracking-tight"
           title="Rename"
           onClick={() => {
             setValue(name)
@@ -133,7 +141,7 @@ function ProjectName({
           }}
         >
           {name}
-        </button>
+        </Button>
       </h1>
     )
   }
@@ -227,19 +235,24 @@ function CommentList({
             ))}
           </datalist>
           {origins.length > 1 && (
-            <select
-              className="h-8 rounded-2xl border bg-background px-3 text-sm"
-              value={origin}
-              onChange={(e) => setOrigin(e.target.value)}
-              aria-label="Filter by site"
+            <Select
+              value={origin || "all"}
+              onValueChange={(value) =>
+                setOrigin(value === "all" ? "" : (value ?? ""))
+              }
             >
-              <option value="">All environments</option>
-              {origins.map((o) => (
-                <option key={o} value={o}>
-                  {hostOf(o)}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger aria-label="Filter by site">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All environments</SelectItem>
+                {origins.map((o) => (
+                  <SelectItem key={o} value={o}>
+                    {hostOf(o)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
         </div>
       )}
@@ -260,9 +273,11 @@ function CommentList({
               <Card size="sm">
                 <CardContent className="grid gap-2">
                   <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="grid size-6 place-items-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
-                      {initials(c.authorName)}
-                    </span>
+                    <Avatar className="size-6">
+                      <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
+                        {initials(c.authorName)}
+                      </AvatarFallback>
+                    </Avatar>
                     <span className="font-medium">{c.authorName}</span>
                     <span className="text-muted-foreground">
                       {timeAgo(c.createdAt)}
@@ -338,85 +353,6 @@ function CommentList({
       )}
       {loadStatus === "LoadingMore" && <Skeleton className="h-10 w-32" />}
     </div>
-  )
-}
-
-function InstallCard({ publicId }: { publicId: string }) {
-  const react = `<Nuni project="${publicId}" />`
-  const script = `<script src="${CDN_URL}" data-project="${publicId}" defer></script>`
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Install</CardTitle>
-        <CardDescription>
-          The project ID is public. Use the same one on every environment.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3 text-sm">
-        <div className="grid gap-1.5">
-          <span className="text-muted-foreground">React (@nuniapp/react)</span>
-          <pre className="overflow-x-auto rounded-xl bg-muted p-3 font-mono text-xs">
-            {react}
-          </pre>
-        </div>
-        <div className="grid gap-1.5">
-          <span className="text-muted-foreground">Script tag</span>
-          <pre className="overflow-x-auto rounded-xl bg-muted p-3 font-mono text-xs">
-            {script}
-          </pre>
-        </div>
-        <div>
-          <CopyButton
-            value={buildAgentPrompt({ projectId: publicId })}
-            label="Copy agent prompt"
-          />
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function SessionsCard({ publicId }: { publicId: string }) {
-  const sessions = useQuery(api.sessions.listMine, { publicId })
-  const revoke = useMutation(api.sessions.revoke)
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Signed-in browsers</CardTitle>
-        <CardDescription>
-          Where you can resolve and delete comments right from the widget.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-2 text-sm">
-        {sessions === undefined ? (
-          <Skeleton className="h-10" />
-        ) : sessions.length === 0 ? (
-          <p className="text-muted-foreground">
-            None. Use &ldquo;Owner sign in&rdquo; in the widget on your site.
-          </p>
-        ) : (
-          sessions.map((s) => (
-            <div key={s._id} className="flex items-center gap-2">
-              <MonitorSmartphoneIcon className="size-4 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{hostOf(s.origin)}</div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {timeAgo(s._creationTime)} ·{" "}
-                  {s.userAgent?.split(") ")[0]?.split("(")[1] ?? "Browser"}
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => revoke({ id: s._id })}
-              >
-                Revoke
-              </Button>
-            </div>
-          ))
-        )}
-      </CardContent>
-    </Card>
   )
 }
 
