@@ -292,8 +292,8 @@ export class NuniWidget {
   private visibleComments() {
     return this.comments.filter(
       (c) =>
-        c.status === "open" ||
-        (this.panelOpen && this.tab === "resolved") ||
+        c.status ===
+          (this.panelOpen && this.tab === "resolved" ? "resolved" : "open") ||
         (this.card?.kind === "thread" && this.card.id === c._id)
     )
   }

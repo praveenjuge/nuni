@@ -100,6 +100,10 @@ test("owner resolves and deletes from the widget; visitors see it live", async (
     0
   )
 
+  await thread.getByRole("button", { name: "Close" }).click()
+  await postComment(visitor, "Second open comment")
+  await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("1")
+
   // Reopen from the Resolved tab, then delete.
   await owner
     .locator("#nuni-root .panel")
@@ -108,6 +112,9 @@ test("owner resolves and deletes from the widget; visitors see it live", async (
   await expect(
     owner.locator("#nuni-root .pin[data-status=resolved]")
   ).toHaveCount(1)
+  await expect(owner.locator("#nuni-root .pin[data-status=open]")).toHaveCount(
+    0
+  )
   await owner
     .locator("#nuni-root .panel")
     .getByRole("tab", { name: /Open/ })
@@ -115,6 +122,9 @@ test("owner resolves and deletes from the widget; visitors see it live", async (
   await expect(
     owner.locator("#nuni-root .pin[data-status=resolved]")
   ).toHaveCount(0)
+  await expect(owner.locator("#nuni-root .pin[data-status=open]")).toHaveCount(
+    1
+  )
   await owner
     .locator("#nuni-root .panel")
     .getByRole("tab", { name: /Resolved/ })
@@ -127,13 +137,13 @@ test("owner resolves and deletes from the widget; visitors see it live", async (
     .locator('#nuni-root [data-card="thread"]')
     .getByRole("button", { name: "Reopen" })
     .click()
-  await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("1")
+  await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("2")
   owner.once("dialog", (d) => d.accept())
   await owner
     .locator('#nuni-root [data-card="thread"]')
     .getByRole("button", { name: "Delete" })
     .click()
-  await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("0")
+  await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("1")
 
   await expect(owner.locator("#nuni-root .panel-foot")).toHaveCount(0)
 })
