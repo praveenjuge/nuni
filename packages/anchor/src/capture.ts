@@ -1,4 +1,9 @@
-import { LIMITS, type Anchor, type AnchorAncestor } from "@nuni/shared"
+import {
+  LIMITS,
+  MASK_SELECTOR,
+  type Anchor,
+  type AnchorAncestor,
+} from "@nuni/shared"
 
 import { reactComponentName } from "./component"
 import { clamp01, documentRect, documentSize, viewportInfo } from "./geometry"
@@ -9,6 +14,8 @@ import { elementText } from "./text"
 
 function capturedAttributes(el: Element, options: AnchorOptions) {
   const attrs: Record<string, string> = {}
+  // Labels and titles in a masked area can be as private as its text.
+  if (el.closest(MASK_SELECTOR)) return attrs
   for (const name of CAPTURED_ATTRIBUTES) {
     if (!attributeAllowed(name, options)) continue
     if (

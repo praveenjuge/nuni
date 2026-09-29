@@ -163,3 +163,36 @@ describe("capture and resolve", () => {
     expect(anchor.offset.x).toBeLessThanOrEqual(1)
   })
 })
+
+describe("masked areas", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <section class="account">
+        <h2>Your account</h2>
+        <p data-nuni-mask title="Card ending 4242">Balance: $1,234</p>
+        <div data-nuni-mask><button id="secret" aria-label="Pay $1,234">Pay</button></div>
+        <button id="pay">Pay now</button>
+      </section>`
+  })
+
+  it("never reads text inside data-nuni-mask", () => {
+    const section = document.querySelector("section")!
+    expect(elementText(section)).toBe("Your account Pay now")
+    expect(elementText(document.querySelector("[data-nuni-mask]")!)).toBe("")
+    expect(elementText(document.getElementById("secret")!)).toBe("")
+  })
+
+  it("keeps masked text and labels out of the anchor, and still resolves", () => {
+    const pay = document.getElementById("pay")!
+    const anchor = captureAnchor(pay)
+    expect(JSON.stringify(anchor)).not.toContain("1,234")
+    expect(anchor.ancestors[0]?.text).toBe("Your account Pay now")
+
+    const secret = document.getElementById("secret")!
+    const masked = captureAnchor(secret)
+    expect(masked.text).toBe("")
+    expect(masked.attrs).toEqual({})
+    expect(JSON.stringify(masked)).not.toContain("1,234")
+    expect(resolveAnchor(masked, document).element).toBe(secret)
+  })
+})

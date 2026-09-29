@@ -64,7 +64,7 @@ Each comment carries context that only the project owner can see (details on the
 
 With the script tag, use data attributes: `data-capture-screenshot="false"`, `data-capture-console="false"`, `data-capture-network="false"` and `data-capture-dom="false"`.
 
-Form fields are always painted over, and any element with `data-nuni-mask` is hidden from the screenshot and the markup:
+Form fields are always painted over, and any element with `data-nuni-mask` is hidden from the screenshot, the markup and the pin's stored text:
 
 ```html
 <section data-nuni-mask>…private details…</section>

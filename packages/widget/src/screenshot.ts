@@ -1,7 +1,7 @@
-import { LIMITS } from "@nuni/shared"
+import { LIMITS, MASK_ATTRIBUTE } from "@nuni/shared"
 import { domToCanvas } from "modern-screenshot"
 
-import { CAPTURE_MARK, MASK_ATTRIBUTE } from "./mark"
+import { CAPTURE_MARK } from "./mark"
 
 /**
  * Screenshots are loaded lazily (a separate chunk for npm users, a separate

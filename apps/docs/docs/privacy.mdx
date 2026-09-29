@@ -31,7 +31,7 @@ Unlike the comment itself, this context is **only visible to the project owner**
 ### What is never captured
 
 - **Form values**: text fields, text areas and selects are painted over in the screenshot, and their values and option lists are removed from the markup.
-- **Areas you mark private**: add `data-nuni-mask` to any element (an account summary, a card number). It is painted over in the screenshot and its contents are removed from the markup, including for elements inside it.
+- **Areas you mark private**: add `data-nuni-mask` to any element (an account summary, a card number). It is painted over in the screenshot, its contents are removed from the markup, and its text and labels are never stored with the pin, including for elements inside it.
 
 ```html
 <div class="account" data-nuni-mask>Balance: $1,234</div>

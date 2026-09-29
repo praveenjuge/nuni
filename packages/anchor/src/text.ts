@@ -1,3 +1,5 @@
+import { MASK_ATTRIBUTE, MASK_SELECTOR } from "@nuni/shared"
+
 const SKIP_TEXT_TAGS = new Set([
   "SCRIPT",
   "STYLE",
@@ -10,8 +12,14 @@ export function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim()
 }
 
-/** Visible-ish text of an element, whitespace-normalized and truncated. */
+/**
+ * Visible-ish text of an element, whitespace-normalized and truncated.
+ * Areas marked data-nuni-mask count as empty, both when capturing and when
+ * resolving, so their (private) text is never stored and matching stays
+ * consistent.
+ */
 export function elementText(el: Element, max = 120): string {
+  if (el.closest(MASK_SELECTOR)) return ""
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
     return normalizeText(
       el.placeholder || el.getAttribute("aria-label") || ""
@@ -27,6 +35,7 @@ export function elementText(el: Element, max = 120): string {
     if (node.nodeType !== 1) return
     const tag = (node as Element).tagName.toUpperCase()
     if (SKIP_TEXT_TAGS.has(tag)) return
+    if ((node as Element).hasAttribute(MASK_ATTRIBUTE)) return
     if (tag === "IMG") {
       out += " " + ((node as Element).getAttribute("alt") ?? "") + " "
       return

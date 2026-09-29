@@ -1,5 +1,6 @@
 import {
   LIMITS,
+  MASK_ATTRIBUTE,
   stripUrlQueries,
   withoutQuery,
   type ConsoleEntry,
@@ -7,7 +8,7 @@ import {
   type NetworkEntry,
 } from "@nuni/shared"
 
-import { CAPTURE_MARK, MASK_ATTRIBUTE } from "./mark"
+import { CAPTURE_MARK } from "./mark"
 
 export interface CaptureOptions {
   console: boolean
@@ -31,7 +32,12 @@ function describeValue(value: unknown): string {
     return `${value.name}: ${value.message}${frame ? ` (${frame.trim()})` : ""}`
   }
   try {
-    return JSON.stringify(value) ?? String(value)
+    // Bounded, so logging a huge object stays cheap; the result is clipped anyway.
+    let budget = 200
+    const json = JSON.stringify(value, (_key, v: unknown) =>
+      budget-- > 0 ? v : undefined
+    )
+    return json ?? String(value)
   } catch {
     return String(value)
   }
