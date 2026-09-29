@@ -25,7 +25,7 @@ Turborepo + Bun workspaces.
 
 ## Develop
 
-Requirements: Bun 1.3+, Node 22.12+.
+Requirements: Bun 1.4.2, Node 22.12+. Run `bun --version` to verify the installed Bun version before installing dependencies.
 
 ```bash
 bun install
