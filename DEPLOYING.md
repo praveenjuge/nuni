@@ -140,6 +140,7 @@ WorkOS default GitHub credentials only work in staging.
 | `WORKOS_COOKIE_PASSWORD`          | 32+ random characters                             |
 | `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | `https://nuni.praveenjuge.com/dashboard/callback` |
 | `NEXT_PUBLIC_APP_URL`             | `https://nuni.praveenjuge.com`                    |
+| `NUNI_BUILD_PRODUCTION`           | `1` (Production only; enables Git builds)         |
 
 - [ ] Deploy. Note its production URL (for example `https://nuni-dashboard.vercel.app`). If it is different, update both rewrites in `apps/docs/vercel.json`.
 - [ ] Settings → Deployment Protection: make sure production is not protected (the docs site proxies to it).
@@ -152,6 +153,7 @@ WorkOS default GitHub credentials only work in staging.
   - `NUNI_CONVEX_URL=https://<prod>.convex.cloud`
   - `NUNI_CONVEX_SITE_URL=https://<prod>.convex.site`
   - `NUNI_APP_URL=https://nuni.praveenjuge.com`
+  - `NUNI_BUILD_PRODUCTION=1` (Production only; enables Git builds)
 - [ ] **Domains**: add `nuni.praveenjuge.com`. In Cloudflare, add the CNAME target Vercel shows and leave **Proxy status off (DNS only)**. Verify that Vercel issues a certificate and the HTTPS site loads.
 
 ### 6. npm packages and releases

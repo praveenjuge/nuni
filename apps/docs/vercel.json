@@ -15,5 +15,5 @@
       "destination": "https://nuni-dashboard.vercel.app/dashboard/:path*"
     }
   ],
-  "ignoreCommand": "[ \"$VERCEL_ENV\" != \"production\" ]"
+  "ignoreCommand": "[ \"$NUNI_BUILD_PRODUCTION\" != \"1\" ]"
 }

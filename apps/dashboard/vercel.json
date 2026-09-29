@@ -3,5 +3,5 @@
   "framework": "nextjs",
   "installCommand": "cd ../.. && bun install --frozen-lockfile",
   "buildCommand": "cd ../../packages/backend && bunx convex deploy --cmd 'cd ../.. && bunx turbo run build --filter=@nuni/dashboard' --cmd-url-env-var-name NEXT_PUBLIC_CONVEX_URL",
-  "ignoreCommand": "[ \"$VERCEL_ENV\" != \"production\" ]"
+  "ignoreCommand": "[ \"$NUNI_BUILD_PRODUCTION\" != \"1\" ]"
 }
