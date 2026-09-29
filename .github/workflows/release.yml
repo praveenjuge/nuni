@@ -47,9 +47,12 @@ jobs:
           for package_dir in packages/widget packages/react packages/cli; do
             package_name=$(node -p "require('./${package_dir}/package.json').name")
             package_version=$(node -p "require('./${package_dir}/package.json').version")
-            if npm view "$package_name@$package_version" version >/dev/null 2>&1; then
+            if lookup_output=$(npm view "$package_name@$package_version" version 2>&1); then
               echo "$package_name@$package_version is already published"
-            else
+            elif [[ "$lookup_output" == *"npm error code E404"* ]]; then
               (cd "$package_dir" && npm publish --access public)
+            else
+              printf '%s\n' "$lookup_output" >&2
+              exit 1
             fi
           done

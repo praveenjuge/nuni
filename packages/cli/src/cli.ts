@@ -1,6 +1,8 @@
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 
+import packageJson from "../package.json"
+
 import {
   buildAgentPrompt,
   DOCS_URL,
@@ -11,7 +13,7 @@ import {
 import { detectFramework, detectPackageManager, installCommand } from "./detect"
 import { packageFor, snippetFor } from "./snippets"
 
-const VERSION = "0.1.0"
+const VERSION = packageJson.version
 
 const HELP = `nuni ${VERSION}: pinned comments on your live site
 
