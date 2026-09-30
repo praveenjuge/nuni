@@ -77,6 +77,27 @@ function describeElement(el: Element): string {
   return `${tag}${id}${cls}${text ? ` "${text}"` : ""}`
 }
 
+/**
+ * Build an "Other pages" link target, or null when it would leave the
+ * current origin. The stored path comes from anonymous comment submissions;
+ * one that does not start with "/" (".evil.com/x", "@evil.com/") would
+ * extend or replace the host once the concatenated string is parsed as a
+ * URL, sending the visitor - and the page's query string - to another site.
+ */
+export function otherPageHref(
+  path: string,
+  loc: { origin: string; search: string }
+): string | null {
+  const candidate = path.includes("#")
+    ? loc.origin + path
+    : loc.origin + path + loc.search
+  try {
+    return new URL(candidate).origin === loc.origin ? candidate : null
+  } catch {
+    return null
+  }
+}
+
 export class NuniWidget {
   private host: HTMLElement
   private root: ShadowRoot
@@ -987,9 +1008,8 @@ export class NuniWidget {
     if (otherPages.length) {
       children.push(h("div", { class: "section-label" }, "Other pages"))
       for (const p of otherPages.slice(0, 20)) {
-        const href = p.path.includes("#")
-          ? location.origin + p.path
-          : location.origin + p.path + location.search
+        const href = otherPageHref(p.path, location)
+        if (href === null) continue
         children.push(
           h(
             "a",
@@ -1457,4 +1477,4 @@ export class NuniWidget {
       target?.focus()
     })
   }
-}
+                                              }
