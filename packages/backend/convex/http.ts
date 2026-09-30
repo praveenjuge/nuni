@@ -28,6 +28,7 @@ function json(request: Request, status: number, body: unknown) {
 
 const STATUS_BY_CODE: Record<string, number> = {
   rate_limited: 429,
+  too_large: 413,
   cap_reached: 403,
   forbidden: 403,
   not_found: 404,
