@@ -145,6 +145,18 @@ export const createFromWidget = internalMutation({
     if (originOf(args.page.url) !== origin) {
       fail("invalid_page", "Page URL does not match its origin")
     }
+    // The stored path is joined to a visitor's origin by plain string
+    // concatenation and parsed as a URL ("Other pages" links), so it must
+    // be an absolute "/..." path. Anything else (".evil.com/x",
+    // "@evil.com/", "//evil.com/x") extends, replaces or redirects the
+    // host at click time.
+    if (
+      !args.page.path.startsWith("/") ||
+      args.page.path.startsWith("//") ||
+      args.page.path[1] === "\\"
+    ) {
+      fail("invalid_page", "Page path must be an absolute path")
+    }
     const body = cleanBody(args.body)
     const authorName = cleanName(args.authorName)
     if (args.authorSecret.length < 16 || args.authorSecret.length > 128) {
