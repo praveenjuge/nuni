@@ -23,6 +23,9 @@ export function assertProjectId(publicId: string) {
 }
 
 export function parseOrigin(origin: string): string {
+  // Real origins are short; refuse pathologically long ones so they cannot
+  // bloat comment documents or project.origins.
+  if (origin.length > 2048) fail("invalid_origin", "Invalid origin")
   try {
     const url = new URL(origin)
     if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error()
