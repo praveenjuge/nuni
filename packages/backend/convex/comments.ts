@@ -66,7 +66,9 @@ function cleanName(name: string): string {
 }
 
 function searchTextFor(body: string, authorName: string) {
-  return `${authorName}\n${body}`
+  // The search index duplicates the body, so cap its bytes: a maximal
+  // multi-byte body must not double the document's stored size.
+  return clampBytes(`${authorName}\n${body}`, 3072)
 }
 
 function originOf(url: string): string | null {
@@ -79,6 +81,20 @@ function originOf(url: string): string | null {
 
 function clampString(value: string, max: number) {
   return value.length > max ? value.slice(0, max) : value
+}
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length
+}
+
+/** Truncate to a byte budget without splitting a multi-byte character. */
+function clampBytes(value: string, maxBytes: number): string {
+  if (value.length <= maxBytes / 3) return value
+  const bytes = new TextEncoder().encode(value)
+  if (bytes.length <= maxBytes) return value
+  let end = maxBytes
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--
+  return new TextDecoder().decode(bytes.subarray(0, end))
 }
 
 /**
@@ -170,29 +186,96 @@ export const createFromWidget = internalMutation({
     }
 
     const now = Date.now()
+    // Store explicit clamped projections instead of spreading raw client
+    // objects, so no bulk-carrying field can enter storage unbounded.
+    const page = {
+      origin,
+      title: clampString(args.page.title, 300),
+      url: clampString(args.page.url, 2000),
+      search: clampString(args.page.search, 1000),
+      hash: clampString(args.page.hash, 1000),
+      path: clampString(args.page.path, 1000),
+    }
+    const anchor = {
+      v: args.anchor.v,
+      selectors: {
+        id:
+          args.anchor.selectors.id &&
+          clampString(args.anchor.selectors.id, 256),
+        testId:
+          args.anchor.selectors.testId &&
+          clampString(args.anchor.selectors.testId, 256),
+        css:
+          args.anchor.selectors.css &&
+          clampString(args.anchor.selectors.css, 2048),
+        path: clampString(args.anchor.selectors.path, 2048),
+      },
+      tag: clampString(args.anchor.tag, 64),
+      classes: args.anchor.classes
+        ?.slice(0, 64)
+        .map((c) => clampString(c, 256)),
+      role: args.anchor.role && clampString(args.anchor.role, 128),
+      text: clampString(args.anchor.text, LIMITS.anchorTextMaxLength),
+      attrs: Object.fromEntries(
+        Object.entries(args.anchor.attrs)
+          .slice(0, 64)
+          .map(([key, value]) => [
+            clampString(key, 128),
+            clampString(value, 512),
+          ])
+      ),
+      ancestors: args.anchor.ancestors.slice(0, 6).map((a) => ({
+        tag: clampString(a.tag, 64),
+        id: a.id && clampString(a.id, 256),
+        classes: a.classes.slice(0, 64).map((c) => clampString(c, 256)),
+        text: a.text && clampString(a.text, LIMITS.anchorTextMaxLength),
+      })),
+      siblingIndex: args.anchor.siblingIndex,
+      siblingCount: args.anchor.siblingCount,
+      componentName:
+        args.anchor.componentName &&
+        clampString(args.anchor.componentName, 256),
+      rect: args.anchor.rect,
+      offset: args.anchor.offset,
+      viewport: args.anchor.viewport,
+      docSize: args.anchor.docSize,
+    }
+    const viewport = {
+      w: args.viewport.w,
+      h: args.viewport.h,
+      dpr: args.viewport.dpr,
+    }
+    const userAgent = clampString(args.userAgent, 400)
+    const searchText = searchTextFor(body, authorName)
+    // listForPage reads up to pageOpenLimit + pageResolvedLimit = 1200
+    // documents of one page in a single transaction, and Convex aborts any
+    // transaction that reads more than 16 MiB. Bound the stored payload of
+    // every comment so the full window can never cross that limit.
+    const storedBytes = byteLength(
+      JSON.stringify({
+        body,
+        authorName,
+        searchText,
+        page,
+        anchor,
+        viewport,
+        userAgent,
+      })
+    )
+    if (storedBytes > LIMITS.commentStoredBytesMax) {
+      fail("too_large", "Comment data too large")
+    }
     const id = await ctx.db.insert("comments", {
       projectId: project._id,
       status: "open",
       body,
       authorName,
       authorKeyHash: await sha256Hex(args.authorSecret),
-      searchText: searchTextFor(body, authorName),
-      page: {
-        ...args.page,
-        origin,
-        title: clampString(args.page.title, 300),
-        url: clampString(args.page.url, 2000),
-        search: clampString(args.page.search, 1000),
-        hash: clampString(args.page.hash, 1000),
-        path: clampString(args.page.path, 1000),
-      },
-      anchor: {
-        ...args.anchor,
-        text: clampString(args.anchor.text, LIMITS.anchorTextMaxLength),
-        ancestors: args.anchor.ancestors.slice(0, 6),
-      },
-      viewport: args.viewport,
-      userAgent: clampString(args.userAgent, 400),
+      searchText,
+      page,
+      anchor,
+      viewport,
+      userAgent,
       createdAt: now,
     })
     await ctx.db.patch(project._id, {
@@ -227,9 +310,26 @@ export const editOwn = mutation({
   handler: async (ctx, { id, authorSecret, body }) => {
     const comment = await loadOwnComment(ctx, id, authorSecret)
     const clean = cleanBody(body)
+    const searchText = searchTextFor(clean, comment.authorName)
+    // An edit must keep the document inside the same stored-size budget as
+    // a fresh insert, or the listForPage window bound could still be crossed.
+    const storedBytes = byteLength(
+      JSON.stringify({
+        body: clean,
+        authorName: comment.authorName,
+        searchText,
+        page: comment.page,
+        anchor: comment.anchor,
+        viewport: comment.viewport,
+        userAgent: comment.userAgent,
+      })
+    )
+    if (storedBytes > LIMITS.commentStoredBytesMax) {
+      fail("too_large", "Comment data too large")
+    }
     await ctx.db.patch(id, {
       body: clean,
-      searchText: searchTextFor(clean, comment.authorName),
+      searchText,
       editedAt: Date.now(),
     })
   },
@@ -556,4 +656,4 @@ async function setPageOpen(
   // A capped read is only a lower bound, so it may raise a count, never lower it.
   else if (capped ? row.openCount < openCount : row.openCount !== openCount)
     await ctx.db.patch(row._id, { openCount })
-}
+          }
