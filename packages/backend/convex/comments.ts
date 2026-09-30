@@ -656,4 +656,4 @@ async function setPageOpen(
   // A capped read is only a lower bound, so it may raise a count, never lower it.
   else if (capped ? row.openCount < openCount : row.openCount !== openCount)
     await ctx.db.patch(row._id, { openCount })
-          }
+}
