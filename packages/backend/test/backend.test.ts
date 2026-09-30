@@ -105,6 +105,149 @@ describe("widget comments", () => {
     ])
   })
 
+  it("clamps oversized anchor fields to bounded sizes", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await t.mutation(internal.comments.createFromWidget, {
+      publicId,
+      ip: "1.1.1.1",
+      body: "Hi",
+      authorName: "Sam",
+      authorSecret: generateSecret(),
+      page: page(),
+      anchor: {
+        ...anchor,
+        selectors: {
+          ...anchor.selectors,
+          css: "x".repeat(5000),
+          path: "y".repeat(5000),
+        },
+        classes: Array.from({ length: 200 }, (_, i) => `c${i}`),
+        attrs: { "data-note": "z".repeat(1000) },
+      },
+      viewport: { w: 1, h: 1, dpr: 1 },
+      userAgent: "",
+    })
+    const doc = await t.run((ctx) => ctx.db.get(id))
+    expect(doc).toMatchObject({
+      anchor: {
+        selectors: { css: "x".repeat(2048), path: "y".repeat(2048) },
+        classes: Array.from({ length: 64 }, (_, i) => `c${i}`),
+        attrs: { "data-note": "z".repeat(512) },
+      },
+    })
+  })
+
+  it("accepts a maximal-length multi-byte body within the size budget", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    // 2000 three-byte characters: the largest body the widget allows.
+    const id = await t.mutation(internal.comments.createFromWidget, {
+      publicId,
+      ip: "1.1.1.1",
+      body: "\u754c".repeat(2000),
+      authorName: "Sam",
+      authorSecret: generateSecret(),
+      page: page(),
+      anchor,
+      viewport: { w: 1, h: 1, dpr: 1 },
+      userAgent: "",
+    })
+    const doc = await t.run((ctx) => ctx.db.get(id))
+    expect(doc?.body).toHaveLength(2000)
+    // The search index copy is byte-capped instead of duplicating 6 KB.
+    expect(
+      new TextEncoder().encode(doc?.searchText ?? "").length
+    ).toBeLessThanOrEqual(3072)
+  })
+
+  it("rejects comments whose clamped payload still crosses the size budget", async () => {
+    const t = setup()
+    // Each clamped attrs value still holds 512 three-byte characters; 64 of
+    // them keep the stored document far over the per-comment budget even
+    // after every per-field clamp.
+    const attrs = Object.fromEntries(
+      Array.from({ length: 64 }, (_, i) => [`k${i}`, "\u754c".repeat(512)])
+    )
+    await expect(
+      t.mutation(internal.comments.createFromWidget, {
+        publicId: generateProjectId(),
+        ip: "1.1.1.1",
+        body: "Hi",
+        authorName: "Sam",
+        authorSecret: generateSecret(),
+        page: page(),
+        anchor: { ...anchor, attrs },
+        viewport: { w: 1, h: 1, dpr: 1 },
+        userAgent: "",
+      })
+    ).rejects.toThrow(/too large/)
+  })
+
+  it("keeps the listing window under the Convex transaction read limit", () => {
+    // listForPage reads this many documents in one transaction; Convex
+    // aborts transactions reading more than 16 MiB. The per-comment budget
+    // plus document overhead must keep the full window below the limit.
+    const windowDocs = LIMITS.pageOpenLimit + LIMITS.pageResolvedLimit
+    const perDoc = LIMITS.commentStoredBytesMax + 600
+    expect(windowDocs * perDoc).toBeLessThan(16 * 1024 * 1024)
+  })
+
+  it("rejects pathologically long origins", async () => {
+    const t = setup()
+    const origin = `https://${"a".repeat(3000)}.example.com`
+    await expect(
+      t.mutation(internal.comments.createFromWidget, {
+        publicId: generateProjectId(),
+        ip: "1.1.1.1",
+        body: "Hi",
+        authorName: "Sam",
+        authorSecret: generateSecret(),
+        page: page("/pricing", origin),
+        anchor,
+        viewport: { w: 1, h: 1, dpr: 1 },
+        userAgent: "",
+      })
+    ).rejects.toThrow(/Invalid origin/)
+  })
+
+  it("keeps edits within the same stored-size budget", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const secret = generateSecret()
+    // A legal insert whose clamped anchor already holds ~9 KB.
+    const attrs = Object.fromEntries(
+      Array.from({ length: 6 }, (_, i) => [`k${i}`, "\u754c".repeat(512)])
+    )
+    const id = await t.mutation(internal.comments.createFromWidget, {
+      publicId,
+      ip: "1.1.1.1",
+      body: "Hi",
+      authorName: "Sam",
+      authorSecret: secret,
+      page: page(),
+      anchor: { ...anchor, attrs },
+      viewport: { w: 1, h: 1, dpr: 1 },
+      userAgent: "",
+    })
+    // Growing the body to the maximal multi-byte size would push the
+    // document over the budget, so the edit is rejected.
+    await expect(
+      t.mutation(api.comments.editOwn, {
+        id,
+        authorSecret: secret,
+        body: "\u754c".repeat(2000),
+      })
+    ).rejects.toThrow(/too large/)
+    // A small edit still works.
+    await t.mutation(api.comments.editOwn, {
+      id,
+      authorSecret: secret,
+      body: "Updated",
+    })
+    expect((await t.run((ctx) => ctx.db.get(id)))?.body).toBe("Updated")
+  })
+
   it("rejects invalid project ids and empty bodies", async () => {
     const t = setup()
     await expect(addComment(t, "nuni_nope")).rejects.toThrow()
