@@ -5,9 +5,14 @@
     "limit": "60 KB"
   },
   {
-    "name": "ESM entry",
+    "name": "ESM entry (includes the lazy screenshot chunk)",
     "path": "dist/index.js",
     "import": "{ init }",
     "limit": "60 KB"
+  },
+  {
+    "name": "Screenshot add-on for the CDN script",
+    "path": "dist/nuni-screenshot.global.js",
+    "limit": "15 KB"
   }
 ]

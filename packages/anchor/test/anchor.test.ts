@@ -163,3 +163,98 @@ describe("capture and resolve", () => {
     expect(anchor.offset.x).toBeLessThanOrEqual(1)
   })
 })
+
+describe("masked areas", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <section class="account">
+        <h2>Your account</h2>
+        <p data-nuni-mask title="Card ending 4242">Balance: $1,234</p>
+        <div data-nuni-mask><button id="secret" aria-label="Pay $1,234">Pay</button></div>
+        <div data-nuni-mask><button aria-label="Refund $1,234">Refund</button></div>
+        <button id="pay">Pay now</button>
+      </section>`
+  })
+
+  it("never reads text inside data-nuni-mask", () => {
+    const section = document.querySelector("section")!
+    expect(elementText(section)).toBe("Your account Pay now")
+    expect(elementText(document.querySelector("[data-nuni-mask]")!)).toBe("")
+    expect(elementText(document.getElementById("secret")!)).toBe("")
+  })
+
+  it("keeps masked text and labels out of the anchor, and still resolves", () => {
+    const pay = document.getElementById("pay")!
+    const anchor = captureAnchor(pay)
+    expect(JSON.stringify(anchor)).not.toContain("1,234")
+    expect(anchor.ancestors[0]?.text).toBe("Your account Pay now")
+
+    const secret = document.getElementById("secret")!
+    const masked = captureAnchor(secret)
+    expect(masked.text).toBe("")
+    expect(masked.attrs).toEqual({})
+    expect(JSON.stringify(masked)).not.toContain("1,234")
+    expect(resolveAnchor(masked, document).element).toBe(secret)
+  })
+
+  it("keeps masked labels out of the selectors", () => {
+    const refund = document.querySelectorAll("[data-nuni-mask] button")[1]!
+    const anchor = captureAnchor(refund)
+    expect(JSON.stringify(anchor)).not.toContain("1,234")
+    expect(resolveAnchor(anchor, document).element).toBe(refund)
+  })
+})
+
+describe("shadow DOM", () => {
+  function card(plan: string) {
+    const host = document.createElement("plan-card")
+    const root = host.attachShadow({ mode: "open" })
+    root.innerHTML = `<h3>${plan}</h3><p>${plan} plan</p><button type="button">Choose plan</button>`
+    return host
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = `<main><section class="grid"></section></main>`
+    const grid = document.querySelector(".grid")!
+    for (const plan of ["Starter", "Pro", "Team"]) grid.append(card(plan))
+  })
+
+  const button = (plan: string) =>
+    Array.from(document.querySelectorAll("plan-card"))
+      .find((h) => h.shadowRoot!.querySelector("h3")!.textContent === plan)!
+      .shadowRoot!.querySelector("button")!
+
+  it("records the host chain and builds selectors inside the shadow root", () => {
+    const anchor = captureAnchor(button("Pro"))
+    expect(anchor.scope).toHaveLength(1)
+    expect(anchor.scope![0]!.kind).toBe("shadow")
+    expect(anchor.scope![0]!.host.tag).toBe("plan-card")
+    // The host's text is what it shows: its shadow tree.
+    expect(anchor.scope![0]!.host.text).toContain("Pro")
+    expect(anchor.selectors.path).toBe("button")
+    expect(buildPath(button("Pro"))).toBe("button")
+  })
+
+  it("finds the element again through its host, and not in another card", () => {
+    const anchor = captureAnchor(button("Pro"))
+    expect(resolveAnchor(anchor, document).element).toBe(button("Pro"))
+
+    // A card inserted before: still the Pro card.
+    const grid = document.querySelector(".grid")!
+    grid.prepend(card("Free"))
+    expect(resolveAnchor(anchor, document).element).toBe(button("Pro"))
+
+    // The Pro card removed: lost, not the same-looking button elsewhere.
+    document.querySelectorAll("plan-card").forEach((h) => {
+      if (h.shadowRoot!.querySelector("h3")!.textContent === "Pro") h.remove()
+    })
+    const lost = resolveAnchor(anchor, document)
+    expect(lost.element).toBeNull()
+    expect(lost.confidence).toBe("lost")
+  })
+
+  it("leaves anchors in the page's own document without a scope", () => {
+    document.body.innerHTML = `<button id="buy">Buy</button>`
+    expect(captureAnchor(document.getElementById("buy")!).scope).toBeUndefined()
+  })
+})

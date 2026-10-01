@@ -18,6 +18,29 @@ export function fail(code: string, message: string): never {
   throw new ConvexError({ code, message })
 }
 
+export function clampString(value: string, max: number) {
+  return value.length > max ? value.slice(0, max) : value
+}
+
+/** A comment or reply body: trimmed, not empty, within the limit. */
+export function cleanBody(body: string): string {
+  const clean = body.replace(/\r\n/g, "\n").trim()
+  if (!clean) fail("invalid_body", "Comment cannot be empty")
+  if (clean.length > LIMITS.bodyMaxLength) {
+    fail(
+      "invalid_body",
+      `Comments are limited to ${LIMITS.bodyMaxLength} characters`
+    )
+  }
+  return clean
+}
+
+export function cleanName(name: string): string {
+  const clean = name.trim().replace(/\s+/g, " ").slice(0, LIMITS.nameMaxLength)
+  if (!clean) fail("invalid_name", "Enter your name")
+  return clean
+}
+
 export function assertProjectId(publicId: string) {
   if (!isProjectId(publicId)) fail("invalid_project", "Invalid project ID")
 }
@@ -86,6 +109,9 @@ export async function ensureProject(
 ): Promise<Doc<"projects">> {
   assertProjectId(publicId)
   const existing = await projectByPublicId(ctx, publicId)
+  if (existing?.deletingAt) {
+    fail("deleting", "This project is being deleted")
+  }
   if (existing) {
     if (
       !existing.origins.includes(origin) &&
@@ -107,6 +133,21 @@ export async function ensureProject(
     lastActivityAt: Date.now(),
   })
   return (await ctx.db.get(id))!
+}
+
+/** Make the user the owner of an unclaimed project, and record the claim. */
+export async function claimFor(
+  ctx: MutationCtx,
+  project: Doc<"projects">,
+  userId: Id<"users">,
+  origin?: string
+) {
+  await ctx.db.patch(project._id, {
+    ownerId: userId,
+    claimedAt: Date.now(),
+    lastActivityAt: Date.now(),
+  })
+  await ctx.db.insert("claims", { projectId: project._id, userId, origin })
 }
 
 /** The signed-in dashboard user (WorkOS JWT), if any. */
@@ -156,19 +197,60 @@ export async function requireOwner(
 ): Promise<Id<"users">> {
   const project = await ctx.db.get(projectId)
   if (!project) fail("not_found", "Project not found")
+  const ownerId = await actingOwner(ctx, project, widget)
+  if (!ownerId) fail("forbidden", "Only the project owner can do this")
+  return ownerId
+}
 
+/** Like requireOwner, but returns null instead of throwing (for queries). */
+export async function actingOwner(
+  ctx: Ctx,
+  project: Doc<"projects">,
+  widget?: { sessionToken?: string }
+): Promise<Id<"users"> | null> {
+  if (!project.ownerId) return null
   if (widget?.sessionToken) {
     const session = await sessionFromToken(ctx, widget.sessionToken)
     if (
       session &&
-      session.projectId === projectId &&
+      session.projectId === project._id &&
       project.ownerId === session.userId
     ) {
       return session.userId
     }
   }
-
   const user = await currentUser(ctx)
   if (user && project.ownerId === user._id) return user._id
-  fail("forbidden", "Only the project owner can do this")
+  return null
+}
+
+/**
+ * The signed-in dashboard user, who must own the project. Management
+ * (transfer, release, delete, sessions) is never allowed with a widget or
+ * CLI session token.
+ */
+export async function requireDashboardOwner(
+  ctx: Ctx,
+  projectId: Id<"projects">
+): Promise<{ user: Doc<"users">; project: Doc<"projects"> }> {
+  const user = await requireUser(ctx)
+  const project = await ctx.db.get(projectId)
+  if (!project || project.deletingAt) fail("not_found", "Project not found")
+  if (project.ownerId !== user._id) {
+    fail("forbidden", "Only the project owner can do this")
+  }
+  return { user, project }
+}
+
+/** Sign out every widget and CLI session of a project. */
+export async function revokeSessions(
+  ctx: MutationCtx,
+  projectId: Id<"projects">
+): Promise<number> {
+  const sessions = await ctx.db
+    .query("widgetSessions")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .collect()
+  for (const session of sessions) await ctx.db.delete(session._id)
+  return sessions.length
 }

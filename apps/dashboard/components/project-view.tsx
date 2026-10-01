@@ -1,19 +1,22 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
-import type { Id } from "@nuni/backend/dataModel"
-import { buildAgentPrompt } from "@nuni/shared"
+import { buildAgentPrompt, buildCommentPrompt, LIMITS } from "@nuni/shared"
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react"
 import {
   ArrowLeftIcon,
   CheckIcon,
   ExternalLinkIcon,
   RotateCcwIcon,
+  SettingsIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 
+import { CommentContext } from "@/components/comment-context"
+import { CommentThread } from "@/components/comment-thread"
 import { CopyButton } from "@/components/copy-button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -36,7 +39,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useStoreUser } from "@/components/use-store-user"
-import { hostOf, initials, jumpUrl, timeAgo } from "@/lib/format"
+import { errorMessage, hostOf, initials, jumpUrl, timeAgo } from "@/lib/format"
 
 type Status = "open" | "resolved"
 
@@ -85,11 +88,21 @@ export function ProjectView({ publicId }: { publicId: string }) {
           <ArrowLeftIcon className="size-4" /> Projects
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <ProjectName projectId={project._id} name={project.name} />
-          <CopyButton
-            value={buildAgentPrompt({ projectId: publicId })}
-            label="Copy agent prompt"
-          />
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {project.name}
+          </h1>
+          <div className="flex flex-wrap gap-2">
+            <CopyButton
+              value={buildAgentPrompt({ projectId: publicId })}
+              label="Copy agent prompt"
+            />
+            <Link
+              href={`/p/${publicId}/settings`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              <SettingsIcon /> Settings
+            </Link>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs">
@@ -115,56 +128,6 @@ export function ProjectView({ publicId }: { publicId: string }) {
         <CommentList publicId={publicId} status={status} />
       </section>
     </div>
-  )
-}
-
-function ProjectName({
-  projectId,
-  name,
-}: {
-  projectId: Id<"projects">
-  name: string
-}) {
-  const rename = useMutation(api.projects.rename)
-  const [editing, setEditing] = useState(false)
-  const [value, setValue] = useState(name)
-  if (!editing) {
-    return (
-      <h1 className="text-2xl font-semibold tracking-tight">
-        <Button
-          variant="ghost"
-          className="h-auto px-0 text-2xl font-semibold tracking-tight"
-          title="Rename"
-          onClick={() => {
-            setValue(name)
-            setEditing(true)
-          }}
-        >
-          {name}
-        </Button>
-      </h1>
-    )
-  }
-  return (
-    <form
-      className="flex max-w-md gap-2"
-      onSubmit={async (e) => {
-        e.preventDefault()
-        if (value.trim()) await rename({ projectId, name: value })
-        setEditing(false)
-      }}
-    >
-      <Input
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        aria-label="Project name"
-      />
-      <Button type="submit">Save</Button>
-      <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
-        Cancel
-      </Button>
-    </form>
   )
 }
 
@@ -201,18 +164,92 @@ function CommentList({
   const resolve = useMutation(api.comments.resolve)
   const reopen = useMutation(api.comments.reopen)
   const remove = useMutation(api.comments.remove)
+  const bulkSetStatus = useMutation(api.comments.bulkSetStatus)
+  const bulkRemove = useMutation(api.comments.bulkRemove)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkError, setBulkError] = useState<string | null>(null)
+  // A different list (tab or filters): start a new selection.
+  const listKey = `${status}|${page}|${origin}|${search}`
+  const [selectedFor, setSelectedFor] = useState(listKey)
+  if (selectedFor !== listKey) {
+    setSelectedFor(listKey)
+    setSelected(new Set())
+  }
 
   const pages = useMemo(() => [...(filters?.paths ?? [])].sort(), [filters])
   const origins = useMemo(() => [...(filters?.origins ?? [])].sort(), [filters])
   const filtered = comments ?? []
   const hasFilters = Boolean(pageInput || origin || query)
+  // Only what is still listed counts (a comment may be gone meanwhile).
+  const picked = filtered.filter((c) => selected.has(c._id))
+  const allPicked = filtered.length > 0 && picked.length === filtered.length
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function runBulk(action: "resolve" | "reopen" | "delete") {
+    const ids = picked.slice(0, LIMITS.bulkMax).map((c) => c._id)
+    if (!ids.length) return
+    if (
+      action === "delete" &&
+      !confirm(
+        `Delete ${ids.length} comment${ids.length === 1 ? "" : "s"}? This can't be undone.`
+      )
+    )
+      return
+    setBulkBusy(true)
+    setBulkError(null)
+    try {
+      if (action === "delete") await bulkRemove({ ids })
+      else
+        await bulkSetStatus({
+          ids,
+          status: action === "resolve" ? "resolved" : "open",
+        })
+      setSelected(new Set())
+    } catch (err) {
+      setBulkError(errorMessage(err))
+    } finally {
+      setBulkBusy(false)
+    }
+  }
 
   if (comments === undefined) return <Skeleton className="h-40 rounded-3xl" />
 
   return (
     <div className="grid gap-3">
       {(comments.length > 0 || hasFilters) && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {filtered.length > 0 && (
+            <label className="flex items-center gap-2 pr-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={allPicked}
+                ref={(el) => {
+                  if (el) el.indeterminate = picked.length > 0 && !allPicked
+                }}
+                onChange={() =>
+                  setSelected(
+                    allPicked
+                      ? new Set()
+                      : new Set(
+                          filtered.slice(0, LIMITS.bulkMax).map((c) => c._id)
+                        )
+                  )
+                }
+                aria-label="Select all comments shown"
+              />
+              Select all
+            </label>
+          )}
           <Input
             className="max-w-xs"
             placeholder="Search comments"
@@ -273,6 +310,13 @@ function CommentList({
               <Card size="sm">
                 <CardContent className="grid gap-2">
                   <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      checked={selected.has(c._id)}
+                      onChange={() => toggle(c._id)}
+                      aria-label={`Select the comment by ${c.authorName}`}
+                    />
                     <Avatar className="size-6">
                       <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
                         {initials(c.authorName)}
@@ -287,12 +331,28 @@ function CommentList({
                     </Badge>
                     <Badge variant="outline">{hostOf(c.page.origin)}</Badge>
                   </div>
+                  {c.anchor.quote && (
+                    <blockquote className="line-clamp-3 border-l-2 border-primary pl-3 text-sm text-muted-foreground italic">
+                      {c.anchor.quote.exact}
+                    </blockquote>
+                  )}
                   <p className="text-sm whitespace-pre-wrap">{c.body}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    On <code className="font-mono">&lt;{c.anchor.tag}&gt;</code>
+                    {c.anchor.region ? "An area of " : "On "}
+                    <code className="font-mono">&lt;{c.anchor.tag}&gt;</code>
                     {c.anchor.text ? ` "${c.anchor.text}"` : ""} ·{" "}
                     {c.viewport.w}×{c.viewport.h}
                   </p>
+                  <CommentContext
+                    context={c.context}
+                    screenshotUrl={c.screenshotUrl}
+                    userAgent={c.userAgent}
+                  />
+                  <CommentThread
+                    publicId={publicId}
+                    commentId={c._id}
+                    replies={c.replies}
+                  />
                   <div className="flex flex-wrap gap-2 pt-1">
                     <a
                       className={buttonVariants({
@@ -322,6 +382,10 @@ function CommentList({
                         <RotateCcwIcon /> Reopen
                       </Button>
                     )}
+                    <CopyButton
+                      value={buildCommentPrompt(c)}
+                      label="Copy for agent"
+                    />
                     <Button
                       size="sm"
                       variant="ghost"
@@ -341,6 +405,59 @@ function CommentList({
             </li>
           ))}
         </ul>
+      )}
+      {picked.length > 0 && (
+        <div
+          role="region"
+          aria-label="Selected comments"
+          className="sticky bottom-4 z-10 flex flex-wrap items-center gap-2 rounded-2xl border bg-background/95 p-2 pl-4 shadow-lg backdrop-blur"
+        >
+          <span className="text-sm font-medium">
+            {picked.length} selected
+            {picked.length > LIMITS.bulkMax
+              ? ` (the first ${LIMITS.bulkMax} at a time)`
+              : ""}
+          </span>
+          <span className="flex-1" />
+          {bulkError && (
+            <span className="text-sm text-destructive">{bulkError}</span>
+          )}
+          {status === "open" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={bulkBusy}
+              onClick={() => void runBulk("resolve")}
+            >
+              <CheckIcon /> Resolve
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={bulkBusy}
+              onClick={() => void runBulk("reopen")}
+            >
+              <RotateCcwIcon /> Reopen
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={bulkBusy}
+            onClick={() => void runBulk("delete")}
+          >
+            <Trash2Icon /> Delete
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Clear the selection"
+            onClick={() => setSelected(new Set())}
+          >
+            <XIcon />
+          </Button>
+        </div>
       )}
       {loadStatus === "CanLoadMore" && (
         <Button

@@ -15,6 +15,40 @@ For each comment: the text, the author name (as typed), a hash of the commenter'
 
 For owners: the name, email and avatar from GitHub via WorkOS.
 
+## Page context (owner only)
+
+To help you, or your coding agent, act on a comment, the widget also attaches what it saw when the comment was left:
+
+- **Screenshot** of the element with a small margin around it (not the rest of the page), with the element outlined. Nuni's own UI is left out.
+- **Console**: the latest console errors and warnings, and uncaught errors.
+- **Failed requests**: method, status and the URL's origin and path.
+- **Element**: the element's markup and a few computed styles (font, color, spacing and size).
+
+Query strings and hashes are removed from every URL, in failed requests, console messages and the element's markup (links, images), since they often carry tokens. The server removes them again, whatever the browser sent.
+
+Unlike the comment itself, this context is **only visible to the project owner**, in the dashboard and in the widget's owner tools. It is deleted with the comment.
+
+### What is never captured
+
+- **Form values**: text fields, text areas and selects are painted over in the screenshot, and their values and option lists are removed from the markup.
+- **Areas you mark private**: add `data-nuni-mask` to any element (an account summary, a card number). It is painted over in the screenshot, its contents are removed from the markup, and its text and labels are never stored with the pin, including for elements inside it.
+
+```html
+<div class="account" data-nuni-mask>Balance: $1,234</div>
+```
+
+### The commenter decides
+
+The screenshot is shown in the comment box before posting, with a **Remove** button. Only a screenshot the commenter saw is uploaded.
+
+### Turning it off
+
+Turn any of it off with the [`capture` option](/reference/options):
+
+```ts
+init({ project: "nuni_...", capture: { screenshot: false, console: false } })
+```
+
 ## Abuse protection
 
 Comment creation is rate limited per IP and per project, and unclaimed projects are capped at 500 comments. Comment text is always rendered as plain text, never HTML.

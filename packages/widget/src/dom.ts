@@ -42,18 +42,6 @@ export function icon(svg: string): HTMLSpanElement {
   return span
 }
 
-export function timeAgo(ts: number, now = Date.now()): string {
-  const s = Math.max(0, Math.round((now - ts) / 1000))
-  if (s < 45) return "just now"
-  const m = Math.round(s / 60)
-  if (m < 60) return `${m}m ago`
-  const hr = Math.round(m / 60)
-  if (hr < 24) return `${hr}h ago`
-  const d = Math.round(hr / 24)
-  if (d < 30) return `${d}d ago`
-  return new Date(ts).toLocaleDateString()
-}
-
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   const letters =
@@ -67,5 +55,68 @@ export function initials(name: string): string {
 export function colorFor(name: string): string {
   let hash = 0
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
-  return `oklch(0.62 0.17 ${hash % 360})`
+  // Dark enough for white initials on every hue (at least 4.9:1).
+  return `oklch(0.5 0.17 ${hash % 360})`
+}
+
+/** Copy text, falling back to execCommand where the async clipboard is off (plain http previews). */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // fall through
+  }
+  const area = document.createElement("textarea")
+  area.value = text
+  area.setAttribute("readonly", "")
+  area.style.cssText = "position:fixed;top:0;left:0;opacity:0"
+  document.body.appendChild(area)
+  area.select()
+  try {
+    return document.execCommand("copy")
+  } catch {
+    return false
+  } finally {
+    area.remove()
+  }
+}
+
+/** Any CSS color as RGB, using the browser's own parser. */
+export function parseColor(color: string): [number, number, number] | null {
+  const probe = document.createElement("span")
+  probe.style.color = color
+  if (!probe.style.color) return null
+  probe.style.display = "none"
+  document.documentElement.appendChild(probe)
+  const computed = getComputedStyle(probe).color
+  probe.remove()
+  if (/^rgba?\(/.test(computed)) {
+    const parts = computed.match(/[\d.]+/g)?.map(Number)
+    if (parts && parts.length >= 3) return [parts[0]!, parts[1]!, parts[2]!]
+  }
+  // Newer color spaces (oklch, lab) stay as written: paint one pixel.
+  try {
+    const canvas = document.createElement("canvas")
+    canvas.width = canvas.height = 1
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return null
+    ctx.fillStyle = color
+    ctx.fillRect(0, 0, 1, 1)
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data
+    return [r!, g!, b!]
+  } catch {
+    return null
+  }
+}
+
+/** Black or white text, whichever reads better on the color (WCAG). */
+export function readableOn([r, g, b]: [number, number, number]): string {
+  const channel = (c: number) => {
+    const v = c / 255
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+  }
+  const l = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+  // Contrast with white is 1.05 / (l + 0.05); with black, (l + 0.05) / 0.05.
+  return 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 ? "#ffffff" : "#111111"
 }

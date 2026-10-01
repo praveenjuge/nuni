@@ -26,6 +26,7 @@ Call `init` once, on the client. Calling it again with the same project does not
     createApp(App).mount("#app")
     init({ project: "nuni_..." })
     ```
+
   </Tab>
   <Tab title="Nuxt">
     ```ts plugins/nuni.client.ts
@@ -35,6 +36,7 @@ Call `init` once, on the client. Calling it again with the same project does not
       init({ project: "nuni_..." })
     })
     ```
+
   </Tab>
   <Tab title="SvelteKit">
     ```svelte src/routes/+layout.svelte
@@ -47,6 +49,7 @@ Call `init` once, on the client. Calling it again with the same project does not
 
     <slot />
     ```
+
   </Tab>
   <Tab title="Astro">
     ```astro src/layouts/Layout.astro

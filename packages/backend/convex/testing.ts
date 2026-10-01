@@ -2,7 +2,13 @@ import { LIMITS, randomBase58 } from "@nuni/shared"
 import { v } from "convex/values"
 
 import { internalMutation } from "./_generated/server"
-import { ensureProject, fail, parseOrigin, sha256Hex } from "./lib"
+import {
+  ensureProject,
+  fail,
+  parseOrigin,
+  projectByPublicId,
+  sha256Hex,
+} from "./lib"
 
 /**
  * E2E helper: create an owner, claim a project and return a widget session
@@ -35,5 +41,28 @@ export const seedOwner = internalMutation({
       expiresAt: Date.now() + LIMITS.sessionTtlMs,
     })
     return { token }
+  },
+})
+
+/**
+ * E2E helper: approve a pending `nuni login` as the project's owner, in
+ * place of the dashboard page. Refused unless NUNI_ALLOW_TESTING=1.
+ */
+export const approveCliLogin = internalMutation({
+  args: { userCode: v.string() },
+  handler: async (ctx, { userCode }) => {
+    if (process.env.NUNI_ALLOW_TESTING !== "1")
+      fail("forbidden", "Testing helpers are disabled")
+    const login = await ctx.db
+      .query("cliLogins")
+      .withIndex("by_userCode", (q) => q.eq("userCode", userCode))
+      .first()
+    if (!login) fail("not_found", "No such login")
+    const project = await projectByPublicId(ctx, login.publicId)
+    if (!project?.ownerId) fail("forbidden", "Project has no owner")
+    await ctx.db.patch(login._id, {
+      status: "approved",
+      userId: project.ownerId,
+    })
   },
 })

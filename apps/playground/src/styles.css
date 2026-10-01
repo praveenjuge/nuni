@@ -132,3 +132,15 @@ main {
     font-size: 32px;
   }
 }
+
+.embeds {
+  padding: 32px 24px;
+  display: grid;
+  gap: 24px;
+}
+.embed-frame {
+  width: 100%;
+  height: 220px;
+  border: 1px solid #e4e4e7;
+  border-radius: 12px;
+}
