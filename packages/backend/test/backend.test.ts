@@ -67,6 +67,27 @@ describe("widget comments", () => {
       /Slow down/
     )
     await addComment(t, publicId, { ip: "8.8.8.8" })
+    // The address is the whole key: another project doesn't reset it.
+    await expect(
+      addComment(t, generateProjectId(), { ip: "9.9.9.9" })
+    ).rejects.toThrow(/Slow down/)
+  })
+
+  it("keys per-IP limits by project on test deployments", async () => {
+    vi.stubEnv("NUNI_ALLOW_TESTING", "1")
+    try {
+      const t = setup()
+      const publicId = generateProjectId()
+      for (let i = 0; i < 10; i++)
+        await addComment(t, publicId, { ip: "9.9.9.9" })
+      await expect(addComment(t, publicId, { ip: "9.9.9.9" })).rejects.toThrow(
+        /Slow down/
+      )
+      // e2e browsers share one address; each test has its own project.
+      await addComment(t, generateProjectId(), { ip: "9.9.9.9" })
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it("caps unclaimed projects", async () => {

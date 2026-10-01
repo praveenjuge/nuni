@@ -230,10 +230,11 @@ export function createMcpServer(options: McpOptions) {
       async run(args) {
         const { publicId, token } = session()
         const id = str(args, "id")
+        // Resolve first, so a note is never left on a comment that stayed open.
+        await remote.setStatus(token, id, "resolved")
         if (typeof args.note === "string" && args.note.trim()) {
           await remote.reply(publicId, token, id, args.note.trim())
         }
-        await remote.setStatus(token, id, "resolved")
         return text(`Resolved ${id}.`)
       },
     },

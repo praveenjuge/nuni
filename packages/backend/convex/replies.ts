@@ -18,7 +18,7 @@ import {
   requireOwner,
   sha256Hex,
 } from "./lib"
-import { rateLimiter } from "./rateLimits"
+import { ipKey, rateLimiter } from "./rateLimits"
 
 /**
  * Replies in a comment's thread. Public like comments: anyone with the
@@ -113,7 +113,9 @@ export const createFromWidget = internalMutation({
   },
   handler: async (ctx, args) => {
     checkSecret(args.authorSecret)
-    const { ok } = await rateLimiter.limit(ctx, "replyPerIp", { key: args.ip })
+    const { ok } = await rateLimiter.limit(ctx, "replyPerIp", {
+      key: ipKey(args.ip, args.publicId),
+    })
     if (!ok) fail("rate_limited", "Slow down a little")
     const { project, comment } = await commentInProject(
       ctx,

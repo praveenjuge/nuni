@@ -18,7 +18,7 @@ import {
   requireUser,
   sha256Hex,
 } from "./lib"
-import { rateLimiter } from "./rateLimits"
+import { ipKey, rateLimiter } from "./rateLimits"
 
 /**
  * `nuni login` is a device-code sign-in, so it also works for agents in
@@ -47,7 +47,9 @@ export const start = internalMutation({
   args: { publicId: v.string(), client: v.string(), ip: v.string() },
   handler: async (ctx, { publicId, client, ip }) => {
     assertProjectId(publicId)
-    const { ok } = await rateLimiter.limit(ctx, "cliLoginPerIp", { key: ip })
+    const { ok } = await rateLimiter.limit(ctx, "cliLoginPerIp", {
+      key: ipKey(ip, publicId),
+    })
     if (!ok) fail("rate_limited", "Too many sign-ins, try again later")
     const project = await projectByPublicId(ctx, publicId)
     if (!project) {
@@ -100,7 +102,12 @@ export const poll = internalMutation({
     if (login.status === "denied") return { status: "denied" as const }
 
     const project = await projectByPublicId(ctx, login.publicId)
-    if (!project || !login.userId || project.ownerId !== login.userId) {
+    if (
+      !project ||
+      project.deletingAt ||
+      !login.userId ||
+      project.ownerId !== login.userId
+    ) {
       return { status: "denied" as const }
     }
     const token = `nuni_s_${randomBase58(40)}`

@@ -19,7 +19,7 @@ import { run } from "../src/cli"
 import { credentialFor, saveCredential } from "../src/credentials"
 import { createMcpServer } from "../src/mcp"
 import { findProjectIds, resolveProject } from "../src/project"
-import type { LoginPoll, Remote } from "../src/remote"
+import { RemoteError, type LoginPoll, type Remote } from "../src/remote"
 
 const PROJECT = "nuni_JJHAES8DaHHYNVh4JoWWXw"
 const OTHER = "nuni_KKHAES8DaHHYNVh4JoWWXw"
@@ -93,6 +93,7 @@ function fakeRemote(polls: LoginPoll[] = []): Remote & {
     },
     getComment: async (_p, _t, id) => (id === comment._id ? comment : null),
     setStatus: async (token, id, status) => {
+      if (id === "gone") throw new RemoteError("Comment not found", "not_found")
       calls.push(`${status} ${id} ${token}`)
     },
     reply: async (_p, token, id, body) => {
@@ -298,9 +299,18 @@ describe("comment commands", () => {
     const calls = remote.calls.slice(-3)
     expect(calls).toEqual([
       "reply jd7abc123 nuni_s_good Looking into it",
-      "reply jd7abc123 nuni_s_good Made it bigger",
       "resolved jd7abc123 nuni_s_good",
+      "reply jd7abc123 nuni_s_good Made it bigger",
     ])
+    // When resolving fails, the note is not posted.
+    const before = remote.calls.length
+    expect(
+      await run(["resolve", "gone", "--note", "Done", "--cwd", dir], {
+        remote,
+        ...io.options,
+      })
+    ).toBe(1)
+    expect(remote.calls.length).toBe(before)
     expect(
       await run(["reply", "jd7abc123", "--cwd", dir], { remote, ...io.options })
     ).toBe(1)
@@ -398,8 +408,8 @@ describe("MCP server", () => {
     })
     expect(resolved.isError).toBeFalsy()
     expect(remote.calls.slice(-2)).toEqual([
-      "reply jd7abc123 nuni_s_good Bigger now",
       "resolved jd7abc123 nuni_s_good",
+      "reply jd7abc123 nuni_s_good Bigger now",
     ])
     await client.callTool({
       name: "reply_to_comment",

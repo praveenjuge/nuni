@@ -50,3 +50,13 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   editPerAuthor: { kind: "token bucket", rate: 30, period: MINUTE },
   sessionPerUser: { kind: "token bucket", rate: 20, period: HOUR },
 })
+
+/**
+ * The key for a per-IP limit. On test deployments (NUNI_ALLOW_TESTING=1)
+ * every e2e browser shares one address, so there the key also names the
+ * project; each test uses its own project, so tests don't use up each
+ * other's allowance. Production keys by address alone.
+ */
+export function ipKey(ip: string, publicId: string): string {
+  return process.env.NUNI_ALLOW_TESTING === "1" ? `${ip} ${publicId}` : ip
+}

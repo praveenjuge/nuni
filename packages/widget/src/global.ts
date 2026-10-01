@@ -62,7 +62,8 @@ if (data?.project) {
         : flag(data.hotkey) === false
           ? false
           : data.hotkey,
-    zIndex: data.zIndex ? Number(data.zIndex) : undefined,
+    // `!== undefined`, so data-z-index="0" works too.
+    zIndex: data.zIndex !== undefined ? Number(data.zIndex) : undefined,
     locale: data.locale,
     capture: {
       console: flag(data.captureConsole),

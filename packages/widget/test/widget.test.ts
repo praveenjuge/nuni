@@ -113,6 +113,8 @@ describe("options", () => {
       label: null,
     })
     expect(resolveConfig({ ...base, hotkey: false }).hotkey).toBeNull()
+    expect(resolveConfig({ ...base, zIndex: 0 }).zIndex).toBe(0)
+    expect(resolveConfig({ ...base, zIndex: Number("x") }).zIndex).toBeNull()
     expect(
       resolveConfig({ ...base, position: "middle" as never }).position
     ).toBe("bottom-right")

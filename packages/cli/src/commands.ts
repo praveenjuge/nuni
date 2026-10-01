@@ -252,9 +252,10 @@ export async function setStatus(
   const verb = status === "resolved" ? "resolve" : "reopen"
   if (!id) throw new CommandError(`Pass a comment id: ${verb} <id>`)
   const { publicId, token } = signedIn(ctx)
-  // The note goes in the thread first, so it is there when people look.
-  if (note?.trim()) await ctx.remote.reply(publicId, token, id, note)
+  // The status first: a note saying what changed is only posted once the
+  // change of status went through.
   await ctx.remote.setStatus(token, id, status)
+  if (note?.trim()) await ctx.remote.reply(publicId, token, id, note)
   ctx.out(
     ctx.json
       ? JSON.stringify({ id, status })

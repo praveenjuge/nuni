@@ -242,6 +242,12 @@ describe("release and delete", () => {
       publicId,
       origin: "http://localhost:3000",
     })
+    // A terminal waiting for its sign-in to be approved.
+    const { userCode } = await t.mutation(internal.cliAuth.start, {
+      publicId,
+      client: "nuni-cli test",
+      ip: "1.1.1.1",
+    })
 
     await expect(
       alice.mutation(api.projects.remove, {
@@ -272,6 +278,7 @@ describe("release and delete", () => {
       sessions: (await ctx.db.query("widgetSessions").collect()).length,
       pageStats: (await ctx.db.query("pageStats").collect()).length,
       claims: (await ctx.db.query("claims").collect()).length,
+      cliLogins: (await ctx.db.query("cliLogins").collect()).length,
     }))
     expect(left).toEqual({
       project: null,
@@ -280,7 +287,13 @@ describe("release and delete", () => {
       sessions: 0,
       pageStats: 0,
       claims: 0,
+      cliLogins: 0,
     })
+
+    // The old sign-in can't be approved for the next project with this ID.
+    await expect(
+      alice.mutation(api.cliAuth.approve, { userCode })
+    ).rejects.toThrow(/expired/)
 
     // A widget that is still installed makes a new, empty, unclaimed project.
     await addComment(t, publicId)

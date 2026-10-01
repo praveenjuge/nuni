@@ -32,7 +32,7 @@ import {
   sha256Hex,
   currentUser,
 } from "./lib"
-import { rateLimiter } from "./rateLimits"
+import { ipKey, rateLimiter } from "./rateLimits"
 import { deleteThread, repliesFor } from "./replies"
 import {
   anchorValidator,
@@ -236,7 +236,9 @@ export const createFromWidget = internalMutation({
       fail("invalid_author", "Invalid author key")
     }
 
-    const perIp = await rateLimiter.limit(ctx, "commentPerIp", { key: args.ip })
+    const perIp = await rateLimiter.limit(ctx, "commentPerIp", {
+      key: ipKey(args.ip, args.publicId),
+    })
     if (!perIp.ok) fail("rate_limited", "Slow down a little")
     const perProject = await rateLimiter.limit(ctx, "commentPerProject", {
       key: args.publicId,
@@ -668,7 +670,7 @@ export const checkScreenshot = internalMutation({
       fail("too_large", "Screenshot is too large")
     }
     const { ok } = await rateLimiter.limit(ctx, "screenshotPerIp", {
-      key: args.ip,
+      key: ipKey(args.ip, args.publicId),
     })
     if (!ok) fail("rate_limited", "Slow down a little")
     const comment = await screenshotTarget(ctx, args)

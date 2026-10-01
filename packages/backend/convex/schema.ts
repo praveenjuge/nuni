@@ -145,6 +145,7 @@ export default defineSchema({
   })
     .index("by_secretHash", ["secretHash"])
     .index("by_userCode", ["userCode"])
+    .index("by_publicId", ["publicId"])
     .index("by_expires", ["expiresAt"]),
 
   /**

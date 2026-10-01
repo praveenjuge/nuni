@@ -222,6 +222,12 @@ export const deleteBatch = internalMutation({
         .query("claims")
         .withIndex("by_project", (q) => q.eq("projectId", projectId))
         .take(DELETE_BATCH),
+      // A CLI sign-in waiting for approval must not carry over to a new
+      // project the widget starts later with the same ID.
+      ctx.db
+        .query("cliLogins")
+        .withIndex("by_publicId", (q) => q.eq("publicId", project.publicId))
+        .take(DELETE_BATCH),
     ])
     const rows = rest.flat()
     for (const row of rows) await ctx.db.delete(row._id)
