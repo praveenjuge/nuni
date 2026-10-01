@@ -49,6 +49,37 @@ async function wordsBox(target: Locator, words: string) {
   }, words)
 }
 
+type Box = { x: number; y: number; width: number; height: number }
+
+/**
+ * The widget's overlay boxes, read in one step: marks and areas are redrawn
+ * on every layout frame, so a box found a moment ago may already be gone.
+ */
+async function boxesOf(page: Page, selector: string): Promise<Box[]> {
+  return root(page).evaluate(
+    (host, selector) =>
+      Array.from(host.shadowRoot!.querySelectorAll(selector), (el) => {
+        const r = el.getBoundingClientRect()
+        return { x: r.x, y: r.y, width: r.width, height: r.height }
+      }),
+    selector
+  )
+}
+
+/** Wait until an overlay box sits where `expected` is. */
+async function expectBox(
+  page: Page,
+  selector: string,
+  expected: Box,
+  slack = 4
+) {
+  await expect
+    .poll(async () =>
+      (await boxesOf(page, selector)).some((b) => near(b, expected, slack))
+    )
+    .toBe(true)
+}
+
 async function post(page: Page, body: string, name?: string) {
   if (name) await composer(page).getByPlaceholder("Your name").fill(name)
   await composer(page).getByPlaceholder("Leave a comment").fill(body)
@@ -56,11 +87,7 @@ async function post(page: Page, body: string, name?: string) {
   await expect(root(page).locator(".toast")).toHaveText("Comment added")
 }
 
-function near(
-  a: { x: number; y: number; width: number; height: number },
-  b: { x: number; y: number; width: number; height: number },
-  slack = 4
-) {
+function near(a: Box, b: Box, slack = 4) {
   return (
     Math.abs(a.x - b.x) <= slack &&
     Math.abs(a.y - b.y) <= slack &&
@@ -91,9 +118,7 @@ test("comments on selected text find the same words after a reload", async ({
   // The words are marked on the page.
   const lead1 = await wordsBox(lead, "ship your product")
   await expect(root(page).locator(".mark")).toHaveCount(1)
-  expect(near((await root(page).locator(".mark").boundingBox())!, lead1)).toBe(
-    true
-  )
+  await expectBox(page, ".mark", lead1)
 
   // The same phrase in the second of three cards, commented with C.
   const card = page.locator(".feature").nth(1)
@@ -107,17 +132,8 @@ test("comments on selected text find the same words after a reload", async ({
   await page.reload()
   await expect(root(page).locator(".pin:not(.pin-draft)")).toHaveCount(2)
   await expect(root(page).locator(".mark")).toHaveCount(2)
-  const marks = await root(page)
-    .locator(".mark")
-    .evaluateAll((els) =>
-      els.map((el) => {
-        const r = el.getBoundingClientRect()
-        return { x: r.x, y: r.y, width: r.width, height: r.height }
-      })
-    )
-  const cardWords = await wordsBox(card, "your team can focus")
-  expect(marks.some((m) => near(m, lead1))).toBe(true)
-  expect(marks.some((m) => near(m, cardWords))).toBe(true)
+  await expectBox(page, ".mark", lead1)
+  await expectBox(page, ".mark", await wordsBox(card, "your team can focus"))
 
   // The thread shows the words.
   await root(page)
@@ -152,20 +168,18 @@ test("an area dragged while picking is shown again on its element", async ({
   await expect(composer(page)).toBeVisible()
   // The page's links and buttons under the drag were not clicked.
   await expect(page).toHaveURL(new RegExp(`/\\?project=${project}$`))
-  const drawn = (await root(page).locator(".area").boundingBox())!
   const expected = {
     x: from.x,
     y: from.y,
     width: to.x - from.x,
     height: to.y - from.y,
   }
-  expect(near(drawn, expected, 3)).toBe(true)
+  await expectBox(page, ".area", expected, 3)
   await post(page, `This whole block ${Date.now()}`, "Sam Tester")
 
   await page.reload()
   await expect(root(page).locator(".pin:not(.pin-draft)")).toHaveCount(1)
   await root(page).locator(".pin:not(.pin-draft)").click()
   await expect(thread(page)).toBeVisible()
-  const shown = (await root(page).locator(".area").boundingBox())!
-  expect(near(shown, expected, 3)).toBe(true)
+  await expectBox(page, ".area", expected, 3)
 })
