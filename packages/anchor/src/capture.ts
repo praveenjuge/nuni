@@ -8,6 +8,7 @@ import {
 import { reactComponentName } from "./component"
 import { clamp01, documentRect, documentSize, viewportInfo } from "./geometry"
 import { attributeAllowed, type AnchorOptions } from "./options"
+import { scopeChain } from "./scope"
 import { buildCssSelector, buildPath, stableIdOf, testIdOf } from "./selector"
 import { CAPTURED_ATTRIBUTES, stableClasses } from "./stable"
 import { elementText } from "./text"
@@ -20,7 +21,7 @@ function capturedAttributes(el: Element, options: AnchorOptions) {
     if (!attributeAllowed(name, options)) continue
     if (
       name === "value" &&
-      !(el instanceof HTMLButtonElement || el.getAttribute("type") === "submit")
+      !(el.tagName === "BUTTON" || el.getAttribute("type") === "submit")
     ) {
       continue
     }
@@ -59,11 +60,35 @@ function ancestorsOf(el: Element): AnchorAncestor[] {
 /**
  * Record everything needed to find `el` again later.
  * `point` is the click position in viewport (client) coordinates.
+ *
+ * An element inside open shadow roots or same-origin iframes also records
+ * each host and iframe on the way (`scope`), captured the same way, so it
+ * can be found again level by level.
  */
 export function captureAnchor(
   el: Element,
   point?: { x: number; y: number },
   options: AnchorOptions = {}
+): Anchor {
+  const anchor = captureLocal(el, point, options)
+  const top =
+    options.document ??
+    (typeof document === "undefined" ? el.ownerDocument : document)
+  const chain = scopeChain(el, top)
+  if (chain.length) {
+    anchor.scope = chain.map(({ kind, host }) => ({
+      kind,
+      host: captureLocal(host, undefined, options),
+    }))
+  }
+  return anchor
+}
+
+/** The anchor of `el` within its own scope (document or shadow root). */
+function captureLocal(
+  el: Element,
+  point: { x: number; y: number } | undefined,
+  options: AnchorOptions
 ): Anchor {
   const doc = el.ownerDocument
   const rect = documentRect(el)
@@ -84,7 +109,8 @@ export function captureAnchor(
   const css = buildCssSelector(el, options)
   const role = el.getAttribute("role") ?? undefined
 
-  const parent = el.parentElement
+  // parentNode, so top-level elements of a shadow root have siblings too.
+  const parent = el.parentNode as ParentNode | null
   const siblings = parent ? Array.from(parent.children) : [el]
 
   const anchor: Anchor = {

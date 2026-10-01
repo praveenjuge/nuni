@@ -43,6 +43,17 @@ export interface Anchor {
     scrollY: number
   }
   docSize: { w: number; h: number }
+  /**
+   * Shadow hosts and same-origin iframes on the way to the element,
+   * outermost first. The selectors above are relative to the innermost one.
+   */
+  scope?: AnchorScope[]
+}
+
+/** One shadow host or <iframe>, captured like any element in its own scope. */
+export interface AnchorScope {
+  kind: "shadow" | "frame"
+  host: Omit<Anchor, "scope">
 }
 
 export type CommentStatus = "open" | "resolved"

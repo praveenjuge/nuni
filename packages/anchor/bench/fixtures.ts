@@ -22,6 +22,8 @@ export interface Scenario {
   scrollContainer?: { selector: string; top: number }
 }
 
+import { scopedScenarios } from "./fixtures-scoped"
+
 const T = "data-bench-target"
 
 interface Plan {
@@ -521,4 +523,5 @@ export const scenarios: Scenario[] = [
     after: page({ faq: false }),
     expect: "lost",
   },
+  ...scopedScenarios,
 ]

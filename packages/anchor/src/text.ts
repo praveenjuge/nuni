@@ -20,9 +20,12 @@ export function normalizeText(value: string): string {
  */
 export function elementText(el: Element, max = 120): string {
   if (el.closest(MASK_SELECTOR)) return ""
-  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+  // Tag names, not instanceof: elements in iframes come from another realm.
+  if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
     return normalizeText(
-      el.placeholder || el.getAttribute("aria-label") || ""
+      (el as HTMLInputElement).placeholder ||
+        el.getAttribute("aria-label") ||
+        ""
     ).slice(0, max)
   }
   let out = ""
@@ -36,9 +39,27 @@ export function elementText(el: Element, max = 120): string {
     const tag = (node as Element).tagName.toUpperCase()
     if (SKIP_TEXT_TAGS.has(tag)) return
     if ((node as Element).hasAttribute(MASK_ATTRIBUTE)) return
+    // Nuni's own host: its UI is never part of the page's text.
+    if ((node as Element).hasAttribute("data-nuni")) return
     if (tag === "IMG") {
       out += " " + ((node as Element).getAttribute("alt") ?? "") + " "
       return
+    }
+    // What a web component shows is its open shadow tree (slots bring in
+    // the light children), so read that.
+    const shadow = (node as Element).shadowRoot
+    if (shadow) {
+      for (const child of Array.from(shadow.childNodes)) walk(child)
+      return
+    }
+    if (tag === "SLOT") {
+      const assigned = (node as HTMLSlotElement).assignedNodes?.({
+        flatten: true,
+      })
+      if (assigned?.length) {
+        for (const child of assigned) walk(child)
+        return
+      }
     }
     for (const child of Array.from(node.childNodes)) walk(child)
     if (tag === "BR" || tag === "P" || tag === "DIV" || tag === "LI") out += " "

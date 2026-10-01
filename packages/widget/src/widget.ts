@@ -1,10 +1,16 @@
 import {
   captureAnchor,
+  createResolveCache,
   elementText,
+  frameDocument,
+  frameElementOf,
   isRendered,
+  isShadowRoot,
   pickTarget,
   resolveAnchor,
+  scopeRootOf,
   textSimilarity,
+  viewportRect,
   type Confidence,
 } from "@nuni/anchor"
 import {
@@ -80,6 +86,29 @@ type Card =
   | null
 
 const PICKING_CLASS = "nuni-picking"
+const PICK_EVENTS = ["pointerdown", "mousedown", "pointerup", "mouseup"]
+
+/** Run when the browser is idle, or soon. */
+function whenIdle(fn: () => void) {
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(fn, { timeout: 100 })
+  } else {
+    setTimeout(fn, 0)
+  }
+}
+
+/** Same-origin iframe documents on the page, nested ones too. */
+function frameDocuments(doc: Document, depth = 0): Document[] {
+  if (depth > 3) return []
+  const out: Document[] = []
+  for (const frame of Array.from(doc.querySelectorAll("iframe"))) {
+    const inner = frameDocument(frame)
+    if (inner?.documentElement) {
+      out.push(inner, ...frameDocuments(inner, depth + 1))
+    }
+  }
+  return out
+}
 const MOBILE_QUERY = "(max-width: 640px)"
 
 function isTypingTarget(target: EventTarget | null) {
@@ -159,6 +188,12 @@ export class NuniWidget {
   private threadId: string | null = null
   private threadUnsub: (() => void) | null = null
 
+  /** Bumped by every resolve pass, so an older sliced pass stops. */
+  private resolveRun = 0
+  /** Shadow roots and iframes holding pins, watched for changes. */
+  private scopeWatchers = new Map<Node, () => void>()
+  /** Iframe documents listening while picking. */
+  private pickDocs: Document[] = []
   private layoutFrame = 0
   private pinPositions = new Map<string, { x: number; y: number }>()
   private resolveTimer = 0
@@ -270,6 +305,9 @@ export class NuniWidget {
     this.sessionUnsub?.()
     this.ownerDetailUnsub?.()
     this.threadUnsub?.()
+    this.resolveRun++
+    for (const stop of this.scopeWatchers.values()) stop()
+    this.scopeWatchers.clear()
     for (const cleanup of this.cleanups) cleanup()
     cancelAnimationFrame(this.layoutFrame)
     clearTimeout(this.resolveTimer)
@@ -306,7 +344,11 @@ export class NuniWidget {
             : comments
         this.comments = merged.sort((a, b) => a.createdAt - b.createdAt)
         this.loaded = true
-        this.resolvePlacements(false)
+        // Updates (a new comment, a reply count) keep pins that still fit.
+        this.resolvePlacements(
+          this.placements.size > 0,
+          this.deepLinkId ?? undefined
+        )
         this.openDeepLink()
         this.render()
       },
@@ -399,45 +441,118 @@ export class NuniWidget {
     )
   }
 
+  private stillPlaced(comment: WidgetComment) {
+    const current = this.placements.get(comment._id)
+    if (!current?.element?.isConnected) return false
+    const text = elementText(current.element)
+    const expected = comment.anchor.text
+    return (
+      !expected || text === expected || textSimilarity(text, expected) > 0.8
+    )
+  }
+
   /**
    * Find each comment's element. With `onlyStale`, keep placements whose
    * element is still attached and still looks like what was captured.
+   * Works in slices of about 8 ms, so a page with many pins stays
+   * responsive; `first` (a deep-linked comment) is found right away.
    */
-  private resolvePlacements(onlyStale: boolean) {
+  private resolvePlacements(onlyStale: boolean, first?: string) {
+    const run = ++this.resolveRun
     const ids = new Set(this.comments.map((c) => c._id))
     for (const id of this.placements.keys())
       if (!ids.has(id)) this.placements.delete(id)
 
-    for (const comment of this.comments) {
-      const current = this.placements.get(comment._id)
-      if (onlyStale && current?.element && current.element.isConnected) {
-        const text = elementText(current.element)
-        const expected = comment.anchor.text
-        if (
-          !expected ||
-          text === expected ||
-          textSimilarity(text, expected) > 0.8
-        )
-          continue
+    const queue = this.comments.filter(
+      (c) => !(onlyStale && this.stillPlaced(c))
+    )
+    const index = first ? queue.findIndex((c) => c._id === first) : -1
+    if (index > 0) queue.unshift(...queue.splice(index, 1))
+    // One cache per pass: lookups are shared by every pin on the page.
+    const cache = createResolveCache()
+    const options = { isIgnored: this.isIgnored, document }
+
+    const slice = () => {
+      if (run !== this.resolveRun) return
+      const started = performance.now()
+      while (queue.length) {
+        const comment = queue.shift()!
+        const result = resolveAnchor(comment.anchor, document, options, cache)
+        this.placements.set(comment._id, {
+          element: result.element,
+          confidence: result.confidence,
+        })
+        if (performance.now() - started > 8) break
       }
-      const result = resolveAnchor(comment.anchor, document, {
-        isIgnored: this.isIgnored,
-      })
-      this.placements.set(comment._id, {
-        element: result.element,
-        confidence: result.confidence,
-      })
+      this.watchScopes()
+      this.renderPins()
+      this.layout()
+      if (queue.length) whenIdle(slice)
+      else if ((onlyStale || run > 1) && this.panelOpen) this.render()
     }
-    this.renderPins()
-    this.layout()
-    if (onlyStale && this.panelOpen) this.render()
+    slice()
+  }
+
+  /**
+   * Pins inside shadow roots and iframes: the page's observers don't see
+   * changes or scrolling in there, so watch each of those scopes too.
+   */
+  private watchScopes() {
+    const roots = new Set<Node>()
+    for (const { element } of this.placements.values()) {
+      let node: Element | null = element
+      for (let depth = 0; node && depth < 8; depth++) {
+        const root = scopeRootOf(node)
+        if (root === document) break
+        roots.add(root)
+        node = isShadowRoot(root) ? root.host : frameElementOf(root)
+      }
+    }
+    for (const [root, stop] of this.scopeWatchers) {
+      if (!roots.has(root)) {
+        stop()
+        this.scopeWatchers.delete(root)
+      }
+    }
+    for (const root of roots) {
+      if (!this.scopeWatchers.has(root)) {
+        this.scopeWatchers.set(root, this.watchScope(root))
+      }
+    }
+  }
+
+  private watchScope(root: Node): () => void {
+    const observer = new MutationObserver(() => this.scheduleResolve())
+    const doc = isShadowRoot(root) ? null : (root as Document)
+    observer.observe(doc ? (doc.body ?? doc.documentElement) : root, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "hidden", "open", "id"],
+    })
+    const onScroll = () => this.scheduleLayout()
+    // Scroll events don't leave a shadow root or an iframe.
+    const target: EventTarget = doc?.defaultView ?? root
+    target.addEventListener("scroll", onScroll, {
+      capture: true,
+      passive: true,
+    })
+    doc?.defaultView?.addEventListener("resize", onScroll, { passive: true })
+    return () => {
+      observer.disconnect()
+      target.removeEventListener("scroll", onScroll, true)
+      doc?.defaultView?.removeEventListener("resize", onScroll)
+    }
   }
 
   private pinPoint(comment: WidgetComment): { x: number; y: number } | null {
     const placement = this.placements.get(comment._id)
     const el = placement?.element
     if (!el || !isRendered(el)) return null
-    const r = el.getBoundingClientRect()
+    // In the page's viewport, also for elements inside iframes.
+    const r = viewportRect(el, document)
+    if (r.clipped) return null
     return {
       x: r.left + comment.anchor.offset.x * r.width,
       y: r.top + comment.anchor.offset.y * r.height,
@@ -493,42 +608,64 @@ export class NuniWidget {
     if (on) {
       this.card = null
       if (window.matchMedia(MOBILE_QUERY).matches) this.panelOpen = false
-      html.classList.add(PICKING_CLASS)
-      this.injectCursorStyle()
-      document.addEventListener("pointermove", this.onPickMove, true)
-      document.addEventListener("click", this.onPickClick, true)
-      // Not touchstart: cancelling it would also cancel the tap's click.
-      for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
-        document.addEventListener(type, this.swallow, {
-          capture: true,
-          passive: false,
-        })
+      // The page and its same-origin iframes: anything in them can be picked.
+      this.pickDocs = [document, ...frameDocuments(document)]
+      for (const doc of this.pickDocs) {
+        doc.documentElement.classList.add(PICKING_CLASS)
+        this.injectCursorStyle(doc)
+        doc.addEventListener("pointermove", this.onPickMove, true)
+        doc.addEventListener("click", this.onPickClick, true)
+        // Not touchstart: cancelling it would also cancel the tap's click.
+        for (const type of PICK_EVENTS) {
+          doc.addEventListener(type, this.swallow, {
+            capture: true,
+            passive: false,
+          })
+        }
+        if (doc !== document) {
+          doc.addEventListener("keydown", this.onFrameKey, true)
+        }
       }
     } else {
       html.classList.remove(PICKING_CLASS)
       this.hoverEl = null
-      document.removeEventListener("pointermove", this.onPickMove, true)
-      document.removeEventListener("click", this.onPickClick, true)
-      for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
-        document.removeEventListener(type, this.swallow, true)
+      for (const doc of this.pickDocs) {
+        doc.documentElement?.classList.remove(PICKING_CLASS)
+        doc.removeEventListener("pointermove", this.onPickMove, true)
+        doc.removeEventListener("click", this.onPickClick, true)
+        for (const type of PICK_EVENTS) {
+          doc.removeEventListener(type, this.swallow, true)
+        }
+        doc.removeEventListener("keydown", this.onFrameKey, true)
       }
+      this.pickDocs = []
     }
     this.render()
   }
 
-  private injectCursorStyle() {
-    if (document.getElementById("nuni-cursor-style")) return
-    const style = document.createElement("style")
+  private onFrameKey = (e: KeyboardEvent) => this.onKeyDown(e)
+
+  private injectCursorStyle(doc: Document) {
+    if (doc.getElementById("nuni-cursor-style")) return
+    const style = doc.createElement("style")
     style.id = "nuni-cursor-style"
     style.textContent = `html.${PICKING_CLASS}, html.${PICKING_CLASS} * { cursor: crosshair !important; }`
-    document.head.appendChild(style)
+    ;(doc.head ?? doc.documentElement).appendChild(style)
     this.cleanups.push(() => style.remove())
   }
 
+  /**
+   * The element the event happened on, inside open shadow roots too
+   * (composedPath), and never Nuni's own UI.
+   */
   private fromPage(e: Event): Element | null {
-    if (e.composedPath().includes(this.host)) return null
-    const target = e.target
-    return target instanceof Element ? target : null
+    const path = e.composedPath()
+    if (path.includes(this.host)) return null
+    const target = path[0] ?? e.target
+    // nodeType, not instanceof: iframe elements come from another realm.
+    return target && (target as Node).nodeType === 1
+      ? (target as Element)
+      : null
   }
 
   private swallow = (e: Event) => {
@@ -562,7 +699,7 @@ export class NuniWidget {
     const anchor = captureAnchor(
       element,
       { x: e.clientX, y: e.clientY },
-      { ignoreAttributePrefixes: [] }
+      { ignoreAttributePrefixes: [], document }
     )
     this.setPicking(false)
     const draft: Draft = { anchor, element }
@@ -582,7 +719,8 @@ export class NuniWidget {
   /** Capture while the person types, so posting stays instant. */
   private async takeScreenshot(draft: Draft) {
     const load = this.runtime.loadScreenshot
-    if (!load) return
+    // An iframe's document can't be rendered from the page.
+    if (!load || draft.element.ownerDocument !== document) return
     const accent =
       getComputedStyle(this.host).getPropertyValue("--n-accent").trim() ||
       "#d6246e"
@@ -652,8 +790,8 @@ export class NuniWidget {
       )
     )
     const el = this.hoverEl
-    if (!el || el === document.documentElement) return
-    const r = el.getBoundingClientRect()
+    if (!el || el === el.ownerDocument.documentElement) return
+    const r = viewportRect(el, document)
     const box = h(
       "div",
       { class: "highlight" },
@@ -767,7 +905,7 @@ export class NuniWidget {
         ...this.comments.filter((c) => c._id !== found._id),
         found,
       ]
-      this.resolvePlacements(false)
+      this.resolvePlacements(false, found._id)
       this.focusDeepLinked(found)
     })
   }
@@ -1103,7 +1241,7 @@ export class NuniWidget {
     draftPin?.remove()
     if (this.card?.kind === "composer") {
       const { draft } = this.card
-      const r = draft.element.getBoundingClientRect()
+      const r = viewportRect(draft.element, document)
       const x = r.left + draft.anchor.offset.x * r.width
       const y = r.top + draft.anchor.offset.y * r.height
       const pin = h(
@@ -2017,7 +2155,7 @@ export class NuniWidget {
     let point: { x: number; y: number } | null = null
     if (this.card?.kind === "composer") {
       const { draft } = this.card
-      const r = draft.element.getBoundingClientRect()
+      const r = viewportRect(draft.element, document)
       point = {
         x: r.left + draft.anchor.offset.x * r.width,
         y: r.top + draft.anchor.offset.y * r.height,

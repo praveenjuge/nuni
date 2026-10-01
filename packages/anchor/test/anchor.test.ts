@@ -204,3 +204,57 @@ describe("masked areas", () => {
     expect(resolveAnchor(anchor, document).element).toBe(refund)
   })
 })
+
+describe("shadow DOM", () => {
+  function card(plan: string) {
+    const host = document.createElement("plan-card")
+    const root = host.attachShadow({ mode: "open" })
+    root.innerHTML = `<h3>${plan}</h3><p>${plan} plan</p><button type="button">Choose plan</button>`
+    return host
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = `<main><section class="grid"></section></main>`
+    const grid = document.querySelector(".grid")!
+    for (const plan of ["Starter", "Pro", "Team"]) grid.append(card(plan))
+  })
+
+  const button = (plan: string) =>
+    Array.from(document.querySelectorAll("plan-card"))
+      .find((h) => h.shadowRoot!.querySelector("h3")!.textContent === plan)!
+      .shadowRoot!.querySelector("button")!
+
+  it("records the host chain and builds selectors inside the shadow root", () => {
+    const anchor = captureAnchor(button("Pro"))
+    expect(anchor.scope).toHaveLength(1)
+    expect(anchor.scope![0]!.kind).toBe("shadow")
+    expect(anchor.scope![0]!.host.tag).toBe("plan-card")
+    // The host's text is what it shows: its shadow tree.
+    expect(anchor.scope![0]!.host.text).toContain("Pro")
+    expect(anchor.selectors.path).toBe("button")
+    expect(buildPath(button("Pro"))).toBe("button")
+  })
+
+  it("finds the element again through its host, and not in another card", () => {
+    const anchor = captureAnchor(button("Pro"))
+    expect(resolveAnchor(anchor, document).element).toBe(button("Pro"))
+
+    // A card inserted before: still the Pro card.
+    const grid = document.querySelector(".grid")!
+    grid.prepend(card("Free"))
+    expect(resolveAnchor(anchor, document).element).toBe(button("Pro"))
+
+    // The Pro card removed: lost, not the same-looking button elsewhere.
+    document.querySelectorAll("plan-card").forEach((h) => {
+      if (h.shadowRoot!.querySelector("h3")!.textContent === "Pro") h.remove()
+    })
+    const lost = resolveAnchor(anchor, document)
+    expect(lost.element).toBeNull()
+    expect(lost.confidence).toBe("lost")
+  })
+
+  it("leaves anchors in the page's own document without a scope", () => {
+    document.body.innerHTML = `<button id="buy">Buy</button>`
+    expect(captureAnchor(document.getElementById("buy")!).scope).toBeUndefined()
+  })
+})

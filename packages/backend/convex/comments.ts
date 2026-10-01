@@ -179,6 +179,16 @@ export const pagesWithComments = query({
   },
 })
 
+function cleanAnchor<A extends { text: string; ancestors: unknown[] }>(
+  anchor: A
+): A {
+  return {
+    ...anchor,
+    text: clampString(anchor.text, LIMITS.anchorTextMaxLength),
+    ancestors: anchor.ancestors.slice(0, 6),
+  }
+}
+
 /** Called from the HTTP action, which supplies the client IP. */
 export const createFromWidget = internalMutation({
   args: {
@@ -240,9 +250,11 @@ export const createFromWidget = internalMutation({
         path: clampString(args.page.path, 1000),
       },
       anchor: {
-        ...args.anchor,
-        text: clampString(args.anchor.text, LIMITS.anchorTextMaxLength),
-        ancestors: args.anchor.ancestors.slice(0, 6),
+        ...cleanAnchor(args.anchor),
+        scope: args.anchor.scope?.slice(0, 6).map((step) => ({
+          kind: step.kind,
+          host: cleanAnchor(step.host),
+        })),
       },
       viewport: args.viewport,
       context: cleanContext(args.context),

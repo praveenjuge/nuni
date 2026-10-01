@@ -7,7 +7,7 @@ export const rectValidator = v.object({
   h: v.number(),
 })
 
-export const anchorValidator = v.object({
+const anchorFields = {
   v: v.literal(1),
   selectors: v.object({
     id: v.optional(v.string()),
@@ -41,6 +41,19 @@ export const anchorValidator = v.object({
     scrollY: v.number(),
   }),
   docSize: v.object({ w: v.number(), h: v.number() }),
+}
+
+export const anchorValidator = v.object({
+  ...anchorFields,
+  /** Shadow hosts and iframes on the way to the element, outermost first. */
+  scope: v.optional(
+    v.array(
+      v.object({
+        kind: v.union(v.literal("shadow"), v.literal("frame")),
+        host: v.object(anchorFields),
+      })
+    )
+  ),
 })
 
 export const pageValidator = v.object({
