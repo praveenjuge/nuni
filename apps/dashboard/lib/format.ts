@@ -10,18 +10,6 @@ export function timeAgo(ts: number, now = Date.now()): string {
   return new Date(ts).toLocaleDateString()
 }
 
-export function timeUntil(ts: number, now = Date.now()): string {
-  // Floor-based buckets: never overstate the time a session has left.
-  const s = Math.max(0, (ts - now) / 1000)
-  if (s < 60) return "in a minute"
-  const m = Math.floor(s / 60)
-  if (m < 60) return `in ${m}m`
-  const h = Math.floor(m / 60)
-  if (h < 48) return `in ${h}h`
-  const d = Math.floor(h / 24)
-  return `in ${d}d`
-}
-
 export function hostOf(origin: string): string {
   try {
     return new URL(origin).host
