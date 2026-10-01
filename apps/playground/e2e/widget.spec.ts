@@ -119,9 +119,13 @@ test("comment, persist, sync live, edit own, navigate", async ({
     .getByRole("button", { name: /open/ })
     .click()
   await page.locator("#nuni-root .panel").getByText(second).click()
-  page.once("dialog", (d) => d.accept())
   await page
     .locator('#nuni-root [data-card="thread"]')
+    .getByRole("button", { name: "Delete" })
+    .click()
+  await page
+    .locator("#nuni-root")
+    .getByRole("alertdialog")
     .getByRole("button", { name: "Delete" })
     .click()
   await expect(pins(otherPage)).toHaveCount(before + 1)

@@ -19,18 +19,23 @@ sidebar:
     loads when someone leaves a comment.
   </AccordionItem>
   <AccordionItem title="Can I hide it in production?">
-    Not yet in v1. Render the component conditionally if you need to, for
-    example only when an env var is set.
+    There is no switch for it. Render the component conditionally if you need
+    to, for example only when an env var is set.
   </AccordionItem>
   <AccordionItem title="How do I hand a comment to my coding agent?">
     Open the comment in the widget (as the owner) or in the dashboard and choose
     **Copy for agent**. It copies the comment with its page, element, screenshot
     link, console errors and failed requests as a task you can paste into Claude
-    Code, Codex or Cursor.
+    Code, Codex or Cursor. Or let the agent fetch comments itself with the [CLI
+    or the MCP server](/guides/agents), and resolve them when it is done.
   </AccordionItem>
-  <AccordionItem title="What is not in v1?">
-    Replies, teams and roles, notifications, widget customization, GitHub issue
-    sync and the MCP/CLI agent integration. They are next: the big goal is Nuni
-    comment, exact UI context, coding agent, fix.
+  <AccordionItem title="Can I change how it looks or what it says?">
+    Yes. Pick the toolbar's corner, your brand color, a light or dark theme, the
+    button label and the shortcut key, and replace any of its words for your
+    language. See the [options](/reference/options#look-and-language).
+  </AccordionItem>
+  <AccordionItem title="What is not there yet?">
+    Teams and roles, notifications and GitHub issue sync. The big goal stays the
+    same: Nuni comment, exact UI context, coding agent, fix.
   </AccordionItem>
 </Accordion>

@@ -67,12 +67,17 @@ Using React? Use [`@nuniapp/react`](https://www.npmjs.com/package/@nuniapp/react
 | `getPageKey(url)`                      | Optional. Decide which URLs share comments. Defaults to the path, ignoring query and hash.                 |
 | `convexUrl`, `convexSiteUrl`, `appUrl` | Optional. For self-hosting or local development.                                                           |
 | `capture`                              | Optional. Owner-only page context per comment: `{ console, network, dom, screenshot }`, all on by default. |
+| `pageKey`                              | Optional. `"path"` (default), `"path+search"` or `"path+hash"`, when `getPageKey` is not set.              |
+| `position`, `accentColor`, `theme`     | Optional. Toolbar corner, brand color (any CSS color), and `"auto"`, `"light"` or `"dark"`.                |
+| `label`, `hotkey`, `zIndex`            | Optional. Comment button text, shortcut key (`false` turns it off) and stacking order.                     |
+| `locale`, `messages`                   | Optional. Language for times and counts, and replacements for any of the widget's words.                   |
 
 `init` returns `{ destroy() }`.
 
 ## Using it
 
-- Press **C** (or the Comment button), click any element and write your comment.
+- Press **C** (or the Comment button), click any element and write your comment. Select text to comment on the words, or drag a box to comment on an area.
+- Everything works from the keyboard: while adding, the arrow keys move between elements and Enter comments.
 - Pins follow their element through layout changes, responsive breakpoints and content edits. If an element is removed, its comment is listed as "Couldn't find on this page" instead of pinned to the wrong thing.
 - Your name is remembered in this browser. You can edit and delete your own comments.
 - The site owner claims the project from the widget ("Claim Nuni", GitHub sign-in) and can then resolve, reopen and delete comments.

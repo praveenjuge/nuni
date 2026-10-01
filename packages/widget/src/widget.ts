@@ -21,7 +21,6 @@ import {
   describeLocation,
   generateSecret,
   LIMITS,
-  normalizePath,
   REACTIONS,
   type Anchor,
   type CommentContext,
@@ -40,7 +39,16 @@ import {
 } from "./api"
 import type { ResolvedConfig } from "./config"
 import { domContext, type Collectors } from "./context"
-import { colorFor, copyText, h, icon, initials, timeAgo } from "./dom"
+import {
+  colorFor,
+  copyText,
+  h,
+  icon,
+  initials,
+  parseColor,
+  readableOn,
+} from "./dom"
+import { createI18n, type I18n, type MessageKey } from "./i18n"
 import { ICONS } from "./icons"
 import { onLocationChange } from "./navigation"
 import type { CaptureScreenshot } from "./screenshot"
@@ -149,13 +157,15 @@ function frameDocuments(doc: Document, depth = 0): Document[] {
 }
 const MOBILE_QUERY = "(max-width: 640px)"
 
-function isTypingTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false
+function isTypingTarget(target: EventTarget | null | undefined) {
+  // nodeType, not instanceof: iframe elements come from another realm.
+  if (!target || (target as Node).nodeType !== 1) return false
+  const el = target as HTMLElement
   return (
-    target.isContentEditable ||
-    target.tagName === "INPUT" ||
-    target.tagName === "TEXTAREA" ||
-    target.tagName === "SELECT"
+    el.isContentEditable ||
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.tagName === "SELECT"
   )
 }
 
@@ -243,14 +253,32 @@ export class NuniWidget {
   private selection: Range | null = null
   private pointerDown = false
   private selectionFrame = 0
+  /**
+   * Where focus was before a card or the panel opened, to go back to: a
+   * page element or a pin, or the focus key of a re-rendered widget button.
+   */
+  private returnFocus: HTMLElement | string | null = null
+  /** Focus this (a selector in the UI) after the next render. */
+  private focusNext: string | null = null
+  /** An open "are you sure?" dialog. */
+  private confirming: {
+    message: string
+    action: string
+    done: (ok: boolean) => void
+    /** Focus key of the button that asked, to go back to on Cancel. */
+    from: string | null
+  } | null = null
+  private live: HTMLDivElement
   private layoutFrame = 0
   private pinPositions = new Map<string, { x: number; y: number }>()
   private resolveTimer = 0
+  private i18n: I18n
 
   constructor(
     private config: ResolvedConfig,
     private runtime: WidgetRuntime
   ) {
+    this.i18n = createI18n(config.locale, config.messages)
     let secret = read(KEYS.secret)
     if (!secret) {
       secret = generateSecret()
@@ -262,6 +290,7 @@ export class NuniWidget {
     this.host = document.createElement("div")
     this.host.id = "nuni-root"
     this.host.setAttribute("data-nuni", "")
+    this.applyAppearance()
     this.root = this.host.attachShadow({ mode: "open" })
     const style = document.createElement("style")
     style.textContent = STYLES
@@ -275,25 +304,56 @@ export class NuniWidget {
         class: "select-btn",
         type: "button",
         hidden: true,
-        title: "Comment on the selected text (C)",
+        title: this.withKey("commentSelection", "commentSelectionKey"),
         // Keep the page's selection: a press would clear it.
         onmousedown: (e: Event) => e.preventDefault(),
         onpointerdown: (e: Event) => e.preventDefault(),
         onclick: () => this.commentOnSelection(),
       },
       icon(ICONS.comment),
-      "Comment"
+      this.t("comment")
     )
+    // Announcements for screen readers (what is selected while picking).
+    this.live = h("div", { class: "sr", role: "status", "aria-live": "polite" })
     this.root.append(
       style,
       this.markLayer,
       this.pinLayer,
       this.overlayLayer,
       this.uiLayer,
-      this.selectButton
+      this.selectButton,
+      this.live
     )
+    this.uiLayer.addEventListener("keydown", (e) => this.trapFocus(e))
 
     this.api = new NuniApi(config)
+  }
+
+  private t(key: MessageKey, vars?: Record<string, string | number>) {
+    return this.i18n.t(key, vars)
+  }
+
+  /** A message that names the hotkey, or the plain one when it is off. */
+  private withKey(plain: MessageKey, keyed: MessageKey) {
+    const key = this.config.hotkey
+    return key ? this.t(keyed, { key: key.toUpperCase() }) : this.t(plain)
+  }
+
+  /** Position, theme, brand color and stacking order from the options. */
+  private applyAppearance() {
+    const { position, theme, accentColor, zIndex } = this.config
+    this.host.dataset.position = position
+    this.host.dataset.theme = theme
+    if (zIndex !== null) this.host.style.zIndex = String(zIndex)
+    const rgb = accentColor ? parseColor(accentColor) : null
+    if (!rgb) return
+    const [r, g, b] = rgb
+    this.host.style.setProperty("--n-accent", `rgb(${r}, ${g}, ${b})`)
+    this.host.style.setProperty(
+      "--n-accent-soft",
+      `rgba(${r}, ${g}, ${b}, 0.14)`
+    )
+    this.host.style.setProperty("--n-accent-fg", readableOn(rgb))
   }
 
   start() {
@@ -411,7 +471,7 @@ export class NuniWidget {
 
   private currentPageKey(): string {
     const url = new URL(location.href)
-    return this.config.getPageKey?.(url) ?? normalizePath(url)
+    return this.config.getPageKey(url)
   }
 
   private subscribePage() {
@@ -452,7 +512,7 @@ export class NuniWidget {
     this.sessionUnsub?.()
     this.sessionUnsub = this.api.onSession(token, (result) => {
       if (result.valid) {
-        this.ownerName = result.ownerName ?? "Owner"
+        this.ownerName = result.ownerName ?? this.t("owner")
       } else {
         this.ownerName = null
         this.ownerToken = null
@@ -1076,7 +1136,7 @@ export class NuniWidget {
       includeContext: Boolean(detail),
     })
     void copyText(prompt).then((ok) =>
-      this.showToast(ok ? "Copied for your coding agent" : "Couldn't copy")
+      this.showToast(ok ? this.t("copied") : this.t("copyFailed"))
     )
   }
 
@@ -1089,8 +1149,11 @@ export class NuniWidget {
         "div",
         { class: "pick-hint" },
         mobile
-          ? "Tap anything to comment"
-          : "Click anything to comment, or drag to mark an area · Esc to cancel"
+          ? this.t("pickHintMobile")
+          : [
+              h("span", {}, this.t("pickHint")),
+              h("span", { class: "pick-keys" }, this.t("pickHintKeys")),
+            ]
       )
     )
     if (this.dragBox) {
@@ -1126,28 +1189,212 @@ export class NuniWidget {
   private onKeyDown(e: KeyboardEvent) {
     const inWidget = e.composedPath().includes(this.host)
     if (e.key === "Escape") {
-      if (this.picking) this.setPicking(false)
+      if (this.confirming) this.answer(false)
+      else if (this.picking) this.setPicking(false)
       else if (this.card) this.closeCard()
       else if (this.panelOpen) this.togglePanel(false)
       else return
       e.stopPropagation()
       return
     }
-    if (
-      inWidget ||
-      isTypingTarget(e.target) ||
-      e.metaKey ||
-      e.ctrlKey ||
-      e.altKey ||
-      e.repeat
-    )
-      return
-    if (e.key === "c" || e.key === "C") {
+    // The real target, inside the widget's shadow root too.
+    const target = e.composedPath()[0] ?? e.target
+    if (isTypingTarget(target) || e.metaKey || e.ctrlKey || e.altKey) return
+    // Arrows and Enter on the widget's own buttons keep their meaning.
+    if (this.picking && !inWidget && this.onPickKey(e)) return
+    if (inWidget && this.confirming) return
+    if (e.repeat) return
+    const hotkey = this.config.hotkey
+    if (hotkey && e.key.toLowerCase() === hotkey) {
       e.preventDefault()
       // Selected text on the page: comment on those words.
       if (!this.picking && this.pageSelection()) this.commentOnSelection()
       else this.setPicking(!this.picking)
     }
+  }
+
+  /**
+   * Picking without a mouse: arrows move to the parent, first child and
+   * siblings; Enter comments on the highlighted element.
+   */
+  private onPickKey(e: KeyboardEvent): boolean {
+    const keys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"]
+    if (!keys.includes(e.key)) return false
+    e.preventDefault()
+    e.stopPropagation()
+    let el = this.hoverEl
+    if (!el || !el.isConnected) {
+      this.movePickTo(this.keyboardStart())
+      return true
+    }
+    if (e.key === "Enter") {
+      const r = el.getBoundingClientRect()
+      const anchor = captureAnchor(
+        el,
+        { x: r.left + r.width / 2, y: r.top + r.height / 2 },
+        { ignoreAttributePrefixes: [], document }
+      )
+      this.openComposer({ anchor, element: el })
+      return true
+    }
+    const visible = (n: Element | null) => {
+      while (n && (n === this.host || !isRendered(n))) {
+        n =
+          e.key === "ArrowLeft"
+            ? n.previousElementSibling
+            : n.nextElementSibling
+      }
+      return n
+    }
+    const body = el.ownerDocument.body
+    if (e.key === "ArrowUp") {
+      if (el.parentElement && el !== body) el = el.parentElement
+    } else if (e.key === "ArrowDown") {
+      el = visible(el.firstElementChild) ?? el
+    } else if (e.key === "ArrowLeft") {
+      el = visible(el.previousElementSibling) ?? el
+    } else {
+      el = visible(el.nextElementSibling) ?? el
+    }
+    this.movePickTo(el)
+    return true
+  }
+
+  /** Keyboard picking starts at the focused element, or mid-screen. */
+  private keyboardStart(): Element {
+    const focused = document.activeElement
+    if (focused && focused !== document.body && focused !== this.host) {
+      return focused
+    }
+    const middle = document
+      .elementsFromPoint(window.innerWidth / 2, window.innerHeight / 2)
+      .find((el) => !this.isIgnored(el))
+    return middle ? pickTarget(middle) : document.body
+  }
+
+  private movePickTo(el: Element) {
+    this.hoverEl = el
+    el.scrollIntoView({ block: "nearest", inline: "nearest" })
+    this.live.textContent = this.t("picked", { element: describeElement(el) })
+    this.renderHighlight()
+  }
+
+  // ---------------------------------------------------------------- focus
+
+  /** Tab stays inside an open card, the panel or a dialog. */
+  private trapFocus(e: KeyboardEvent) {
+    if (e.key !== "Tab") return
+    const from = e.composedPath()[0] as HTMLElement | undefined
+    const box = from?.closest?.<HTMLElement>(".confirm, [data-card], .panel")
+    if (!box) return
+    const items = Array.from(
+      box.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input, textarea, a[href], [tabindex="0"]'
+      )
+    ).filter((el) => !el.closest("[hidden]"))
+    if (!items.length) return
+    const first = items[0]!
+    const last = items[items.length - 1]!
+    const active = this.root.activeElement
+    if (e.shiftKey && active === first) {
+      e.preventDefault()
+      last.focus()
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
+
+  /** Remember where focus was, before moving it into the widget. */
+  private keepFocus() {
+    if (this.returnFocus) return
+    const inside = this.root.activeElement as HTMLElement | null
+    if (inside) {
+      this.returnFocus = inside.dataset.focusKey ?? inside
+      return
+    }
+    const active = document.activeElement as HTMLElement | null
+    this.returnFocus =
+      active && active !== document.body && active !== this.host ? active : null
+  }
+
+  /** Back to where focus was before (when that is still there). */
+  private restoreFocus() {
+    const back = this.returnFocus
+    this.returnFocus = null
+    const target =
+      typeof back === "string"
+        ? this.uiLayer.querySelector<HTMLElement>(`[data-focus-key="${back}"]`)
+        : back
+    if (target?.isConnected) target.focus({ preventScroll: true })
+  }
+
+  /** An "are you sure?" dialog inside the widget. */
+  private ask(message: string, action: string): Promise<boolean> {
+    this.confirming?.done(false)
+    const from =
+      (this.root.activeElement as HTMLElement | null)?.dataset.focusKey ?? null
+    return new Promise((resolve) => {
+      this.confirming = { message, action, done: resolve, from }
+      this.focusNext = '[data-focus-key="confirm-cancel"]'
+      this.render()
+    })
+  }
+
+  private answer(ok: boolean) {
+    const confirming = this.confirming
+    if (!confirming) return
+    this.confirming = null
+    if (!ok && confirming.from) {
+      this.focusNext = `[data-focus-key="${confirming.from}"]`
+    }
+    this.render()
+    confirming.done(ok)
+  }
+
+  private renderConfirm(): HTMLElement | null {
+    const c = this.confirming
+    if (!c) return null
+    return h(
+      "div",
+      { class: "confirm-backdrop", onclick: () => this.answer(false) },
+      h(
+        "div",
+        {
+          class: "confirm",
+          role: "alertdialog",
+          "aria-modal": "true",
+          "aria-labelledby": "nuni-confirm-text",
+          onclick: (e: Event) => e.stopPropagation(),
+        },
+        h("p", { id: "nuni-confirm-text" }, c.message),
+        h(
+          "div",
+          { class: "row" },
+          h("span", { class: "spacer" }),
+          h(
+            "button",
+            {
+              class: "btn btn-ghost",
+              type: "button",
+              "data-focus-key": "confirm-cancel",
+              onclick: () => this.answer(false),
+            },
+            this.t("cancel")
+          ),
+          h(
+            "button",
+            {
+              class: "btn btn-danger-solid",
+              type: "button",
+              "data-focus-key": "confirm-ok",
+              onclick: () => this.answer(true),
+            },
+            c.action
+          )
+        )
+      )
+    )
   }
 
   // --------------------------------------------------------------- claim
@@ -1188,7 +1435,7 @@ export class NuniWidget {
     this.ownerToken = data.token
     write(KEYS.session(this.config.project), data.token)
     this.watchSession(data.token)
-    this.showToast("You're signed in as the owner")
+    this.showToast(this.t("signedIn"))
   }
 
   // ------------------------------------------------------------ deep links
@@ -1214,7 +1461,7 @@ export class NuniWidget {
     // Older comments (e.g. long-resolved ones) are outside the page listing.
     void this.api.getComment(id).then((found) => {
       if (!found || found.page.path !== this.pageKey) {
-        this.showToast("That comment was deleted or is on another page")
+        this.showToast(this.t("linkGone"))
         return
       }
       this.extraComment = found
@@ -1234,8 +1481,7 @@ export class NuniWidget {
   private focusComment(id: string) {
     const placement = this.placements.get(id)
     placement?.element?.scrollIntoView({ block: "center", behavior: "smooth" })
-    this.activeId = id
-    this.card = { kind: "thread", id }
+    this.openThread(id)
     if (window.matchMedia(MOBILE_QUERY).matches) this.panelOpen = false
     this.render()
     setTimeout(() => this.scheduleLayout(), 400)
@@ -1246,12 +1492,12 @@ export class NuniWidget {
   private async submitDraft(draft: Draft, body: string, name: string) {
     const cleanName = name.trim().slice(0, LIMITS.nameMaxLength)
     const cleanBody = body.trim()
-    if (!cleanName) return this.setDraftError(draft, "Enter your name")
-    if (!cleanBody) return this.setDraftError(draft, "Write a comment first")
+    if (!cleanName) return this.setDraftError(draft, this.t("enterName"))
+    if (!cleanBody) return this.setDraftError(draft, this.t("writeFirst"))
     if (cleanBody.length > LIMITS.bodyMaxLength) {
       return this.setDraftError(
         draft,
-        `Comments are limited to ${LIMITS.bodyMaxLength} characters`
+        this.t("commentTooLong", { count: LIMITS.bodyMaxLength })
       )
     }
     this.name = cleanName
@@ -1290,13 +1536,11 @@ export class NuniWidget {
       })
       if (this.card?.kind === "composer" && this.card.draft === draft)
         this.card = null
-      this.showToast("Comment added")
+      this.showToast(this.t("added"))
     } catch (error) {
       draft.sending = false
       draft.error =
-        error instanceof NuniApiError
-          ? error.message
-          : "Couldn't post the comment"
+        error instanceof NuniApiError ? error.message : this.t("postFailed")
     }
     this.render()
   }
@@ -1331,7 +1575,7 @@ export class NuniWidget {
       if (this.card?.kind === "thread" && this.card.id === id) {
         this.card.busy = false
         this.card.error =
-          error instanceof Error ? error.message : "Something went wrong"
+          error instanceof Error ? error.message : this.t("failed")
       }
       this.render()
       return false
@@ -1341,27 +1585,37 @@ export class NuniWidget {
   private resolveComment(c: WidgetComment) {
     const token = this.ownerToken
     if (!token) return
-    void this.act(c._id, () => this.api.resolve(c._id, token), "Resolved").then(
-      (ok) => {
-        if (
-          ok &&
-          !(this.panelOpen && this.tab === "resolved") &&
-          this.card?.kind === "thread" &&
-          this.card.id === c._id
-        )
-          this.closeCard()
-      }
-    )
+    void this.act(
+      c._id,
+      () => this.api.resolve(c._id, token),
+      this.t("resolved")
+    ).then((ok) => {
+      if (
+        ok &&
+        !(this.panelOpen && this.tab === "resolved") &&
+        this.card?.kind === "thread" &&
+        this.card.id === c._id
+      )
+        this.closeCard()
+    })
   }
 
   private reopenComment(c: WidgetComment) {
     const token = this.ownerToken
     if (!token) return
-    void this.act(c._id, () => this.api.reopen(c._id, token), "Reopened")
+    void this.act(
+      c._id,
+      () => this.api.reopen(c._id, token),
+      this.t("reopened")
+    )
   }
 
-  private deleteComment(c: WidgetComment) {
-    if (!window.confirm("Delete this comment? This can't be undone.")) return
+  private async deleteComment(c: WidgetComment) {
+    const sure = await this.ask(
+      this.t("confirmDeleteComment"),
+      this.t("delete")
+    )
+    if (!sure) return
     const token = this.ownerToken
     const action = this.isMine(c)
       ? () => this.api.deleteOwn(c._id, this.secret)
@@ -1370,7 +1624,7 @@ export class NuniWidget {
         : null
     if (!action) return
     // Keep the thread open on failure so the error stays visible.
-    void this.act(c._id, action, "Deleted").then((ok) => {
+    void this.act(c._id, action, this.t("deleted")).then((ok) => {
       if (!ok) return
       // The deep-link fallback is not part of the live subscription, so drop
       // it by hand or its pin would linger until the next navigation.
@@ -1394,12 +1648,12 @@ export class NuniWidget {
     const clean = body.trim()
     if (!clean) return
     if (!authorName) {
-      card.error = "Enter your name"
+      card.error = this.t("enterName")
       this.render()
       return
     }
     if (clean.length > LIMITS.bodyMaxLength) {
-      card.error = `Replies are limited to ${LIMITS.bodyMaxLength} characters`
+      card.error = this.t("replyTooLong", { count: LIMITS.bodyMaxLength })
       this.render()
       return
     }
@@ -1424,9 +1678,7 @@ export class NuniWidget {
       if (box) box.value = ""
     } catch (error) {
       card.error =
-        error instanceof NuniApiError
-          ? error.message
-          : "Couldn't post the reply"
+        error instanceof NuniApiError ? error.message : this.t("replyFailed")
     }
     card.sendingReply = false
     this.render()
@@ -1442,21 +1694,22 @@ export class NuniWidget {
       .catch((error: unknown) => {
         if (this.card?.kind === "thread" && this.card.id === comment._id) {
           this.card.error =
-            error instanceof Error ? error.message : "Couldn't react"
+            error instanceof Error ? error.message : this.t("reactFailed")
           this.render()
         }
       })
   }
 
-  private deleteReply(comment: WidgetComment, reply: ReplyView) {
-    if (!window.confirm("Delete this reply?")) return
+  private async deleteReply(comment: WidgetComment, reply: ReplyView) {
+    const sure = await this.ask(this.t("confirmDeleteReply"), this.t("delete"))
+    if (!sure) return
     const token = this.ownerToken
     const action = this.isMyReply(reply)
       ? () => this.api.deleteReply(reply._id, this.secret)
       : token
         ? () => this.api.removeReply(reply._id, token)
         : null
-    if (action) void this.act(comment._id, action, "Reply deleted")
+    if (action) void this.act(comment._id, action, this.t("replyDeleted"))
   }
 
   private saveReplyEdit(
@@ -1467,7 +1720,7 @@ export class NuniWidget {
     void this.act(
       comment._id,
       () => this.api.editReply(reply._id, this.secret, body),
-      "Saved"
+      this.t("saved")
     ).then((ok) => {
       if (ok && this.card?.kind === "thread") {
         this.card.replyEditing = undefined
@@ -1480,7 +1733,7 @@ export class NuniWidget {
     void this.act(
       c._id,
       () => this.api.editOwn(c._id, this.secret, body),
-      "Saved"
+      this.t("saved")
     )
   }
 
@@ -1497,15 +1750,31 @@ export class NuniWidget {
   }
 
   private togglePanel(open = !this.panelOpen) {
+    if (open === this.panelOpen) return
     this.panelOpen = open
-    if (open && window.matchMedia(MOBILE_QUERY).matches) this.card = null
+    if (open) {
+      this.keepFocus()
+      this.focusNext = '.panel [role="tab"][aria-selected="true"]'
+      if (window.matchMedia(MOBILE_QUERY).matches) this.card = null
+    }
     this.render()
+    if (!open && !this.card) this.restoreFocus()
   }
 
   private closeCard() {
+    const had = this.card !== null
     this.card = null
     this.activeId = null
     this.render()
+    if (had && !this.panelOpen) this.restoreFocus()
+  }
+
+  /** Open a comment's thread and move focus into it. */
+  private openThread(id: string) {
+    this.keepFocus()
+    this.activeId = id
+    this.card = { kind: "thread", id }
+    this.focusNext = '[data-card="thread"] .card-head button'
   }
 
   private render() {
@@ -1536,8 +1805,7 @@ export class NuniWidget {
           if (this.card?.kind === "thread" && this.card.id === id)
             this.closeCard()
           else {
-            this.activeId = id
-            this.card = { kind: "thread", id }
+            this.openThread(id)
             this.render()
           }
         })
@@ -1548,7 +1816,10 @@ export class NuniWidget {
       pin.style.background = colorFor(comment.authorName)
       pin.setAttribute(
         "aria-label",
-        `Comment by ${comment.authorName}: ${comment.body.slice(0, 80)}`
+        this.t("pinLabel", {
+          name: comment.authorName,
+          body: comment.body.slice(0, 80),
+        })
       )
       if (comment.replyCount) pin.dataset.replies = String(comment.replyCount)
       else delete pin.dataset.replies
@@ -1585,6 +1856,8 @@ export class NuniWidget {
     if (card) nodes.push(card)
     if (this.toast)
       nodes.push(h("div", { class: "toast", role: "status" }, this.toast))
+    const confirm = this.renderConfirm()
+    if (confirm) nodes.push(confirm)
     const focused = this.root.activeElement as HTMLElement | null
     const focusKey = focused?.dataset.focusKey
     const selection =
@@ -1593,7 +1866,11 @@ export class NuniWidget {
         ? { start: focused.selectionStart, end: focused.selectionEnd }
         : null
     this.uiLayer.replaceChildren(...nodes)
-    if (focusKey) {
+    const next = this.focusNext
+    this.focusNext = null
+    const wanted = next ? this.uiLayer.querySelector<HTMLElement>(next) : null
+    if (wanted) wanted.focus()
+    else if (focusKey) {
       const next = this.uiLayer.querySelector<HTMLElement>(
         `[data-focus-key="${focusKey}"]`
       )
@@ -1613,24 +1890,27 @@ export class NuniWidget {
     const open = this.comments.filter((c) => c.status === "open").length
     return h(
       "div",
-      { class: "toolbar", role: "toolbar", "aria-label": "Nuni comments" },
+      { class: "toolbar", role: "toolbar", "aria-label": this.t("toolbar") },
       h(
         "button",
         {
           class: "tb-btn",
           type: "button",
           "aria-pressed": String(this.picking),
+          "data-focus-key": "tb-comment",
           "aria-label": this.picking
-            ? "Cancel adding a comment"
-            : "Add a comment",
-          title: "Add a comment (C)",
+            ? this.t("cancelAdding")
+            : this.t("addComment"),
+          title: this.withKey("addComment", "addCommentKey"),
           onclick: () => this.setPicking(!this.picking),
         },
         icon(ICONS.comment),
         h(
           "span",
           { class: "tb-label" },
-          this.picking ? "Pick an element" : "Comment"
+          this.picking
+            ? this.t("pickElement")
+            : (this.config.label ?? this.t("comment"))
         )
       ),
       h(
@@ -1639,8 +1919,9 @@ export class NuniWidget {
           class: "tb-btn",
           type: "button",
           "aria-pressed": String(this.panelOpen),
-          "aria-label": `Comments on this page: ${open} open`,
-          title: "All comments",
+          "data-focus-key": "tb-panel",
+          "aria-label": this.t("openCount", { count: open }),
+          title: this.t("allComments"),
           onclick: () => this.togglePanel(),
         },
         icon(ICONS.list),
@@ -1663,6 +1944,7 @@ export class NuniWidget {
         {
           class: "item",
           type: "button",
+          "data-focus-key": `item-${c._id}`,
           onclick: () => this.focusComment(c._id),
         },
         h(
@@ -1677,9 +1959,9 @@ export class NuniWidget {
           h(
             "span",
             { class: "meta" },
-            timeAgo(c.createdAt) +
+            this.i18n.timeAgo(c.createdAt) +
               (c.replyCount
-                ? ` · ${c.replyCount} ${c.replyCount === 1 ? "reply" : "replies"}`
+                ? ` · ${this.t("replyCount", { count: c.replyCount })}`
                 : "")
           ),
           c.page.origin !== location.origin
@@ -1697,30 +1979,32 @@ export class NuniWidget {
       )
 
     const children: Node[] = []
-    if (!this.loaded) children.push(h("div", { class: "empty" }, "Loading…"))
-    else if (!list.length) {
+    if (!this.loaded) {
+      children.push(h("div", { class: "empty" }, this.t("loading")))
+    } else if (!list.length) {
       children.push(
         h(
           "div",
           { class: "empty" },
           this.tab === "open"
-            ? "No open comments on this page. Press C to add one."
-            : "Nothing resolved yet."
+            ? this.withKey("noOpen", "noOpenKey")
+            : this.t("noResolved")
         )
       )
     } else {
       children.push(...placed.map(item))
       if (lost.length) {
         children.push(
-          h("div", { class: "section-label" }, "Couldn't find on this page")
+          h("div", { class: "section-label" }, this.t("notFoundHere"))
         )
         children.push(...lost.map(item))
       }
     }
     if (otherPages.length) {
-      children.push(h("div", { class: "section-label" }, "Other pages"))
+      children.push(h("div", { class: "section-label" }, this.t("otherPages")))
       for (const p of otherPages.slice(0, 20)) {
-        const href = p.path.includes("#")
+        // A key with its own query or hash (see `pageKey`) is the whole URL.
+        const href = /[?#]/.test(p.path)
           ? location.origin + p.path
           : location.origin + p.path + location.search
         children.push(
@@ -1732,7 +2016,11 @@ export class NuniWidget {
               { class: "row" },
               h("span", { class: "author" }, p.path),
               h("span", { class: "spacer" }),
-              h("span", { class: "badge" }, `${p.count} open`)
+              h(
+                "span",
+                { class: "badge" },
+                this.t("openOnPage", { count: p.count })
+              )
             )
           )
         )
@@ -1741,17 +2029,17 @@ export class NuniWidget {
 
     return h(
       "div",
-      { class: "panel", role: "dialog", "aria-label": "Comments" },
+      { class: "panel", role: "dialog", "aria-label": this.t("comments") },
       h(
         "div",
         { class: "panel-head" },
-        h("div", { class: "panel-title" }, "Comments"),
+        h("div", { class: "panel-title" }, this.t("comments")),
         h(
           "button",
           {
             class: "btn btn-ghost btn-icon",
             type: "button",
-            "aria-label": "Close",
+            "aria-label": this.t("close"),
             onclick: () => this.togglePanel(false),
           },
           icon(ICONS.close)
@@ -1759,37 +2047,62 @@ export class NuniWidget {
       ),
       h(
         "div",
-        { class: "tabs", role: "tablist" },
-        h(
-          "button",
-          {
-            class: "tab",
-            role: "tab",
-            type: "button",
-            "aria-selected": String(this.tab === "open"),
-            onclick: () => {
-              this.tab = "open"
-              this.render()
-            },
+        {
+          class: "tabs",
+          role: "tablist",
+          "aria-label": this.t("comments"),
+          // Arrow keys move between the tabs; Tab moves on to the list.
+          onkeydown: (e: Event) => {
+            const key = (e as KeyboardEvent).key
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(key)) {
+              return
+            }
+            e.preventDefault()
+            this.tab =
+              key === "Home"
+                ? "open"
+                : key === "End"
+                  ? "resolved"
+                  : this.tab === "open"
+                    ? "resolved"
+                    : "open"
+            this.focusNext = `[data-focus-key="tab-${this.tab}"]`
+            this.render()
           },
-          `Open (${open.length})`
-        ),
-        h(
-          "button",
-          {
-            class: "tab",
-            role: "tab",
-            type: "button",
-            "aria-selected": String(this.tab === "resolved"),
-            onclick: () => {
-              this.tab = "resolved"
-              this.render()
+        },
+        (["open", "resolved"] as const).map((tab) =>
+          h(
+            "button",
+            {
+              class: "tab",
+              role: "tab",
+              type: "button",
+              id: `nuni-tab-${tab}`,
+              "data-focus-key": `tab-${tab}`,
+              "aria-selected": String(this.tab === tab),
+              "aria-controls": "nuni-panel-list",
+              tabindex: this.tab === tab ? 0 : -1,
+              onclick: () => {
+                this.tab = tab
+                this.render()
+              },
             },
-          },
-          `Resolved (${resolved.length})`
+            tab === "open"
+              ? this.t("tabOpen", { count: open.length })
+              : this.t("tabResolved", { count: resolved.length })
+          )
         )
       ),
-      h("div", { class: "panel-list" }, ...children),
+      h(
+        "div",
+        {
+          class: "panel-list",
+          id: "nuni-panel-list",
+          role: "tabpanel",
+          "aria-labelledby": `nuni-tab-${this.tab}`,
+        },
+        ...children
+      ),
       this.status && !this.status.claimed && !this.isOwner
         ? this.renderPanelFooter()
         : null
@@ -1803,13 +2116,13 @@ export class NuniWidget {
       h(
         "div",
         { class: "row" },
-        h("span", { class: "meta" }, "Own this website?"),
+        h("span", { class: "meta" }, this.t("ownSite")),
         h("span", { class: "spacer" }),
         h(
           "button",
           { class: "btn", type: "button", onclick: () => this.openClaim() },
           icon(ICONS.github),
-          "Claim Nuni"
+          this.t("claim")
         )
       )
     )
@@ -1826,19 +2139,19 @@ export class NuniWidget {
       const needsName = !this.name
       const nameInput = h("input", {
         class: "field",
-        placeholder: "Your name",
+        placeholder: this.t("yourName"),
         value: this.name,
         maxlength: LIMITS.nameMaxLength,
         autocomplete: "name",
         "data-focus-key": "name",
-        "aria-label": "Your name",
+        "aria-label": this.t("yourName"),
       })
       const textarea = h("textarea", {
         class: "field",
-        placeholder: "Leave a comment",
+        placeholder: this.t("leaveComment"),
         maxlength: LIMITS.bodyMaxLength,
         "data-focus-key": "body",
-        "aria-label": "Comment",
+        "aria-label": this.t("comment"),
       })
       const prev = this.uiLayer.querySelector<HTMLTextAreaElement>(
         '[data-focus-key="body"]'
@@ -1898,7 +2211,7 @@ export class NuniWidget {
                       this.render()
                     },
                   },
-                  "Not you?"
+                  this.t("notYou")
                 )
               ),
           draft.anchor.quote
@@ -1911,16 +2224,12 @@ export class NuniWidget {
                 { class: "shot-preview" },
                 h("img", {
                   src: draft.screenshot.preview,
-                  alt: "Screenshot that will be attached",
+                  alt: this.t("screenshotAlt"),
                 }),
                 h(
                   "div",
                   { class: "shot-note" },
-                  h(
-                    "span",
-                    {},
-                    "Screenshot attached. Only the site owner sees it."
-                  ),
+                  h("span", {}, this.t("screenshotNote")),
                   h("span", { class: "spacer" }),
                   h(
                     "button",
@@ -1932,7 +2241,7 @@ export class NuniWidget {
                         this.render()
                       },
                     },
-                    "Remove"
+                    this.t("remove")
                   )
                 )
               )
@@ -1943,7 +2252,7 @@ export class NuniWidget {
           h(
             "div",
             { class: "row" },
-            h("span", { class: "kbd" }, "⌘ + Enter"),
+            h("span", { class: "kbd" }, this.t("send", { key: this.i18n.mod })),
             h("span", { class: "spacer" }),
             h(
               "button",
@@ -1952,7 +2261,7 @@ export class NuniWidget {
                 type: "button",
                 onclick: () => this.closeCard(),
               },
-              "Cancel"
+              this.t("cancel")
             ),
             h(
               "button",
@@ -1962,7 +2271,7 @@ export class NuniWidget {
                 disabled: Boolean(draft.sending),
               },
               icon(ICONS.send),
-              draft.sending ? "Posting…" : "Post"
+              draft.sending ? this.t("posting") : this.t("post")
             )
           )
         )
@@ -2004,7 +2313,7 @@ export class NuniWidget {
                 this.render()
               },
             },
-            "Cancel"
+            this.t("cancel")
           ),
           h(
             "button",
@@ -2014,7 +2323,7 @@ export class NuniWidget {
               disabled: Boolean(card.busy),
               onclick: () => this.saveEdit(comment, textarea.value),
             },
-            "Save"
+            this.t("save")
           )
         )
       )
@@ -2037,7 +2346,8 @@ export class NuniWidget {
           h(
             "span",
             { class: "meta" },
-            timeAgo(comment.createdAt) + (comment.editedAt ? " · edited" : "")
+            this.i18n.timeAgo(comment.createdAt) +
+              (comment.editedAt ? ` · ${this.t("edited")}` : "")
           ),
           h("span", { class: "spacer" }),
           h(
@@ -2045,7 +2355,7 @@ export class NuniWidget {
             {
               class: "btn btn-ghost btn-icon",
               type: "button",
-              "aria-label": "Close",
+              "aria-label": this.t("close"),
               onclick: () => this.closeCard(),
             },
             icon(ICONS.close)
@@ -2063,11 +2373,11 @@ export class NuniWidget {
                 href: this.ownerDetail.screenshotUrl,
                 target: "_blank",
                 rel: "noreferrer",
-                title: "Open the screenshot",
+                title: this.t("openScreenshot"),
               },
               h("img", {
                 src: this.ownerDetail.screenshotUrl,
-                alt: "Screenshot taken when the comment was left",
+                alt: this.t("screenshotTaken"),
               })
             )
           : null,
@@ -2079,13 +2389,16 @@ export class NuniWidget {
                 "span",
                 { class: "badge badge-ok" },
                 icon(ICONS.check),
-                "Resolved"
+                this.t("resolved")
               )
             : null,
           comment.page.origin !== location.origin
             ? h(
                 "span",
-                { class: "badge", title: `Left on ${comment.page.origin}` },
+                {
+                  class: "badge",
+                  title: this.t("leftOn", { origin: comment.page.origin }),
+                },
                 new URL(comment.page.origin).host
               )
             : null,
@@ -2094,9 +2407,9 @@ export class NuniWidget {
                 "span",
                 {
                   class: "badge",
-                  title: "The page changed; this pin is a best guess",
+                  title: this.t("approximateHint"),
                 },
-                "Approximate"
+                this.t("approximate")
               )
             : null,
           !placement?.element
@@ -2104,9 +2417,11 @@ export class NuniWidget {
                 "span",
                 {
                   class: "badge",
-                  title: `Originally on: ${comment.anchor.text || comment.anchor.tag}`,
+                  title: this.t("originallyOn", {
+                    text: comment.anchor.text || comment.anchor.tag,
+                  }),
                 },
-                "Element not found"
+                this.t("notFound")
               )
             : null
         ),
@@ -2131,7 +2446,7 @@ export class NuniWidget {
                   onclick: () => this.resolveComment(comment),
                 },
                 icon(ICONS.check),
-                "Resolve"
+                this.t("resolve")
               )
             : h(
                 "button",
@@ -2142,7 +2457,7 @@ export class NuniWidget {
                   onclick: () => this.reopenComment(comment),
                 },
                 icon(ICONS.undo),
-                "Reopen"
+                this.t("reopen")
               )
         )
       }
@@ -2156,10 +2471,10 @@ export class NuniWidget {
           {
             class: "btn btn-ghost btn-icon",
             type: "button",
-            "aria-label": "Copy for agent",
+            "aria-label": this.t("copyForAgent"),
             title: contextPending
-              ? "Loading page context…"
-              : "Copy for your coding agent",
+              ? this.t("loadingContext")
+              : this.t("copyForAgentHint"),
             disabled: contextPending,
             onclick: () => this.copyForAgent(comment),
           },
@@ -2173,8 +2488,8 @@ export class NuniWidget {
             {
               class: "btn btn-ghost btn-icon",
               type: "button",
-              "aria-label": "Edit",
-              title: "Edit",
+              "aria-label": this.t("edit"),
+              title: this.t("edit"),
               onclick: () => {
                 card.editing = true
                 this.render()
@@ -2191,10 +2506,11 @@ export class NuniWidget {
             {
               class: "btn btn-ghost btn-icon btn-danger",
               type: "button",
-              "aria-label": "Delete",
-              title: "Delete",
+              "aria-label": this.t("delete"),
+              title: this.t("delete"),
+              "data-focus-key": "delete",
               disabled: Boolean(card.busy),
-              onclick: () => this.deleteComment(comment),
+              onclick: () => void this.deleteComment(comment),
             },
             icon(ICONS.trash)
           )
@@ -2208,7 +2524,7 @@ export class NuniWidget {
         class: cls,
         "data-card": "thread",
         role: "dialog",
-        "aria-label": `Comment by ${comment.authorName}`,
+        "aria-label": this.t("commentBy", { name: comment.authorName }),
       },
       body,
       actions.length ? h("div", { class: "actions" }, ...actions) : null,
@@ -2247,9 +2563,9 @@ export class NuniWidget {
         {
           class: "reaction reaction-add",
           type: "button",
-          "aria-label": "Add a reaction",
+          "aria-label": this.t("addReaction"),
           "aria-expanded": String(open),
-          title: "Add a reaction",
+          title: this.t("addReaction"),
           onclick: () => {
             card.picker = open ? null : targetId
             this.render()
@@ -2263,7 +2579,7 @@ export class NuniWidget {
             {
               class: "reaction-picker",
               role: "group",
-              "aria-label": "Reactions",
+              "aria-label": this.t("reactions"),
             },
             ...REACTIONS.map((emoji) =>
               h(
@@ -2271,7 +2587,7 @@ export class NuniWidget {
                 {
                   class: "reaction",
                   type: "button",
-                  "aria-label": `React with ${emoji}`,
+                  "aria-label": this.t("reactWith", { emoji }),
                   onclick: () => {
                     card.picker = null
                     this.toggleReaction(comment, targetId, emoji)
@@ -2301,7 +2617,7 @@ export class NuniWidget {
           class: "field",
           maxlength: LIMITS.bodyMaxLength,
           "data-focus-key": `reply-edit-${reply._id}`,
-          "aria-label": "Edit reply",
+          "aria-label": this.t("editReply"),
         })
         const prev = this.uiLayer.querySelector<HTMLTextAreaElement>(
           `[data-focus-key="reply-edit-${reply._id}"]`
@@ -2325,7 +2641,7 @@ export class NuniWidget {
                   this.render()
                 },
               },
-              "Cancel"
+              this.t("cancel")
             ),
             h(
               "button",
@@ -2335,7 +2651,7 @@ export class NuniWidget {
                 disabled: Boolean(card.busy),
                 onclick: () => this.saveReplyEdit(comment, reply, box.value),
               },
-              "Save"
+              this.t("save")
             )
           )
         )
@@ -2356,12 +2672,13 @@ export class NuniWidget {
           ),
           h("span", { class: "author" }, reply.authorName),
           reply.isOwner
-            ? h("span", { class: "badge badge-owner" }, "Owner")
+            ? h("span", { class: "badge badge-owner" }, this.t("owner"))
             : null,
           h(
             "span",
             { class: "meta" },
-            timeAgo(reply.createdAt) + (reply.editedAt ? " · edited" : "")
+            this.i18n.timeAgo(reply.createdAt) +
+              (reply.editedAt ? ` · ${this.t("edited")}` : "")
           ),
           h("span", { class: "spacer" }),
           mine
@@ -2370,8 +2687,8 @@ export class NuniWidget {
                 {
                   class: "btn btn-ghost btn-icon btn-xs",
                   type: "button",
-                  "aria-label": "Edit reply",
-                  title: "Edit",
+                  "aria-label": this.t("editReply"),
+                  title: this.t("edit"),
                   onclick: () => {
                     card.replyEditing = reply._id
                     this.render()
@@ -2386,10 +2703,11 @@ export class NuniWidget {
                 {
                   class: "btn btn-ghost btn-icon btn-xs btn-danger",
                   type: "button",
-                  "aria-label": "Delete reply",
-                  title: "Delete",
+                  "aria-label": this.t("deleteReply"),
+                  title: this.t("delete"),
+                  "data-focus-key": `delete-${reply._id}`,
                   disabled: Boolean(card.busy),
-                  onclick: () => this.deleteReply(comment, reply),
+                  onclick: () => void this.deleteReply(comment, reply),
                 },
                 icon(ICONS.trash)
               )
@@ -2403,12 +2721,12 @@ export class NuniWidget {
     const needsName = !owner && !this.name
     const nameInput = h("input", {
       class: "field",
-      placeholder: "Your name",
+      placeholder: this.t("yourName"),
       value: this.name,
       maxlength: LIMITS.nameMaxLength,
       autocomplete: "name",
       "data-focus-key": "reply-name",
-      "aria-label": "Your name",
+      "aria-label": this.t("yourName"),
     })
     const prevName = this.uiLayer.querySelector<HTMLInputElement>(
       '[data-focus-key="reply-name"]'
@@ -2416,10 +2734,10 @@ export class NuniWidget {
     if (prevName) nameInput.value = prevName.value
     const box = h("textarea", {
       class: "field field-reply",
-      placeholder: replies.length ? "Reply" : "Reply to start a thread",
+      placeholder: replies.length ? this.t("reply") : this.t("replyFirst"),
       maxlength: LIMITS.bodyMaxLength,
       "data-focus-key": "reply",
-      "aria-label": "Reply",
+      "aria-label": this.t("reply"),
     })
     const prev = this.uiLayer.querySelector<HTMLTextAreaElement>(
       '[data-focus-key="reply"]'
@@ -2447,7 +2765,7 @@ export class NuniWidget {
             {
               class: "replies",
               role: "list",
-              "aria-label": `${items.length} ${items.length === 1 ? "reply" : "replies"}`,
+              "aria-label": this.t("replyCount", { count: items.length }),
             },
             ...items.map((item) => {
               item.setAttribute("role", "listitem")
@@ -2471,8 +2789,8 @@ export class NuniWidget {
           {
             class: "btn btn-primary btn-icon",
             type: "submit",
-            "aria-label": "Send reply",
-            title: "Send reply",
+            "aria-label": this.t("sendReply"),
+            title: this.t("sendReply"),
             disabled: Boolean(card.sendingReply),
           },
           icon(ICONS.send)
@@ -2507,8 +2825,10 @@ export class NuniWidget {
       top = point.y - 28
       if (left + width > vw - 12) left = point.x - width - 12
     } else {
-      left = vw - width - 16
-      top = vh - height - 72
+      // Next to the toolbar, in its corner.
+      const { position } = this.config
+      left = position.endsWith("left") ? 16 : vw - width - 16
+      top = position.startsWith("top") ? 72 : vh - height - 72
     }
     left = Math.max(12, Math.min(left, vw - width - 12))
     top = Math.max(12, Math.min(top, vh - height - 12))

@@ -26,7 +26,7 @@ export const STYLES = /* css */ `
   -moz-osx-font-smoothing: grayscale;
 }
 @media (prefers-color-scheme: dark) {
-  :host {
+  :host(:not([data-theme="light"])) {
     --n-bg: #1d1b20;
     --n-bg-subtle: #2a272e;
     --n-fg: #f4f2f6;
@@ -37,6 +37,18 @@ export const STYLES = /* css */ `
     --n-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 12px 32px rgba(0,0,0,0.5);
   }
 }
+:host([data-theme="dark"]) {
+  --n-bg: #1d1b20;
+  --n-bg-subtle: #2a272e;
+  --n-fg: #f4f2f6;
+  --n-fg-muted: #a8a2ae;
+  --n-border: rgba(255, 255, 255, 0.12);
+  --n-accent: #ff4d94;
+  --n-accent-soft: rgba(255, 77, 148, 0.18);
+  --n-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 12px 32px rgba(0,0,0,0.5);
+}
+:host([data-theme="light"]) { color-scheme: light; }
+:host([data-theme="dark"]) { color-scheme: dark; }
 *, *::before, *::after { box-sizing: border-box; }
 button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -90,6 +102,10 @@ button { cursor: pointer; }
 
 /* Picking */
 .pick-hint {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: calc(100vw - 24px);
   position: fixed;
   top: 12px;
   left: 50%;
@@ -186,6 +202,33 @@ button { cursor: pointer; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.pick-keys { opacity: 0.7; }
+.pick-keys::before { content: "·"; margin-right: 8px; }
+@media (max-width: 900px) { .pick-keys { display: none; } }
+
+/* Confirm dialog */
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.32);
+  pointer-events: auto;
+}
+.confirm {
+  width: min(360px, calc(100vw - 32px));
+  padding: 16px;
+  border-radius: var(--n-radius);
+  background: var(--n-bg);
+  color: var(--n-fg);
+  border: 1px solid var(--n-border);
+  box-shadow: var(--n-shadow);
+  display: grid;
+  gap: 12px;
+}
+.confirm p { margin: 0; }
+.btn-danger-solid { background: var(--n-danger); color: #fff; border-color: transparent; }
 
 /* Pins */
 .pin {
@@ -456,5 +499,16 @@ a.item { color: inherit; text-decoration: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+}
+
+/* The toolbar's corner (the position option) */
+:host([data-position$="left"]) .toolbar { right: auto; left: 16px; }
+:host([data-position^="top"]) .toolbar { bottom: auto; top: 16px; }
+:host([data-position$="left"]) .panel { right: auto; left: 12px; }
+:host([data-position^="top"]) .panel { top: 72px; bottom: 12px; }
+:host([data-position^="top"]) .toast { bottom: auto; top: 72px; }
+@media (max-width: 640px) {
+  :host([data-position$="left"]) .toolbar { left: 12px; }
+  :host([data-position^="top"]) .toolbar { top: 12px; }
 }
 `

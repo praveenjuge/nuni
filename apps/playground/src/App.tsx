@@ -1,4 +1,4 @@
-import { Nuni } from "@nuniapp/react"
+import { Nuni, type NuniProps } from "@nuniapp/react"
 import { createElement, useState } from "react"
 
 import { APPROVALS_FRAME } from "./elements"
@@ -13,6 +13,21 @@ const PROJECT_ID = (() => {
     sessionStorage.getItem("playground:project") ??
     "nuni_JJHAES8DaHHYNVh4JoWWXw"
   )
+})()
+
+// Widget options from the URL, for trying them out (and for the e2e tests):
+// `?position=top-left&accent=%23facc15&theme=dark&label=Feedback&hotkey=f`.
+const OPTIONS = (() => {
+  const q = new URLSearchParams(location.search)
+  const get = (name: string) => q.get(name) ?? undefined
+  return {
+    position: get("position") as NuniProps["position"],
+    accentColor: get("accent"),
+    theme: get("theme") as NuniProps["theme"],
+    label: get("label"),
+    hotkey: q.get("hotkey") === "off" ? (false as const) : get("hotkey"),
+    locale: get("locale"),
+  }
 })()
 
 const plans = [
@@ -190,6 +205,7 @@ export function App() {
         convexUrl={import.meta.env.VITE_CONVEX_URL}
         convexSiteUrl={import.meta.env.VITE_CONVEX_SITE_URL}
         appUrl={import.meta.env.VITE_APP_URL}
+        {...OPTIONS}
       />
     </>
   )
