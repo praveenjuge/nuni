@@ -13,6 +13,12 @@ export interface ScreenshotOptions {
   exclude: Element
   /** Outline color drawn around the commented element. */
   accent: string
+  /**
+   * The part of the element that was commented on (selected text, an
+   * area), in viewport coordinates. The image is cropped around it and it
+   * is outlined instead of the whole element.
+   */
+  focus?: () => Box
 }
 
 export type CaptureScreenshot = (
@@ -50,7 +56,7 @@ const MASKED_INPUT_TYPES = new Set([
   "time",
 ])
 
-interface Box {
+export interface Box {
   left: number
   top: number
   right: number
@@ -93,7 +99,7 @@ export function frameFor(el: Element): Element {
  * stays inside it there; `display: flow-root` gives that same layout. The
  * frame's style attribute is restored exactly afterwards.
  */
-export function isolatedLayout(frame: Element, el: Element) {
+export function isolatedLayout(frame: Element, el: Element, focus?: () => Box) {
   const { display } = getComputedStyle(frame)
   const isolate = display === "block" || display === "list-item"
   const before = frame.getAttribute("style")
@@ -106,7 +112,7 @@ export function isolatedLayout(frame: Element, el: Element) {
     )
   try {
     const box = frame.getBoundingClientRect()
-    const target = el.getBoundingClientRect()
+    const target = focus?.() ?? el.getBoundingClientRect()
     const want = around(target)
     return {
       box,
@@ -176,7 +182,7 @@ function toBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
 
 export const captureScreenshot: CaptureScreenshot = async (el, options) => {
   const frame = frameFor(el)
-  const { box, target, masks, crop } = isolatedLayout(frame, el)
+  const { box, target, masks, crop } = isolatedLayout(frame, el, options.focus)
   const cropW = crop.right - crop.left
   const cropH = crop.bottom - crop.top
   if (cropW < 1 || cropH < 1) return null

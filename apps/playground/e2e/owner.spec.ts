@@ -138,9 +138,13 @@ test("owner resolves and deletes from the widget; visitors see it live", async (
     .getByRole("button", { name: "Reopen" })
     .click()
   await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("2")
-  owner.once("dialog", (d) => d.accept())
   await owner
     .locator('#nuni-root [data-card="thread"]')
+    .getByRole("button", { name: "Delete" })
+    .click()
+  await owner
+    .locator("#nuni-root")
+    .getByRole("alertdialog")
     .getByRole("button", { name: "Delete" })
     .click()
   await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("1")

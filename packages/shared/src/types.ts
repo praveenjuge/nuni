@@ -43,6 +43,31 @@ export interface Anchor {
     scrollY: number
   }
   docSize: { w: number; h: number }
+  /**
+   * Shadow hosts and same-origin iframes on the way to the element,
+   * outermost first. The selectors above are relative to the innermost one.
+   */
+  scope?: AnchorScope[]
+  /** A text comment: the selected words inside the element. */
+  quote?: AnchorQuote
+  /** An area comment: a box inside the element, 0..1 of its size. */
+  region?: Rect
+}
+
+/**
+ * Selected text, found again by its exact words and the text around them
+ * (like the W3C TextQuoteSelector). Whitespace is collapsed.
+ */
+export interface AnchorQuote {
+  exact: string
+  prefix: string
+  suffix: string
+}
+
+/** One shadow host or <iframe>, captured like any element in its own scope. */
+export interface AnchorScope {
+  kind: "shadow" | "frame"
+  host: Omit<Anchor, "scope">
 }
 
 export type CommentStatus = "open" | "resolved"
@@ -100,6 +125,35 @@ export interface WidgetComment {
   createdAt: number
   editedAt?: number
   resolvedAt?: number
+  /** Replies in the thread (not counting the comment itself). */
+  replyCount?: number
+}
+
+/** A reply in a comment's thread. */
+export interface ReplyView {
+  _id: string
+  commentId: string
+  body: string
+  authorName: string
+  authorKeyHash: string
+  /** Written by the project owner (widget session, dashboard or CLI). */
+  isOwner: boolean
+  createdAt: number
+  editedAt?: number
+}
+
+/** One emoji on a comment or reply, with who added it. */
+export interface ReactionSummary {
+  /** The comment or reply id. */
+  targetId: string
+  emoji: string
+  count: number
+  authorKeyHashes: string[]
+}
+
+export interface Thread {
+  replies: ReplyView[]
+  reactions: ReactionSummary[]
 }
 
 /** A comment as the owner sees it (dashboard, owner widget, agents). */
@@ -107,4 +161,5 @@ export interface OwnerComment extends WidgetComment {
   userAgent?: string
   context?: CommentContext
   screenshotUrl?: string | null
+  replies?: ReplyView[]
 }

@@ -1,4 +1,5 @@
 import { commentUrl } from "./path"
+import { PACKAGES } from "./prompt"
 import type { OwnerComment } from "./types"
 
 export interface CommentPromptOptions {
@@ -54,6 +55,18 @@ export function buildCommentPrompt(
       (comment.status === "resolved" ? " (already resolved)" : "")
   )
 
+  if (comment.replies?.length) {
+    out.push("", `## Replies (${comment.replies.length})`, "")
+    for (const reply of comment.replies) {
+      out.push(
+        `${reply.authorName}${reply.isOwner ? " (owner)" : ""}:`,
+        quote(reply.body),
+        ""
+      )
+    }
+    out.pop()
+  }
+
   out.push("", "## Where", "")
   out.push(`- Page: ${page.title ? `${page.title} ` : ""}(${page.path})`)
   out.push(`- Open it: ${commentUrl(page, comment._id)}`)
@@ -67,6 +80,16 @@ export function buildCommentPrompt(
   out.push("", "## Element", "")
   out.push(`- Tag: <${anchor.tag}>`)
   if (anchor.text) out.push(`- Text: ${inline(anchor.text)}`)
+  if (anchor.quote) {
+    out.push(`- Selected text: ${inline(anchor.quote.exact)}`)
+  }
+  if (anchor.region) {
+    const pct = (n: number) => `${Math.round(n * 100)}%`
+    const r = anchor.region
+    out.push(
+      `- Area: ${pct(r.w)} × ${pct(r.h)} of the element, from ${pct(r.x)} left and ${pct(r.y)} top`
+    )
+  }
   if (anchor.componentName) {
     out.push(`- React component: ${anchor.componentName}`)
   }
@@ -124,7 +147,8 @@ export function buildCommentPrompt(
     "",
     "1. Find the code that renders this element. Search for the text, the component name, the test ID or the selector.",
     "2. Make the change the comment asks for, and keep the fix focused on it.",
-    "3. Tell me what you changed, so the comment can be resolved in Nuni."
+    "3. Tell me what you changed, so the comment can be resolved in Nuni.",
+    `   If the Nuni CLI is signed in to this project (\`npx ${PACKAGES.cli}@latest login\`), resolve it with \`npx ${PACKAGES.cli}@latest resolve ${comment._id}\` or the \`resolve_comment\` MCP tool.`
   )
   return out.join("\n")
 }

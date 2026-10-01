@@ -17,6 +17,8 @@ By default the path is normalized: the query string and `#section` hashes are ig
 init({
   project: "nuni_...",
   // Keep ?tab=... so each tab has its own comments
-  getPageKey: (url) => url.pathname + (url.searchParams.has("tab") ? `?tab=${url.searchParams.get("tab")}` : ""),
+  getPageKey: (url) =>
+    url.pathname +
+    (url.searchParams.has("tab") ? `?tab=${url.searchParams.get("tab")}` : ""),
 })
 ```

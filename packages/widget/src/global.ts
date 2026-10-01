@@ -51,6 +51,20 @@ if (data?.project) {
     convexUrl: data.convexUrl,
     convexSiteUrl: data.convexSiteUrl,
     appUrl: data.appUrl,
+    pageKey: data.pageKey as NuniOptions["pageKey"],
+    position: data.position as NuniOptions["position"],
+    accentColor: data.accentColor,
+    theme: data.theme as NuniOptions["theme"],
+    label: data.label,
+    hotkey:
+      data.hotkey === undefined
+        ? undefined
+        : flag(data.hotkey) === false
+          ? false
+          : data.hotkey,
+    // `!== undefined`, so data-z-index="0" works too.
+    zIndex: data.zIndex !== undefined ? Number(data.zIndex) : undefined,
+    locale: data.locale,
     capture: {
       console: flag(data.captureConsole),
       network: flag(data.captureNetwork),

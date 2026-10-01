@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawn } from "node:child_process"
 import {
   existsSync,
   mkdtempSync,
@@ -39,6 +39,8 @@ function atLeast(version: string, min: string) {
 
 /** Screenshots, page context and Copy for agent shipped in 0.1.4. */
 const HAS_CONTEXT = atLeast(VERSION, "0.1.4")
+/** The MCP server, replies, reactions and text comments shipped in 0.1.5. */
+const HAS_THREADS = atLeast(VERSION, "0.1.5")
 const CDN = `https://cdn.jsdelivr.net/npm/@nuniapp/widget@${VERSION}/dist`
 const PACKAGES = ["@nuniapp/widget", "@nuniapp/react", "@nuniapp/cli"]
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -60,7 +62,7 @@ function smokePage(body: string) {
   <head><meta charset="utf-8"><title>Nuni release smoke test</title></head>
   <body style="font-family: sans-serif; padding: 40px">
     <main>
-      <h1>Release smoke test</h1>
+      <h1>Release smoke test for the Nuni widget</h1>
       <p>Nuni ${VERSION}</p>
       <button id="target" style="padding: 8px 16px">Buy now</button>
     </main>
@@ -134,6 +136,7 @@ test("production backend serves this release", async ({ request }) => {
   const routes = [
     "/widget/comments",
     ...(HAS_CONTEXT ? ["/widget/screenshot"] : []),
+    ...(HAS_THREADS ? ["/widget/replies"] : []),
   ]
   for (const route of routes) {
     const res = await request.fetch(`${site}${route}`, {
@@ -159,6 +162,91 @@ test("CLI", () => {
   }
 })
 
+/** Send JSON-RPC lines to a stdio server and collect the answers by id. */
+function rpc(command: string, args: string[], cwd: string, messages: object[]) {
+  return new Promise<Map<number, { result?: unknown; error?: unknown }>>(
+    (resolve, reject) => {
+      const child = spawn(command, args, {
+        cwd,
+        stdio: ["pipe", "pipe", "pipe"],
+      })
+      const answers = new Map<number, { result?: unknown; error?: unknown }>()
+      const wanted = messages.filter((m) => "id" in m).length
+      let buffer = ""
+      const timer = setTimeout(() => {
+        child.kill()
+        reject(new Error(`No answer from ${args.join(" ")}`))
+      }, 90_000)
+      child.stdout.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString()
+        let newline = buffer.indexOf("\n")
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline).trim()
+          buffer = buffer.slice(newline + 1)
+          newline = buffer.indexOf("\n")
+          if (!line) continue
+          const message = JSON.parse(line) as {
+            id?: number
+            result?: unknown
+            error?: unknown
+          }
+          if (typeof message.id === "number") answers.set(message.id, message)
+          if (answers.size === wanted) {
+            clearTimeout(timer)
+            child.kill()
+            resolve(answers)
+          }
+        }
+      })
+      child.on("error", reject)
+      for (const m of messages) {
+        child.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...m }) + "\n")
+      }
+    }
+  )
+}
+
+test("MCP server lists its tools", async () => {
+  test.skip(!HAS_THREADS, "The MCP server shipped in 0.1.5")
+  test.setTimeout(120_000)
+  const dir = mkdtempSync(join(tmpdir(), "nuni-mcp-"))
+  try {
+    const answers = await rpc(
+      "npx",
+      ["-y", `@nuniapp/cli@${VERSION}`, "mcp"],
+      dir,
+      [
+        {
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "nuni-smoke", version: VERSION },
+          },
+        },
+        { method: "notifications/initialized" },
+        { id: 2, method: "tools/list" },
+      ]
+    )
+    const init = answers.get(1)?.result as {
+      serverInfo: { name: string; version: string }
+    }
+    expect(init.serverInfo.version).toBe(VERSION)
+    const tools = (answers.get(2)?.result as { tools: { name: string }[] })
+      .tools
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "get_comment",
+      "list_comments",
+      "reopen_comment",
+      "reply_to_comment",
+      "resolve_comment",
+    ])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 /**
  * Comment on the button as a visitor through the real UI, then check the
  * stored comment and delete it through Convex's HTTP API. (The widget's live
@@ -173,6 +261,8 @@ async function commentFlow(
     project: string
     serve: (context: BrowserContext) => Promise<unknown>
     lazyScript: RegExp
+    /** Comment on selected words instead of clicking the button. */
+    words?: string
   }
 ) {
   const body = `Release smoke test ${VERSION} ${Date.now()}`
@@ -192,9 +282,28 @@ async function commentFlow(
   expect(authorSecret).toBeTruthy()
   await page.evaluate(() => console.error("Release smoke test error"))
 
-  await toolbar.getByRole("button", { name: "Add a comment" }).click()
-  await page.locator("#target").click()
+  if (options.words) {
+    await page.locator("h1").evaluate((el, words) => {
+      const text = el.firstChild as Text
+      const at = text.data.indexOf(words)
+      const range = document.createRange()
+      range.setStart(text, at)
+      range.setEnd(text, at + words.length)
+      getSelection()!.removeAllRanges()
+      getSelection()!.addRange(range)
+    }, options.words)
+    await page
+      .locator("#nuni-root")
+      .getByRole("button", { name: "Comment", exact: true })
+      .click()
+  } else {
+    await toolbar.getByRole("button", { name: "Add a comment" }).click()
+    await page.locator("#target").click()
+  }
   const composer = page.locator('#nuni-root [data-card="composer"]')
+  if (options.words) {
+    await expect(composer.locator(".quote")).toHaveText(options.words)
+  }
   await composer.getByPlaceholder("Your name").fill("Nuni smoke test")
   await composer.getByPlaceholder("Leave a comment").fill(body)
   let upload: Promise<Response> | null = null
@@ -227,10 +336,55 @@ async function commentFlow(
       publicId: options.project,
       path: "/",
     })) as { _id: string; body: string }[]
-    const mine = listed.find((c) => c._id === id)
+    const mine = listed.find((c) => c._id === id) as
+      { body: string; anchor: { quote?: { exact: string } } } | undefined
     expect(mine?.body).toBe(body)
     expect(mine).not.toHaveProperty("context")
     expect(mine).not.toHaveProperty("screenshotUrl")
+    if (options.words) expect(mine?.anchor.quote?.exact).toBe(options.words)
+
+    if (HAS_THREADS) {
+      // A reply from the page (CORS included), and a reaction.
+      const { site } = await backendUrls(request)
+      const reply = await page.evaluate(
+        async ({ site, project, id, secret }) => {
+          const res = await fetch(`${site}/widget/replies`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              publicId: project,
+              commentId: id,
+              body: "Smoke test reply",
+              authorName: "Nuni smoke test",
+              authorSecret: secret,
+            }),
+          })
+          return { status: res.status, ...((await res.json()) as object) }
+        },
+        { site, project: options.project, id, secret: authorSecret }
+      )
+      expect(reply).toMatchObject({ status: 201, id: expect.any(String) })
+      await callConvex(request, "mutation", "reactions:toggle", {
+        publicId: options.project,
+        commentId: id,
+        targetId: id,
+        emoji: "👍",
+        authorSecret,
+      })
+      const thread = (await callConvex(
+        request,
+        "query",
+        "replies:listForComment",
+        { publicId: options.project, commentId: id }
+      )) as {
+        replies: { body: string }[]
+        reactions: { emoji: string; count: number }[]
+      }
+      expect(thread.replies.map((r) => r.body)).toEqual(["Smoke test reply"])
+      expect(thread.reactions).toEqual([
+        expect.objectContaining({ emoji: "👍", count: 1 }),
+      ])
+    }
     if (HAS_CONTEXT) {
       expect(
         await callConvex(request, "query", "comments:getForOwner", {
@@ -289,6 +443,15 @@ test("CDN script tag", async ({ browser, request }) => {
     serve,
     lazyScript: /nuni-screenshot\.global\.js$/,
   })
+  if (HAS_THREADS) {
+    await commentFlow(browser, request, {
+      url: `${origin}/`,
+      project,
+      serve,
+      lazyScript: /nuni-screenshot\.global\.js$/,
+      words: "smoke test",
+    })
+  }
 })
 
 test.describe("npm packages in a bundled React app", () => {

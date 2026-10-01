@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { resolveConfig } from "../src/config"
+import { pageKeyFor, resolveConfig } from "../src/config"
 import { domContext, safeUrl, startCollectors } from "../src/context"
 import { CAPTURE_MARK } from "../src/mark"
 import { maskedBoxes } from "../src/screenshot"
-import { colorFor, h, icon, initials, timeAgo } from "../src/dom"
+import { colorFor, h, icon, initials, readableOn } from "../src/dom"
+import { createI18n } from "../src/i18n"
 import { ICONS } from "../src/icons"
 import { init } from "../src/index"
 import { sha256 } from "../src/sha256"
@@ -50,9 +51,86 @@ describe("dom helpers", () => {
     expect(initials("ada")).toBe("AD")
     expect(initials("  ")).toBe("?")
     expect(colorFor("Sam")).toBe(colorFor("Sam"))
+    const { timeAgo } = createI18n("en")
     expect(timeAgo(Date.now() - 10_000)).toBe("just now")
     expect(timeAgo(Date.now() - 5 * 60_000)).toBe("5m ago")
     expect(timeAgo(Date.now() - 3 * 3600_000)).toBe("3h ago")
+  })
+
+  it("picks readable text for the accent color", () => {
+    expect(readableOn([214, 36, 110])).toBe("#ffffff")
+    expect(readableOn([250, 204, 21])).toBe("#111111")
+    expect(readableOn([0, 0, 0])).toBe("#ffffff")
+  })
+})
+
+describe("messages", () => {
+  it("fills in values and plural forms", () => {
+    const { t } = createI18n("en")
+    expect(t("replyCount", { count: 1 })).toBe("1 reply")
+    expect(t("replyCount", { count: 3 })).toBe("3 replies")
+    expect(t("tabOpen", { count: 2 })).toBe("Open (2)")
+  })
+
+  it("takes overrides and a locale", () => {
+    const { t, timeAgo } = createI18n("de", {
+      comment: "Kommentieren",
+      replyCount: { one: "{count} Antwort", other: "{count} Antworten" },
+    })
+    expect(t("comment")).toBe("Kommentieren")
+    expect(t("replyCount", { count: 2 })).toBe("2 Antworten")
+    // Words not overridden stay English.
+    expect(t("post")).toBe("Post")
+    expect(timeAgo(Date.now() - 86_400_000)).toBe("gestern")
+  })
+
+  it("survives an invalid locale", () => {
+    expect(createI18n("not a locale!").t("post")).toBe("Post")
+  })
+})
+
+describe("options", () => {
+  it("resolves appearance options with safe defaults", () => {
+    const base = { project: "nuni_123456789ABCDEFGHJKLMN" }
+    const config = resolveConfig(base)
+    expect(config.position).toBe("bottom-right")
+    expect(config.theme).toBe("auto")
+    expect(config.hotkey).toBe("c")
+    expect(config.zIndex).toBeNull()
+    const custom = resolveConfig({
+      ...base,
+      position: "top-left",
+      theme: "dark",
+      hotkey: "N",
+      zIndex: 50.4,
+      label: "  ",
+    })
+    expect(custom).toMatchObject({
+      position: "top-left",
+      theme: "dark",
+      hotkey: "n",
+      zIndex: 50,
+      label: null,
+    })
+    expect(resolveConfig({ ...base, hotkey: false }).hotkey).toBeNull()
+    expect(resolveConfig({ ...base, zIndex: 0 }).zIndex).toBe(0)
+    expect(resolveConfig({ ...base, zIndex: Number("x") }).zIndex).toBeNull()
+    expect(
+      resolveConfig({ ...base, position: "middle" as never }).position
+    ).toBe("bottom-right")
+  })
+
+  it("builds page keys from the URL", () => {
+    const url = new URL(
+      "https://a.com/docs/?b=2&utm_source=x&a=1&nuni=c1#install"
+    )
+    expect(pageKeyFor("path")(url)).toBe("/docs")
+    expect(pageKeyFor("path+search")(url)).toBe("/docs?a=1&b=2")
+    expect(pageKeyFor("path+hash")(url)).toBe("/docs#install")
+    // Hash routes are part of the path already.
+    expect(pageKeyFor("path+hash")(new URL("https://a.com/#/settings"))).toBe(
+      "/#/settings"
+    )
   })
 })
 

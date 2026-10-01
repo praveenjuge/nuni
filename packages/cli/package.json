@@ -1,7 +1,7 @@
 {
   "name": "@nuniapp/cli",
-  "version": "0.1.4",
-  "description": "Set up Nuni in any project: generates a project ID and prints the install snippet.",
+  "version": "0.1.5",
+  "description": "Set up Nuni in any project, and give coding agents its comments: login, list, read and resolve from the terminal or over MCP.",
   "license": "MIT",
   "type": "module",
   "homepage": "https://nuni.praveenjuge.com",
@@ -32,10 +32,13 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@nuni/backend": "workspace:*",
     "@nuni/eslint-config": "workspace:*",
     "@nuni/shared": "workspace:*",
     "@nuni/tsconfig": "workspace:*",
     "@types/node": "^22",
+    "convex": "^1.46.0",
     "eslint": "^10.11.0",
     "tsdown": "^0.23.0",
     "typescript": "^5.9.3",

@@ -1,6 +1,7 @@
-import { Nuni } from "@nuniapp/react"
-import { useState } from "react"
+import { Nuni, type NuniProps } from "@nuniapp/react"
+import { createElement, useState } from "react"
 
+import { APPROVALS_FRAME } from "./elements"
 import { Link, usePath } from "./router"
 
 // Public project ID for local development. Safe to commit.
@@ -12,6 +13,21 @@ const PROJECT_ID = (() => {
     sessionStorage.getItem("playground:project") ??
     "nuni_JJHAES8DaHHYNVh4JoWWXw"
   )
+})()
+
+// Widget options from the URL, for trying them out (and for the e2e tests):
+// `?position=top-left&accent=%23facc15&theme=dark&label=Feedback&hotkey=f`.
+const OPTIONS = (() => {
+  const q = new URLSearchParams(location.search)
+  const get = (name: string) => q.get(name) ?? undefined
+  return {
+    position: get("position") as NuniProps["position"],
+    accentColor: get("accent"),
+    theme: get("theme") as NuniProps["theme"],
+    label: get("label"),
+    hotkey: q.get("hotkey") === "off" ? (false as const) : get("hotkey"),
+    locale: get("locale"),
+  }
 })()
 
 const plans = [
@@ -139,10 +155,37 @@ function Tasks() {
   )
 }
 
+/** Shadow DOM and an iframe, for pins inside both. */
+function Embeds() {
+  return (
+    <section className="embeds">
+      <h1>Embeds</h1>
+      <div className="plans">
+        {["Basic", "Plus"].map((plan) =>
+          createElement("acme-card", { key: plan, plan })
+        )}
+      </div>
+      <iframe
+        className="embed-frame"
+        title="Approvals"
+        srcDoc={APPROVALS_FRAME}
+      />
+    </section>
+  )
+}
+
 export function App() {
   const path = usePath()
   const page =
-    path === "/pricing" ? <Pricing /> : path === "/tasks" ? <Tasks /> : <Home />
+    path === "/pricing" ? (
+      <Pricing />
+    ) : path === "/tasks" ? (
+      <Tasks />
+    ) : path === "/embeds" ? (
+      <Embeds />
+    ) : (
+      <Home />
+    )
   return (
     <>
       <header className="site-header">
@@ -152,6 +195,7 @@ export function App() {
           </Link>
           <Link href="/pricing">Pricing</Link>
           <Link href="/tasks">Tasks</Link>
+          <Link href="/embeds">Embeds</Link>
         </nav>
       </header>
       <main>{page}</main>
@@ -161,6 +205,7 @@ export function App() {
         convexUrl={import.meta.env.VITE_CONVEX_URL}
         convexSiteUrl={import.meta.env.VITE_CONVEX_SITE_URL}
         appUrl={import.meta.env.VITE_APP_URL}
+        {...OPTIONS}
       />
     </>
   )

@@ -1,5 +1,6 @@
 import {
   LIMITS,
+  type AnchorQuote,
   stripHtmlUrlQueries,
   stripUrlQueries,
   withoutQuery,
@@ -19,15 +20,20 @@ import {
 import {
   actingOwner,
   bumpPageOpen,
+  clampString,
+  cleanBody,
+  cleanName,
   ensureProject,
   fail,
   parseOrigin,
   projectByPublicId,
   requireOwner,
+  requireUser,
   sha256Hex,
   currentUser,
 } from "./lib"
-import { rateLimiter } from "./rateLimits"
+import { ipKey, rateLimiter } from "./rateLimits"
+import { deleteThread, repliesFor } from "./replies"
 import {
   anchorValidator,
   contextValidator,
@@ -52,6 +58,7 @@ function toPublic(c: Doc<"comments">) {
     createdAt: c.createdAt,
     editedAt: c.editedAt,
     resolvedAt: c.resolvedAt,
+    replyCount: c.replyCount ?? 0,
   }
 }
 
@@ -65,6 +72,7 @@ async function toOwner(ctx: QueryCtx, c: Doc<"comments">) {
     screenshotUrl: c.screenshotId
       ? await ctx.storage.getUrl(c.screenshotId)
       : null,
+    replies: c.replyCount ? await repliesFor(ctx, c._id) : [],
   }
 }
 
@@ -115,24 +123,6 @@ function cleanContext(context: CommentContext | undefined) {
   return out.console || out.network || out.dom ? out : undefined
 }
 
-function cleanBody(body: string): string {
-  const clean = body.replace(/\r\n/g, "\n").trim()
-  if (!clean) fail("invalid_body", "Comment cannot be empty")
-  if (clean.length > LIMITS.bodyMaxLength) {
-    fail(
-      "invalid_body",
-      `Comments are limited to ${LIMITS.bodyMaxLength} characters`
-    )
-  }
-  return clean
-}
-
-function cleanName(name: string): string {
-  const clean = name.trim().replace(/\s+/g, " ").slice(0, LIMITS.nameMaxLength)
-  if (!clean) fail("invalid_name", "Enter your name")
-  return clean
-}
-
 function searchTextFor(body: string, authorName: string) {
   return `${authorName}\n${body}`
 }
@@ -143,10 +133,6 @@ function originOf(url: string): string | null {
   } catch {
     return null
   }
-}
-
-function clampString(value: string, max: number) {
-  return value.length > max ? value.slice(0, max) : value
 }
 
 /**
@@ -195,6 +181,36 @@ export const pagesWithComments = query({
   },
 })
 
+/** A text comment's words and the text around them, within the limits. */
+function cleanQuote(quote: AnchorQuote | undefined): AnchorQuote | undefined {
+  const exact = clampString(quote?.exact.trim() ?? "", LIMITS.quoteMaxLength)
+  if (!quote || !exact) return undefined
+  return {
+    exact,
+    prefix: clampString(quote.prefix, LIMITS.quoteContextLength),
+    suffix: clampString(quote.suffix, LIMITS.quoteContextLength),
+  }
+}
+
+/** An area inside the element, kept to 0..1 of its box. */
+function cleanRegion(r: { x: number; y: number; w: number; h: number }) {
+  const unit = (n: number) =>
+    Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0
+  const x = unit(r.x)
+  const y = unit(r.y)
+  return { x, y, w: Math.min(unit(r.w), 1 - x), h: Math.min(unit(r.h), 1 - y) }
+}
+
+function cleanAnchor<A extends { text: string; ancestors: unknown[] }>(
+  anchor: A
+): A {
+  return {
+    ...anchor,
+    text: clampString(anchor.text, LIMITS.anchorTextMaxLength),
+    ancestors: anchor.ancestors.slice(0, 6),
+  }
+}
+
 /** Called from the HTTP action, which supplies the client IP. */
 export const createFromWidget = internalMutation({
   args: {
@@ -220,7 +236,9 @@ export const createFromWidget = internalMutation({
       fail("invalid_author", "Invalid author key")
     }
 
-    const perIp = await rateLimiter.limit(ctx, "commentPerIp", { key: args.ip })
+    const perIp = await rateLimiter.limit(ctx, "commentPerIp", {
+      key: ipKey(args.ip, args.publicId),
+    })
     if (!perIp.ok) fail("rate_limited", "Slow down a little")
     const perProject = await rateLimiter.limit(ctx, "commentPerProject", {
       key: args.publicId,
@@ -256,9 +274,13 @@ export const createFromWidget = internalMutation({
         path: clampString(args.page.path, 1000),
       },
       anchor: {
-        ...args.anchor,
-        text: clampString(args.anchor.text, LIMITS.anchorTextMaxLength),
-        ancestors: args.anchor.ancestors.slice(0, 6),
+        ...cleanAnchor(args.anchor),
+        scope: args.anchor.scope?.slice(0, 6).map((step) => ({
+          kind: step.kind,
+          host: cleanAnchor(step.host),
+        })),
+        quote: cleanQuote(args.anchor.quote),
+        region: args.anchor.region && cleanRegion(args.anchor.region),
       },
       viewport: args.viewport,
       context: cleanContext(args.context),
@@ -305,7 +327,11 @@ export const editOwn = mutation({
   },
 })
 
-async function removeComment(ctx: MutationCtx, comment: Doc<"comments">) {
+export async function removeComment(
+  ctx: MutationCtx,
+  comment: Doc<"comments">
+) {
+  await deleteThread(ctx, comment._id)
   await ctx.db.delete(comment._id)
   if (comment.screenshotId) await ctx.storage.delete(comment.screenshotId)
   if (comment.status === "open") {
@@ -386,6 +412,101 @@ export const remove = mutation({
   },
 })
 
+const bulkArgs = { ids: v.array(v.id("comments")) }
+
+/**
+ * Comments picked in the dashboard: all in one project the signed-in user
+ * owns. Missing ids (deleted meanwhile) are skipped.
+ */
+async function loadBulk(ctx: MutationCtx, ids: Id<"comments">[]) {
+  if (ids.length > LIMITS.bulkMax) {
+    fail("too_many", `Pick up to ${LIMITS.bulkMax} comments at a time`)
+  }
+  const user = await requireUser(ctx)
+  const comments = (
+    await Promise.all([...new Set(ids)].map((id) => ctx.db.get(id)))
+  ).filter((c): c is Doc<"comments"> => c !== null)
+  const projectIds = new Set(comments.map((c) => c.projectId))
+  if (projectIds.size > 1) fail("invalid", "Comments from several projects")
+  const projectId = comments[0]?.projectId
+  const project = projectId ? await ctx.db.get(projectId) : null
+  if (comments.length && project?.ownerId !== user._id) {
+    fail("forbidden", "Only the project owner can do this")
+  }
+  if (project?.deletingAt) fail("not_found", "Project not found")
+  return { user, project, comments }
+}
+
+/** Open-comment counts per page, applied once for a whole batch. */
+async function applyPageDeltas(
+  ctx: MutationCtx,
+  projectId: Id<"projects">,
+  deltas: Map<string, number>
+) {
+  for (const [path, delta] of deltas) {
+    if (delta) await bumpPageOpen(ctx, projectId, path, delta)
+  }
+}
+
+export const bulkSetStatus = mutation({
+  args: { ...bulkArgs, status: statusValidator },
+  handler: async (ctx, { ids, status }) => {
+    const { user, project, comments } = await loadBulk(ctx, ids)
+    if (!project) return 0
+    const now = Date.now()
+    const deltas = new Map<string, number>()
+    let changed = 0
+    for (const comment of comments) {
+      if (comment.status === status) continue
+      changed++
+      const path = comment.page.path
+      deltas.set(path, (deltas.get(path) ?? 0) + (status === "open" ? 1 : -1))
+      await ctx.db.patch(comment._id, {
+        status,
+        resolvedAt: status === "resolved" ? now : undefined,
+        resolvedBy: status === "resolved" ? user._id : undefined,
+      })
+    }
+    if (!changed) return 0
+    await applyPageDeltas(ctx, project._id, deltas)
+    await ctx.db.patch(project._id, {
+      openCount: Math.max(
+        0,
+        project.openCount + (status === "open" ? changed : -changed)
+      ),
+      lastActivityAt: now,
+    })
+    return changed
+  },
+})
+
+export const bulkRemove = mutation({
+  args: bulkArgs,
+  handler: async (ctx, { ids }) => {
+    const { project, comments } = await loadBulk(ctx, ids)
+    if (!project) return 0
+    const deltas = new Map<string, number>()
+    let open = 0
+    for (const comment of comments) {
+      await deleteThread(ctx, comment._id)
+      await ctx.db.delete(comment._id)
+      if (comment.screenshotId) await ctx.storage.delete(comment.screenshotId)
+      if (comment.status === "open") {
+        open++
+        const path = comment.page.path
+        deltas.set(path, (deltas.get(path) ?? 0) - 1)
+      }
+    }
+    await applyPageDeltas(ctx, project._id, deltas)
+    await ctx.db.patch(project._id, {
+      commentCount: Math.max(0, project.commentCount - comments.length),
+      openCount: Math.max(0, project.openCount - open),
+      lastActivityAt: Date.now(),
+    })
+    return comments.length
+  },
+})
+
 /** Dashboard list, owner only, newest first, paginated and filtered server-side. */
 export const listForOwner = query({
   args: {
@@ -429,6 +550,45 @@ export const listForOwner = query({
       ...result,
       // The owner sees the full page location and the captured context.
       page: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
+    }
+  },
+})
+
+/**
+ * The CLI and MCP server (`nuni login` session token): owner comments,
+ * newest first, with the full context. Throws when the token is not an
+ * owner session for this project, so the agent can tell the person to log in.
+ */
+export const listForAgent = query({
+  args: {
+    publicId: v.string(),
+    sessionToken: v.string(),
+    status: v.optional(statusValidator),
+    path: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const project = await projectByPublicId(ctx, args.publicId)
+    if (
+      !project ||
+      !(await actingOwner(ctx, project, { sessionToken: args.sessionToken }))
+    ) {
+      fail("unauthenticated", "Not signed in to this project")
+    }
+    const status = args.status ?? "open"
+    const numItems = Math.min(50, Math.max(1, Math.trunc(args.limit ?? 20)))
+    const result = await ctx.db
+      .query("comments")
+      .withIndex("by_project_status", (q) =>
+        q.eq("projectId", project._id).eq("status", status)
+      )
+      .order("desc")
+      .filter((q) => (args.path ? q.eq(q.field("page.path"), args.path) : true))
+      .paginate({ numItems, cursor: args.cursor ?? null })
+    return {
+      comments: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
+      cursor: result.isDone ? null : result.continueCursor,
     }
   },
 })
@@ -510,7 +670,7 @@ export const checkScreenshot = internalMutation({
       fail("too_large", "Screenshot is too large")
     }
     const { ok } = await rateLimiter.limit(ctx, "screenshotPerIp", {
-      key: args.ip,
+      key: ipKey(args.ip, args.publicId),
     })
     if (!ok) fail("rate_limited", "Slow down a little")
     const comment = await screenshotTarget(ctx, args)

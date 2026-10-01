@@ -169,6 +169,21 @@ describe("buildCommentPrompt", () => {
     expect(prompt).not.toContain("Mozilla")
     expect(prompt).toContain("Buy now")
   })
+
+  it("includes the selected text and the area", () => {
+    const prompt = buildCommentPrompt({
+      ...comment,
+      anchor: {
+        ...comment.anchor,
+        quote: { exact: "only $10", prefix: "From ", suffix: " a month" },
+        region: { x: 0.1, y: 0.25, w: 0.5, h: 0.4 },
+      },
+    })
+    expect(prompt).toContain("- Selected text: `only $10`")
+    expect(prompt).toContain(
+      "- Area: 50% × 40% of the element, from 10% left and 25% top"
+    )
+  })
 })
 
 describe("URL secrets", () => {

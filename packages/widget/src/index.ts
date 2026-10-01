@@ -1,7 +1,8 @@
 import type { NuniOptions } from "./config"
 import { mount, type NuniInstance } from "./mount"
 
-export type { NuniOptions } from "./config"
+export type { NuniOptions, PageKey, Position, Theme } from "./config"
+export { EN as messages, type Messages } from "./i18n"
 export type { NuniInstance } from "./mount"
 export { VERSION } from "./config"
 

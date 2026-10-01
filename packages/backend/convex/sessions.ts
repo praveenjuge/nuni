@@ -7,7 +7,9 @@ import {
   fail,
   parseOrigin,
   projectByPublicId,
+  requireDashboardOwner,
   requireUser,
+  revokeSessions,
   sessionFromToken,
   sha256Hex,
   currentUser,
@@ -27,7 +29,7 @@ export const create = mutation({
   handler: async (ctx, { publicId, origin, userAgent }) => {
     const user = await requireUser(ctx)
     const project = await projectByPublicId(ctx, publicId)
-    if (!project) fail("not_found", "Project not found")
+    if (!project || project.deletingAt) fail("not_found", "Project not found")
     if (project.ownerId !== user._id) {
       fail("forbidden", "Only the project owner can do this")
     }
@@ -83,6 +85,7 @@ export const listMine = query({
       .map((s) => ({
         _id: s._id,
         _creationTime: s._creationTime,
+        kind: s.kind ?? "widget",
         origin: s.origin,
         userAgent: s.userAgent,
         expiresAt: s.expiresAt,
@@ -99,6 +102,15 @@ export const revoke = mutation({
     const project = await ctx.db.get(session.projectId)
     if (project?.ownerId !== user._id) fail("forbidden", "Not your session")
     await ctx.db.delete(id)
+  },
+})
+
+/** Sign out every widget and CLI session of a project. */
+export const revokeAll = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    await requireDashboardOwner(ctx, projectId)
+    return await revokeSessions(ctx, projectId)
   },
 })
 

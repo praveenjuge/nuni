@@ -1,81 +1,9 @@
-/// <reference types="vite/client" />
-import rateLimiter from "@convex-dev/rate-limiter/test"
-import workOSAuthKit from "@convex-dev/workos-authkit/test"
 import { generateProjectId, generateSecret, LIMITS } from "@nuni/shared"
-import { convexTest } from "convex-test"
 import { describe, expect, it, vi } from "vitest"
 
 import { api, internal } from "../convex/_generated/api"
-import schema from "../convex/schema"
 import { deleteUserData } from "../convex/users"
-
-const modules = import.meta.glob("../convex/**/*.ts")
-
-function setup() {
-  const t = convexTest(schema, modules)
-  rateLimiter.register(t)
-  workOSAuthKit.register(t)
-  return t
-}
-
-type T = ReturnType<typeof setup>
-
-const anchor = {
-  v: 1 as const,
-  selectors: { path: "body > main > button:nth-of-type(1)" },
-  tag: "button",
-  text: "Buy now",
-  attrs: {},
-  ancestors: [],
-  siblingIndex: 0,
-  siblingCount: 1,
-  rect: { x: 10, y: 10, w: 100, h: 40 },
-  offset: { x: 0.5, y: 0.5 },
-  viewport: { w: 1280, h: 800, dpr: 2, scrollX: 0, scrollY: 0 },
-  docSize: { w: 1280, h: 2000 },
-}
-
-function page(path = "/pricing", origin = "http://localhost:3000") {
-  return {
-    origin,
-    path,
-    search: "",
-    hash: "",
-    title: "Pricing",
-    url: origin + path,
-  }
-}
-
-async function addComment(
-  t: T,
-  publicId: string,
-  opts: {
-    ip?: string
-    secret?: string
-    path?: string
-    origin?: string
-    context?: Record<string, unknown>
-  } = {}
-) {
-  return t.mutation(internal.comments.createFromWidget, {
-    ...(opts.context ? { context: opts.context as never } : {}),
-    publicId,
-    ip: opts.ip ?? "1.1.1.1",
-    body: "Make this bigger",
-    authorName: "Sam",
-    authorSecret: opts.secret ?? generateSecret(),
-    page: page(opts.path, opts.origin),
-    anchor,
-    viewport: { w: 1280, h: 800, dpr: 2 },
-    userAgent: "test",
-  })
-}
-
-async function signIn(t: T, subject: string, name: string) {
-  const user = t.withIdentity({ subject, name })
-  await user.mutation(api.users.store, {})
-  return user
-}
+import { addComment, anchor, page, setup, signIn, type T } from "./helpers"
 
 describe("widget comments", () => {
   it("creates the unclaimed project lazily and lists by path", async () => {
@@ -139,6 +67,27 @@ describe("widget comments", () => {
       /Slow down/
     )
     await addComment(t, publicId, { ip: "8.8.8.8" })
+    // The address is the whole key: another project doesn't reset it.
+    await expect(
+      addComment(t, generateProjectId(), { ip: "9.9.9.9" })
+    ).rejects.toThrow(/Slow down/)
+  })
+
+  it("keys per-IP limits by project on test deployments", async () => {
+    vi.stubEnv("NUNI_ALLOW_TESTING", "1")
+    try {
+      const t = setup()
+      const publicId = generateProjectId()
+      for (let i = 0; i < 10; i++)
+        await addComment(t, publicId, { ip: "9.9.9.9" })
+      await expect(addComment(t, publicId, { ip: "9.9.9.9" })).rejects.toThrow(
+        /Slow down/
+      )
+      // e2e browsers share one address; each test has its own project.
+      await addComment(t, generateProjectId(), { ip: "9.9.9.9" })
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it("caps unclaimed projects", async () => {
@@ -252,6 +201,37 @@ describe("widget comments", () => {
     expect(
       await t.query(api.comments.getById, { publicId, id: "not-an-id" })
     ).toBeNull()
+  })
+
+  it("keeps text and area comments within limits", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId, {
+      anchor: {
+        quote: {
+          exact: ` ${"x".repeat(LIMITS.quoteMaxLength + 50)}`,
+          prefix: "p".repeat(100),
+          suffix: "s".repeat(100),
+        },
+        region: { x: -0.5, y: 0.8, w: 3, h: 0.5 },
+      },
+    })
+    const comment = await t.query(api.comments.getById, { publicId, id })
+    expect(comment?.anchor.quote?.exact).toHaveLength(LIMITS.quoteMaxLength)
+    expect(comment?.anchor.quote?.prefix).toHaveLength(
+      LIMITS.quoteContextLength
+    )
+    expect(comment?.anchor.region).toMatchObject({ x: 0, y: 0.8, w: 1 })
+    expect(comment?.anchor.region?.h).toBeCloseTo(0.2)
+
+    // A quote with no words is dropped, not stored empty.
+    const blank = await addComment(t, publicId, {
+      anchor: { quote: { exact: "  ", prefix: "", suffix: "" } },
+    })
+    expect(
+      (await t.query(api.comments.getById, { publicId, id: blank }))?.anchor
+        .quote
+    ).toBeUndefined()
   })
 })
 

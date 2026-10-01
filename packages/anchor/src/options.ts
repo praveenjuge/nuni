@@ -3,6 +3,11 @@ export interface AnchorOptions {
   isIgnored?: (el: Element) => boolean
   /** Attribute prefixes that must never be read (e.g. benchmark markers). */
   ignoreAttributePrefixes?: string[]
+  /**
+   * The page's own document: iframes are recorded only up to it. Defaults
+   * to the global document.
+   */
+  document?: Document
 }
 
 export function attributeAllowed(
