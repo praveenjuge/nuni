@@ -62,3 +62,13 @@ Playwright uses its own Chromium. To use a preinstalled one: `CHROMIUM_PATH=/pat
 ## Deploy and release
 
 To release the public packages, increase the root `package.json` version and merge to `master`. [The release workflow](./.github/workflows/release.yml) builds and publishes them.
+
+### Checking a release
+
+Once npm has the new version and the dashboard deploy has updated the production backend, test the published packages (not the workspace):
+
+```bash
+NUNI_RELEASE_VERSION=0.1.4 bun run --cwd apps/playground smoke:release
+```
+
+It checks the npm tarballs, the CLI, the backend routes, and a real comment through the CDN script tag and through a bundled React app, against production. Each run uses a fresh project and deletes its comment afterwards. Live updates and owner tools are covered by `bun run e2e`.

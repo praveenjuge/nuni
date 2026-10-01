@@ -1,5 +1,7 @@
+export * from "./comment-prompt"
 export * from "./id"
 export * from "./limits"
 export * from "./path"
+export * from "./privacy"
 export * from "./prompt"
 export * from "./types"

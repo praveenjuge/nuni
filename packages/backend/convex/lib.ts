@@ -156,19 +156,29 @@ export async function requireOwner(
 ): Promise<Id<"users">> {
   const project = await ctx.db.get(projectId)
   if (!project) fail("not_found", "Project not found")
+  const ownerId = await actingOwner(ctx, project, widget)
+  if (!ownerId) fail("forbidden", "Only the project owner can do this")
+  return ownerId
+}
 
+/** Like requireOwner, but returns null instead of throwing (for queries). */
+export async function actingOwner(
+  ctx: Ctx,
+  project: Doc<"projects">,
+  widget?: { sessionToken?: string }
+): Promise<Id<"users"> | null> {
+  if (!project.ownerId) return null
   if (widget?.sessionToken) {
     const session = await sessionFromToken(ctx, widget.sessionToken)
     if (
       session &&
-      session.projectId === projectId &&
+      session.projectId === project._id &&
       project.ownerId === session.userId
     ) {
       return session.userId
     }
   }
-
   const user = await currentUser(ctx)
   if (user && project.ownerId === user._id) return user._id
-  fail("forbidden", "Only the project owner can do this")
+  return null
 }

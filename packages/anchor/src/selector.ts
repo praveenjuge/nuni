@@ -1,3 +1,5 @@
+import { MASK_SELECTOR } from "@nuni/shared"
+
 import { attributeAllowed, type AnchorOptions } from "./options"
 import { isStableId, stableClasses, TEST_ID_ATTRIBUTES } from "./stable"
 
@@ -105,8 +107,10 @@ function describeSegment(el: Element, options: AnchorOptions): string {
       segment += attrSelector(name, value)
     }
   }
+  // Selectors are public; a label in a masked area can be as private as its text.
   const label = el.getAttribute("aria-label")
-  if (label && label.length <= 60) segment += attrSelector("aria-label", label)
+  if (label && label.length <= 60 && !el.closest(MASK_SELECTOR))
+    segment += attrSelector("aria-label", label)
   return segment
 }
 

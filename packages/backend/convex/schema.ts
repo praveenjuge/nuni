@@ -3,6 +3,7 @@ import { v } from "convex/values"
 
 import {
   anchorValidator,
+  contextValidator,
   pageValidator,
   statusValidator,
   viewportValidator,
@@ -39,6 +40,10 @@ export default defineSchema({
     anchor: anchorValidator,
     viewport: viewportValidator,
     userAgent: v.string(),
+    /** Owner-only: console, network and DOM details from the commenter. */
+    context: v.optional(contextValidator),
+    /** Owner-only: an image of the element, uploaded right after posting. */
+    screenshotId: v.optional(v.id("_storage")),
     /** Body plus author name, for dashboard search. */
     searchText: v.optional(v.string()),
     createdAt: v.number(),

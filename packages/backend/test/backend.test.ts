@@ -49,9 +49,16 @@ function page(path = "/pricing", origin = "http://localhost:3000") {
 async function addComment(
   t: T,
   publicId: string,
-  opts: { ip?: string; secret?: string; path?: string; origin?: string } = {}
+  opts: {
+    ip?: string
+    secret?: string
+    path?: string
+    origin?: string
+    context?: Record<string, unknown>
+  } = {}
 ) {
   return t.mutation(internal.comments.createFromWidget, {
+    ...(opts.context ? { context: opts.context as never } : {}),
     publicId,
     ip: opts.ip ?? "1.1.1.1",
     body: "Make this bigger",
@@ -671,5 +678,236 @@ describe("claiming and owner actions", () => {
     expect(
       await t.run((ctx) => ctx.db.query("widgetSessions").collect())
     ).toHaveLength(0)
+  })
+})
+
+// A minimal valid WebP header: RIFF....WEBP
+const WEBP = new Uint8Array([
+  0x52, 0x49, 0x46, 0x46, 0x1a, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50,
+  0x38, 0x4c, 0x0d, 0, 0, 0, 0x2f, 0, 0, 0, 0x10, 0x07, 0x10, 0x11, 0x11, 0x88,
+  0x88, 0xfe, 0x07, 0,
+])
+
+function uploadScreenshot(
+  t: T,
+  target: { publicId: string; id: string; secret: string },
+  body: Uint8Array<ArrayBuffer> = WEBP
+) {
+  return t.fetch("/widget/screenshot", {
+    method: "POST",
+    headers: {
+      "Content-Type": "image/webp",
+      "X-Nuni-Project": target.publicId,
+      "X-Nuni-Comment": target.id,
+      "X-Nuni-Author": target.secret,
+    },
+    body,
+  })
+}
+
+describe("captured context and screenshots", () => {
+  const context = {
+    console: [
+      { level: "error", message: "x".repeat(5000), at: 1 },
+      ...Array.from({ length: 30 }, (_, i) => ({
+        level: "warn",
+        message: `warn ${i}`,
+        at: i,
+      })),
+      { level: "error", message: "POST /reset?token=secret failed", at: 40 },
+    ],
+    network: [
+      {
+        method: "get",
+        url: "https://api.example.com/v1?token=secret#frag",
+        status: 500,
+        at: 2,
+      },
+    ],
+    dom: {
+      html:
+        '<a href="/reset?token=secret">Reset</a>' +
+        '<img data-src="i.png?sig=secret" style="background: url(/bg.png?t=secret)">' +
+        "<button>" +
+        "y".repeat(9000) +
+        "</button>",
+      styles: {
+        "font-size": "14px",
+        color: "rgb(0, 0, 0)",
+        "background-image": 'url("https://cdn.example.com/bg.png?t=secret")',
+      },
+    },
+  }
+
+  it("clamps context and shows it to the owner only", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId, { context })
+    const alice = await signIn(t, "user_alice", "Alice")
+    const bob = await signIn(t, "user_bob", "Bob")
+    await alice.mutation(api.projects.claim, { publicId })
+
+    const [pub] = await t.query(api.comments.listForPage, {
+      publicId,
+      path: "/pricing",
+    })
+    expect(pub).not.toHaveProperty("context")
+    expect(
+      await t.query(api.comments.getById, { publicId, id })
+    ).not.toHaveProperty("context")
+    expect(
+      await bob.query(api.comments.getForOwner, { publicId, id })
+    ).toBeNull()
+    expect(await t.query(api.comments.getForOwner, { publicId, id })).toBeNull()
+
+    const mine = await alice.query(api.comments.getForOwner, { publicId, id })
+    expect(mine?.context?.console).toHaveLength(LIMITS.contextEntryMax)
+    expect(mine?.context?.console?.[0]?.message).toBe("warn 11")
+    expect(mine?.context?.network?.[0]?.method).toBe("GET")
+    // Stripped on the server, whatever the client sent.
+    expect(mine?.context?.network?.[0]?.url).toBe("https://api.example.com/v1")
+    expect(mine?.context?.dom?.html).toHaveLength(LIMITS.domSnippetMaxLength)
+    expect(mine?.context?.dom?.html).toContain('<a href="/reset">')
+    expect(mine?.context?.dom?.html).toContain('<img data-src="i.png"')
+    expect(mine?.context?.console?.at(-1)?.message).toBe("POST /reset failed")
+    expect(mine?.context?.dom?.styles["background-image"]).toBe(
+      'url("https://cdn.example.com/bg.png")'
+    )
+    expect(JSON.stringify(mine?.context)).not.toContain("secret")
+    expect(mine?.screenshotUrl).toBeNull()
+
+    const { token } = await alice.mutation(api.sessions.create, {
+      publicId,
+      origin: "http://localhost:3000",
+    })
+    const viaWidget = await t.query(api.comments.getForOwner, {
+      publicId,
+      id,
+      sessionToken: token,
+    })
+    expect(viaWidget?.context?.network).toHaveLength(1)
+    expect(viaWidget?.userAgent).toBe("test")
+
+    const listed = await alice.query(api.comments.listForOwner, {
+      publicId,
+      status: "open",
+      paginationOpts: { numItems: 10, cursor: null },
+    })
+    expect(listed.page[0]?.context?.dom?.styles).toEqual({
+      ...context.dom.styles,
+      "background-image": 'url("https://cdn.example.com/bg.png")',
+    })
+  })
+
+  it("strips query strings from console messages on the server", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId, {
+      context: {
+        console: [
+          {
+            level: "error",
+            message: "GET https://api.example.com/me?key=abc#x failed",
+            at: 1,
+          },
+        ],
+      },
+    })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    const mine = await alice.query(api.comments.getForOwner, { publicId, id })
+    expect(mine?.context?.console?.[0]?.message).toBe(
+      "GET https://api.example.com/me failed"
+    )
+  })
+
+  it("lets the author attach one screenshot to their fresh comment", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const secret = generateSecret()
+    const id = await addComment(t, publicId, { secret })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+
+    const wrong = await uploadScreenshot(t, {
+      publicId,
+      id,
+      secret: generateSecret(),
+    })
+    expect(wrong.status).toBe(403)
+
+    const notImage = await uploadScreenshot(
+      t,
+      { publicId, id, secret },
+      new TextEncoder().encode("<script>alert(1)</script>")
+    )
+    expect(notImage.status).toBe(415)
+
+    const tooBig = await uploadScreenshot(
+      t,
+      { publicId, id, secret },
+      new Uint8Array(LIMITS.screenshotMaxBytes + 1)
+    )
+    expect(tooBig.status).toBe(413)
+
+    // Without a Content-Length, the body is still cut off at the limit.
+    const chunked = await t.fetch("/widget/screenshot", {
+      method: "POST",
+      headers: {
+        "Content-Type": "image/webp",
+        "X-Nuni-Project": publicId,
+        "X-Nuni-Comment": id,
+        "X-Nuni-Author": secret,
+      },
+      body: new ReadableStream({
+        start(controller) {
+          for (let i = 0; i < 4; i++)
+            controller.enqueue(new Uint8Array(LIMITS.screenshotMaxBytes / 2))
+          controller.close()
+        },
+      }),
+      duplex: "half",
+    } as RequestInit)
+    expect(chunked.status).toBe(413)
+
+    const ok = await uploadScreenshot(t, { publicId, id, secret })
+    expect(ok.status).toBe(201)
+    expect(ok.headers.get("Access-Control-Allow-Origin")).toBeTruthy()
+
+    const again = await uploadScreenshot(t, { publicId, id, secret })
+    expect(again.status).toBe(409)
+
+    const owner = await alice.query(api.comments.getForOwner, { publicId, id })
+    expect(owner?.screenshotUrl).toMatch(/^https?:\/\//)
+    const [pub] = await t.query(api.comments.listForPage, {
+      publicId,
+      path: "/pricing",
+    })
+    expect(pub).not.toHaveProperty("screenshotUrl")
+
+    // Deleting the comment deletes the file.
+    const files = () =>
+      t.run((ctx) => ctx.db.system.query("_storage").collect())
+    expect(await files()).toHaveLength(1)
+    await alice.mutation(api.comments.remove, { id })
+    expect(await files()).toHaveLength(0)
+  })
+
+  it("rejects screenshots after the upload window", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const secret = generateSecret()
+    const id = await addComment(t, publicId, { secret })
+    await t.run(async (ctx) => {
+      await ctx.db.patch(id, {
+        createdAt: Date.now() - LIMITS.screenshotUploadWindowMs - 1000,
+      })
+    })
+    const late = await uploadScreenshot(t, { publicId, id, secret })
+    expect(late.status).toBe(410)
+    const files = await t.run((ctx) =>
+      ctx.db.system.query("_storage").collect()
+    )
+    expect(files).toHaveLength(0)
   })
 })

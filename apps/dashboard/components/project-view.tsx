@@ -2,7 +2,7 @@
 
 import { api } from "@nuni/backend/api"
 import type { Id } from "@nuni/backend/dataModel"
-import { buildAgentPrompt } from "@nuni/shared"
+import { buildAgentPrompt, buildCommentPrompt } from "@nuni/shared"
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react"
 import {
   ArrowLeftIcon,
@@ -14,6 +14,7 @@ import {
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 
+import { CommentContext } from "@/components/comment-context"
 import { CopyButton } from "@/components/copy-button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -293,6 +294,11 @@ function CommentList({
                     {c.anchor.text ? ` "${c.anchor.text}"` : ""} ·{" "}
                     {c.viewport.w}×{c.viewport.h}
                   </p>
+                  <CommentContext
+                    context={c.context}
+                    screenshotUrl={c.screenshotUrl}
+                    userAgent={c.userAgent}
+                  />
                   <div className="flex flex-wrap gap-2 pt-1">
                     <a
                       className={buttonVariants({
@@ -322,6 +328,10 @@ function CommentList({
                         <RotateCcwIcon /> Reopen
                       </Button>
                     )}
+                    <CopyButton
+                      value={buildCommentPrompt(c)}
+                      label="Copy for agent"
+                    />
                     <Button
                       size="sm"
                       variant="ghost"

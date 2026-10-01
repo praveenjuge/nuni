@@ -10,15 +10,27 @@ sidebar:
     No. They type their name once and it is remembered in their browser.
   </AccordionItem>
   <AccordionItem title="Is the project ID a secret?">
-    No. It is public and meant to be committed. It only connects comments to your site.
+    No. It is public and meant to be committed. It only connects comments to
+    your site.
   </AccordionItem>
   <AccordionItem title="Will it slow down my site?">
-    Nuni loads after the page is idle, renders in a Shadow DOM, and the script is about 37 KB gzipped.
+    Nuni loads after the page is idle, renders in a Shadow DOM, and the script
+    is about 40 KB gzipped. The screenshot code is a separate file that only
+    loads when someone leaves a comment.
   </AccordionItem>
   <AccordionItem title="Can I hide it in production?">
-    Not yet in v1. Render the component conditionally if you need to, for example only when an env var is set.
+    Not yet in v1. Render the component conditionally if you need to, for
+    example only when an env var is set.
+  </AccordionItem>
+  <AccordionItem title="How do I hand a comment to my coding agent?">
+    Open the comment in the widget (as the owner) or in the dashboard and choose
+    **Copy for agent**. It copies the comment with its page, element, screenshot
+    link, console errors and failed requests as a task you can paste into Claude
+    Code, Codex or Cursor.
   </AccordionItem>
   <AccordionItem title="What is not in v1?">
-    Replies, teams and roles, screenshots, notifications, widget customization, GitHub issue sync and the MCP/agent integration. They are next: the big goal is Nuni comment, exact UI context, coding agent, fix.
+    Replies, teams and roles, notifications, widget customization, GitHub issue
+    sync and the MCP/CLI agent integration. They are next: the big goal is Nuni
+    comment, exact UI context, coding agent, fix.
   </AccordionItem>
 </Accordion>

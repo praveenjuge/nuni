@@ -8,11 +8,15 @@ import {
   type Confidence,
 } from "@nuni/anchor"
 import {
+  buildCommentPrompt,
   describeLocation,
   generateSecret,
   LIMITS,
   normalizePath,
   type Anchor,
+  type CommentContext,
+  type DomContext,
+  type OwnerComment,
   type WidgetComment,
 } from "@nuni/shared"
 
@@ -23,9 +27,11 @@ import {
   type ProjectStatus,
 } from "./api"
 import type { ResolvedConfig } from "./config"
-import { colorFor, h, icon, initials, timeAgo } from "./dom"
+import { domContext, type Collectors } from "./context"
+import { colorFor, copyText, h, icon, initials, timeAgo } from "./dom"
 import { ICONS } from "./icons"
 import { onLocationChange } from "./navigation"
+import type { CaptureScreenshot } from "./screenshot"
 import { sha256Hex } from "./sha256"
 import { KEYS, read, write } from "./storage"
 import { STYLES } from "./styles"
@@ -38,8 +44,20 @@ interface Placement {
 interface Draft {
   anchor: Anchor
   element: Element
+  dom?: DomContext
+  /**
+   * Taken while the person types and shown in the composer, so they see
+   * exactly what is attached (and can remove it). Only a screenshot that was
+   * shown before posting is uploaded.
+   */
+  screenshot?: { blob: Blob; preview: string }
   error?: string
   sending?: boolean
+}
+
+export interface WidgetRuntime {
+  collectors: Collectors
+  loadScreenshot: (() => Promise<CaptureScreenshot | null>) | null
 }
 
 type Card =
@@ -64,6 +82,15 @@ function isTypingTarget(target: EventTarget | null) {
     target.tagName === "TEXTAREA" ||
     target.tagName === "SELECT"
   )
+}
+
+function dataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
 }
 
 function describeElement(el: Element): string {
@@ -113,12 +140,21 @@ export class NuniWidget {
   private deepLinkId: string | null = null
   /** A deep-linked comment that is outside the page listing window. */
   private extraComment: WidgetComment | null = null
+  /** The open thread with its owner-only context, while an owner is signed in. */
+  private ownerDetail: OwnerComment | null = null
+  private ownerDetailId: string | null = null
+  /** The subscription answered (possibly null), so the copy is complete. */
+  private ownerDetailLoaded = false
+  private ownerDetailUnsub: (() => void) | null = null
 
   private layoutFrame = 0
   private pinPositions = new Map<string, { x: number; y: number }>()
   private resolveTimer = 0
 
-  constructor(private config: ResolvedConfig) {
+  constructor(
+    private config: ResolvedConfig,
+    private runtime: WidgetRuntime
+  ) {
     let secret = read(KEYS.secret)
     if (!secret) {
       secret = generateSecret()
@@ -220,6 +256,7 @@ export class NuniWidget {
     this.setPicking(false)
     this.pageUnsub?.()
     this.sessionUnsub?.()
+    this.ownerDetailUnsub?.()
     for (const cleanup of this.cleanups) cleanup()
     cancelAnimationFrame(this.layoutFrame)
     clearTimeout(this.resolveTimer)
@@ -277,6 +314,28 @@ export class NuniWidget {
         this.sessionUnsub?.()
         this.sessionUnsub = null
       }
+      this.render()
+    })
+  }
+
+  /** Keep the owner-only details of the open thread subscribed. */
+  private syncOwnerDetail() {
+    const token = this.ownerToken
+    const id =
+      this.card?.kind === "thread" && this.isOwner && token
+        ? this.card.id
+        : null
+    if (id === this.ownerDetailId) return
+    this.ownerDetailUnsub?.()
+    this.ownerDetailUnsub = null
+    this.ownerDetail = null
+    this.ownerDetailLoaded = false
+    this.ownerDetailId = id
+    if (!id || !token) return
+    this.ownerDetailUnsub = this.api.onOwnerComment(id, token, (comment) => {
+      if (this.ownerDetailId !== id) return
+      this.ownerDetail = comment
+      this.ownerDetailLoaded = true
       this.render()
     })
   }
@@ -477,9 +536,78 @@ export class NuniWidget {
       { ignoreAttributePrefixes: [] }
     )
     this.setPicking(false)
-    this.card = { kind: "composer", draft: { anchor, element } }
+    const draft: Draft = { anchor, element }
+    if (this.config.capture.dom) {
+      try {
+        draft.dom = domContext(element)
+      } catch {
+        // Context is a bonus; never block a comment on it.
+      }
+    }
+    this.card = { kind: "composer", draft }
     this.render()
     this.focusComposer()
+    void this.takeScreenshot(draft)
+  }
+
+  /** Capture while the person types, so posting stays instant. */
+  private async takeScreenshot(draft: Draft) {
+    const load = this.runtime.loadScreenshot
+    if (!load) return
+    const accent =
+      getComputedStyle(this.host).getPropertyValue("--n-accent").trim() ||
+      "#d6246e"
+    try {
+      // Let the composer paint first; the capture clones part of the page.
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      const capture = await load()
+      const blob = capture
+        ? await capture(draft.element, { exclude: this.host, accent })
+        : null
+      // Only attach what the commenter can still see and remove: a capture
+      // that finishes after Post was clicked is dropped.
+      if (!blob || !this.isComposing(draft) || draft.sending) return
+      const preview = await dataUrl(blob)
+      if (!this.isComposing(draft) || draft.sending) return
+      draft.screenshot = { blob, preview }
+      this.render()
+    } catch {
+      // No screenshot then; the comment still works.
+    }
+  }
+
+  private isComposing(draft: Draft) {
+    return this.card?.kind === "composer" && this.card.draft === draft
+  }
+
+  private collectContext(draft: Draft): CommentContext | undefined {
+    const { collectors } = this.runtime
+    const context: CommentContext = {}
+    const logs = collectors.console()
+    const failed = collectors.network()
+    if (logs.length) context.console = logs
+    if (failed.length) context.network = failed
+    if (draft.dom) context.dom = draft.dom
+    return Object.keys(context).length ? context : undefined
+  }
+
+  private async attachScreenshot(id: string, image: Blob) {
+    try {
+      await this.api.uploadScreenshot(id, this.secret, image)
+    } catch {
+      // The comment is posted; the screenshot is optional.
+    }
+  }
+
+  private copyForAgent(comment: WidgetComment) {
+    const detail =
+      this.ownerDetail?._id === comment._id ? this.ownerDetail : null
+    const prompt = buildCommentPrompt(detail ?? comment, {
+      includeContext: Boolean(detail),
+    })
+    void copyText(prompt).then((ok) =>
+      this.showToast(ok ? "Copied for your coding agent" : "Couldn't copy")
+    )
   }
 
   private renderHighlight() {
@@ -647,6 +775,8 @@ export class NuniWidget {
     this.render()
 
     const loc = describeLocation(location.href)
+    // The screenshot shown when Post was clicked, and nothing that lands later.
+    const shot = draft.screenshot
     try {
       const id = await this.api.createComment({
         body: cleanBody,
@@ -663,7 +793,9 @@ export class NuniWidget {
           h: window.innerHeight,
           dpr: window.devicePixelRatio || 1,
         },
+        context: this.collectContext(draft),
       })
+      if (shot) void this.attachScreenshot(id, shot.blob)
       // Show the new pin exactly where it was dropped until it syncs.
       this.placements.set(id, { element: draft.element, confidence: "exact" })
       if (this.card?.kind === "composer" && this.card.draft === draft)
@@ -792,6 +924,7 @@ export class NuniWidget {
   }
 
   private render() {
+    this.syncOwnerDetail()
     this.renderPins()
     this.renderUi()
     this.renderHighlight()
@@ -1169,6 +1302,38 @@ export class NuniWidget {
                 )
               ),
           textarea,
+          draft.screenshot
+            ? h(
+                "div",
+                { class: "shot-preview" },
+                h("img", {
+                  src: draft.screenshot.preview,
+                  alt: "Screenshot that will be attached",
+                }),
+                h(
+                  "div",
+                  { class: "shot-note" },
+                  h(
+                    "span",
+                    {},
+                    "Screenshot attached. Only the site owner sees it."
+                  ),
+                  h("span", { class: "spacer" }),
+                  h(
+                    "button",
+                    {
+                      class: "link",
+                      type: "button",
+                      onclick: () => {
+                        draft.screenshot = undefined
+                        this.render()
+                      },
+                    },
+                    "Remove"
+                  )
+                )
+              )
+            : null,
           draft.error
             ? h("div", { class: "error", role: "alert" }, draft.error)
             : null,
@@ -1284,6 +1449,22 @@ export class NuniWidget {
           )
         ),
         h("div", { class: "comment-body" }, comment.body),
+        this.ownerDetail?._id === comment._id && this.ownerDetail.screenshotUrl
+          ? h(
+              "a",
+              {
+                class: "shot",
+                href: this.ownerDetail.screenshotUrl,
+                target: "_blank",
+                rel: "noreferrer",
+                title: "Open the screenshot",
+              },
+              h("img", {
+                src: this.ownerDetail.screenshotUrl,
+                alt: "Screenshot taken when the comment was left",
+              })
+            )
+          : null,
         h(
           "div",
           { class: "row" },
@@ -1359,6 +1540,25 @@ export class NuniWidget {
         )
       }
       actions.push(h("span", { class: "spacer" }))
+      // Owners copy the full context, so wait until it has loaded.
+      const contextPending =
+        owner && !(this.ownerDetailLoaded && this.ownerDetailId === comment._id)
+      actions.push(
+        h(
+          "button",
+          {
+            class: "btn btn-ghost btn-icon",
+            type: "button",
+            "aria-label": "Copy for agent",
+            title: contextPending
+              ? "Loading page context…"
+              : "Copy for your coding agent",
+            disabled: contextPending,
+            onclick: () => this.copyForAgent(comment),
+          },
+          icon(ICONS.bot)
+        )
+      )
       if (mine) {
         actions.push(
           h(
@@ -1404,9 +1604,7 @@ export class NuniWidget {
         "aria-label": `Comment by ${comment.authorName}`,
       },
       body,
-      actions.length > 1 || owner
-        ? h("div", { class: "actions" }, ...actions)
-        : null
+      actions.length ? h("div", { class: "actions" }, ...actions) : null
     )
   }
 

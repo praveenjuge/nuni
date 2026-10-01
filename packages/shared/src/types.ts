@@ -47,6 +47,37 @@ export interface Anchor {
 
 export type CommentStatus = "open" | "resolved"
 
+export interface ConsoleEntry {
+  level: "error" | "warn"
+  message: string
+  at: number
+}
+
+/** A failed request. `url` is origin + path only; `status` 0 is a network error. */
+export interface NetworkEntry {
+  method: string
+  url: string
+  status: number
+  at: number
+}
+
+export interface DomContext {
+  /** Trimmed outerHTML, with form values removed. */
+  html: string
+  /** A fixed set of computed styles. */
+  styles: Record<string, string>
+}
+
+/**
+ * Extra context captured with a comment. Only the project owner can read it,
+ * since comments themselves are readable by anyone with the project ID.
+ */
+export interface CommentContext {
+  console?: ConsoleEntry[]
+  network?: NetworkEntry[]
+  dom?: DomContext
+}
+
 /** Shape of a comment as the widget receives it. */
 export interface WidgetComment {
   _id: string
@@ -69,4 +100,11 @@ export interface WidgetComment {
   createdAt: number
   editedAt?: number
   resolvedAt?: number
+}
+
+/** A comment as the owner sees it (dashboard, owner widget, agents). */
+export interface OwnerComment extends WidgetComment {
+  userAgent?: string
+  context?: CommentContext
+  screenshotUrl?: string | null
 }

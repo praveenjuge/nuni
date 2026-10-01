@@ -51,4 +51,16 @@ export default defineConfig([
     deps: { alwaysBundle: [/.*/], onlyBundle: false },
     outputOptions: { entryFileNames: "[name].global.js" },
   },
+  {
+    // Loaded by nuni.global.js on demand (see src/global.ts).
+    entry: { "nuni-screenshot": "src/screenshot.global.ts" },
+    format: "iife",
+    platform: "browser",
+    target: "es2020",
+    dts: false,
+    minify: true,
+    define,
+    deps: { alwaysBundle: [/.*/], onlyBundle: false },
+    outputOptions: { entryFileNames: "[name].global.js" },
+  },
 ])
