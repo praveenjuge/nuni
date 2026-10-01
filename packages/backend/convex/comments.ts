@@ -230,6 +230,24 @@ export const createFromWidget = internalMutation({
     if (originOf(args.page.url) !== origin) {
       fail("invalid_page", "Page URL does not match its origin")
     }
+    // The stored path is joined to a visitor's origin by plain string
+    // concatenation and parsed as a URL ("Other pages" links). Opaque
+    // custom keys from a site's getPageKey (e.g. "product-123") are fine:
+    // the widget only renders same-origin links. Reject the prefixes that
+    // would continue or replace the host at click time (".evil.com/x",
+    // "@evil.com/", "\\evil.com", "//evil.com/x", "/\\evil.com").
+    // Leading whitespace is stripped again by the URL parser, so check
+    // the trimmed form too ("\t@evil.example" would otherwise slip by).
+    const path = args.page.path.trimStart()
+    if (
+      path.startsWith(".") ||
+      path.startsWith("@") ||
+      path.startsWith("\\") ||
+      path.startsWith("//") ||
+      path.startsWith("/\\")
+    ) {
+      fail("invalid_page", "Page path must not continue the host")
+    }
     const body = cleanBody(args.body)
     const authorName = cleanName(args.authorName)
     if (args.authorSecret.length < 16 || args.authorSecret.length > 128) {

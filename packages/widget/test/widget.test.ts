@@ -8,6 +8,7 @@ import { colorFor, h, icon, initials, readableOn } from "../src/dom"
 import { createI18n } from "../src/i18n"
 import { ICONS } from "../src/icons"
 import { init } from "../src/index"
+import { otherPageHref } from "../src/widget"
 import { sha256 } from "../src/sha256"
 import { KEYS, read, write } from "../src/storage"
 
@@ -131,6 +132,44 @@ describe("options", () => {
     expect(pageKeyFor("path+hash")(new URL("https://a.com/#/settings"))).toBe(
       "/#/settings"
     )
+  })
+})
+
+describe("other page links", () => {
+  const loc = { origin: "https://acme.example", search: "?token=secret" }
+
+  it("builds same-origin links, keeping hash routes search-free", () => {
+    expect(otherPageHref("/pricing", loc)).toBe(
+      "https://acme.example/pricing?token=secret"
+    )
+    expect(otherPageHref("/pricing?plan=pro", loc)).toBe(
+      "https://acme.example/pricing?plan=pro"
+    )
+    expect(otherPageHref("/#/settings", loc)).toBe(
+      "https://acme.example/#/settings"
+    )
+  })
+
+  it("drops stored paths that would leave the origin", () => {
+    for (const bad of [
+      ".evil.example/verify",
+      "@evil.example/",
+      "-evil.example/",
+      "\t@evil.example/login",
+    ]) {
+      expect(otherPageHref(bad, loc)).toBeNull()
+    }
+  })
+
+  it("keeps leading-slash forms on the origin once concatenated", () => {
+    // origin + path concatenation means "//" or "/\\" land inside the
+    // path; they cannot become protocol-relative. The backend still
+    // rejects them at ingestion as junk, but the widget is safe either way.
+    expect(otherPageHref("//evil.example/x", loc)).not.toBeNull()
+  })
+
+  it("treats custom getPageKey keys as non-links, never as off-site links", () => {
+    expect(otherPageHref("product-123", loc)).toBeNull()
   })
 })
 
