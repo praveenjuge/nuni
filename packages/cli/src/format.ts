@@ -43,7 +43,9 @@ export function formatCommentList(
     lines.push(
       `${i + 1}. ${c._id} · ${c.page.path} · ${c.authorName} · ${timeAgo(c.createdAt)}`,
       `   "${oneLine(c.body)}"`,
-      `   On ${element}`
+      c.anchor.quote
+        ? `   On the text "${oneLine(c.anchor.quote.exact, 60)}" in ${element}`
+        : `   ${c.anchor.region ? "On an area of" : "On"} ${element}`
     )
   })
   lines.push("", options.detailHint)

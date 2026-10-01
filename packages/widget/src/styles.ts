@@ -126,6 +126,67 @@ button { cursor: pointer; }
   text-overflow: ellipsis;
 }
 
+.drag-box { transition: none; border-style: dashed; }
+
+/* Text and area comments */
+.marks { position: fixed; inset: 0; pointer-events: none; }
+.mark {
+  position: fixed;
+  border-bottom: 2px solid var(--n-accent);
+  background: var(--n-accent-soft);
+  opacity: 0.7;
+  pointer-events: none;
+}
+.mark-active { opacity: 1; background: color-mix(in srgb, var(--n-accent) 26%, transparent); }
+.area {
+  position: fixed;
+  border: 2px dashed var(--n-accent);
+  border-radius: 4px;
+  background: var(--n-accent-soft);
+  pointer-events: none;
+}
+.select-btn {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--n-fg);
+  color: var(--n-bg);
+  font-weight: 550;
+  font-size: 13px;
+  box-shadow: var(--n-shadow);
+  pointer-events: auto;
+}
+.select-btn[hidden] { display: none; }
+.quote {
+  margin: 0;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--n-accent);
+  color: var(--n-fg-muted);
+  font-style: italic;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 4.5em;
+  overflow: hidden;
+}
+.item-quote {
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid var(--n-accent);
+  color: var(--n-fg-muted);
+  font-size: 12px;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Pins */
 .pin {
   position: fixed;

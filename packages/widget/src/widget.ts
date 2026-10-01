@@ -1,5 +1,8 @@
 import {
+  areaContainer,
   captureAnchor,
+  captureArea,
+  captureSelection,
   createResolveCache,
   elementText,
   frameDocument,
@@ -48,11 +51,15 @@ import { STYLES } from "./styles"
 interface Placement {
   element: Element | null
   confidence: Confidence
+  /** A text comment's words, when they were found. */
+  range?: Range
 }
 
 interface Draft {
   anchor: Anchor
   element: Element
+  /** The selected words of a text comment. */
+  range?: Range
   dom?: DomContext
   /**
    * Taken while the person types and shown in the composer, so they see
@@ -87,6 +94,37 @@ type Card =
 
 const PICKING_CLASS = "nuni-picking"
 const PICK_EVENTS = ["pointerdown", "mousedown", "pointerup", "mouseup"]
+/** How far the pointer moves before a press becomes an area drag. */
+const DRAG_THRESHOLD = 6
+
+interface ViewBox {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/** The rectangles of a range that have a size (lines of text). */
+function lineRects(range: Range): DOMRect[] {
+  return Array.from(range.getClientRects()).filter(
+    (r) => r.width > 0 && r.height > 0
+  )
+}
+
+/** An area comment's box on screen, from its element's box. */
+function regionBox(anchor: Anchor, el: Element): ViewBox | null {
+  const region = anchor.region
+  if (!region) return null
+  const r = viewportRect(el, document)
+  return {
+    left: r.left + region.x * r.width,
+    top: r.top + region.y * r.height,
+    width: region.w * r.width,
+    height: region.h * r.height,
+  }
+}
+
+const collapse = (text: string) => text.replace(/\s+/g, " ").trim()
 
 /** Run when the browser is idle, or soon. */
 function whenIdle(fn: () => void) {
@@ -144,8 +182,10 @@ function describeElement(el: Element): string {
 export class NuniWidget {
   private host: HTMLElement
   private root: ShadowRoot
+  private markLayer: HTMLDivElement
   private pinLayer: HTMLDivElement
   private overlayLayer: HTMLDivElement
+  private selectButton: HTMLButtonElement
   private uiLayer: HTMLDivElement
   private api: NuniApi
   private cleanups: (() => void)[] = []
@@ -194,6 +234,15 @@ export class NuniWidget {
   private scopeWatchers = new Map<Node, () => void>()
   /** Iframe documents listening while picking. */
   private pickDocs: Document[] = []
+  /** Where the pointer went down while picking, for area drags. */
+  private dragStart: { x: number; y: number } | null = null
+  private dragBox: ViewBox | null = null
+  /** A drag just ended: the click that follows it is not a pick. */
+  private dragEnded = false
+  /** The page's text selection, offered as a text comment. */
+  private selection: Range | null = null
+  private pointerDown = false
+  private selectionFrame = 0
   private layoutFrame = 0
   private pinPositions = new Map<string, { x: number; y: number }>()
   private resolveTimer = 0
@@ -216,10 +265,33 @@ export class NuniWidget {
     this.root = this.host.attachShadow({ mode: "open" })
     const style = document.createElement("style")
     style.textContent = STYLES
+    this.markLayer = h("div", { class: "marks", "aria-hidden": "true" })
     this.pinLayer = h("div", { class: "pins" })
     this.overlayLayer = h("div", { class: "overlay" })
     this.uiLayer = h("div", { class: "ui" })
-    this.root.append(style, this.pinLayer, this.overlayLayer, this.uiLayer)
+    this.selectButton = h(
+      "button",
+      {
+        class: "select-btn",
+        type: "button",
+        hidden: true,
+        title: "Comment on the selected text (C)",
+        // Keep the page's selection: a press would clear it.
+        onmousedown: (e: Event) => e.preventDefault(),
+        onpointerdown: (e: Event) => e.preventDefault(),
+        onclick: () => this.commentOnSelection(),
+      },
+      icon(ICONS.comment),
+      "Comment"
+    )
+    this.root.append(
+      style,
+      this.markLayer,
+      this.pinLayer,
+      this.overlayLayer,
+      this.uiLayer,
+      this.selectButton
+    )
 
     this.api = new NuniApi(config)
   }
@@ -266,6 +338,25 @@ export class NuniWidget {
     })
     window.addEventListener("resize", onScroll, { passive: true })
     window.addEventListener("message", onMessage)
+    const onSelection = () => this.scheduleSelection()
+    const onDown = (e: PointerEvent) => {
+      if (e.composedPath().includes(this.host)) return
+      this.pointerDown = true
+      this.scheduleSelection()
+    }
+    const onUp = () => {
+      this.pointerDown = false
+      this.scheduleSelection()
+    }
+    document.addEventListener("selectionchange", onSelection)
+    document.addEventListener("pointerdown", onDown, true)
+    document.addEventListener("pointerup", onUp, true)
+    this.cleanups.push(() => {
+      document.removeEventListener("selectionchange", onSelection)
+      document.removeEventListener("pointerdown", onDown, true)
+      document.removeEventListener("pointerup", onUp, true)
+      cancelAnimationFrame(this.selectionFrame)
+    })
     this.cleanups.push(() => {
       window.removeEventListener("keydown", onKey, true)
       window.removeEventListener("scroll", onScroll, true)
@@ -444,6 +535,15 @@ export class NuniWidget {
   private stillPlaced(comment: WidgetComment) {
     const current = this.placements.get(comment._id)
     if (!current?.element?.isConnected) return false
+    // A text comment: its words must still be where the range is (a range
+    // over removed text collapses).
+    const quote = comment.anchor.quote
+    if (quote) {
+      return (
+        current.range !== undefined &&
+        collapse(current.range.toString()) === quote.exact
+      )
+    }
     const text = elementText(current.element)
     const expected = comment.anchor.text
     return (
@@ -481,6 +581,7 @@ export class NuniWidget {
         this.placements.set(comment._id, {
           element: result.element,
           confidence: result.confidence,
+          range: result.range,
         })
         if (performance.now() - started > 8) break
       }
@@ -553,10 +654,76 @@ export class NuniWidget {
     // In the page's viewport, also for elements inside iframes.
     const r = viewportRect(el, document)
     if (r.clipped) return null
-    return {
-      x: r.left + comment.anchor.offset.x * r.width,
-      y: r.top + comment.anchor.offset.y * r.height,
+    return this.anchorPoint(comment.anchor, el, placement.range)
+  }
+
+  /**
+   * Where a pin goes: after the last selected word for a text comment, the
+   * top-right corner of an area, or where the element was clicked.
+   */
+  private anchorPoint(
+    anchor: Anchor,
+    el: Element,
+    range?: Range
+  ): { x: number; y: number } {
+    if (range && range.startContainer.ownerDocument === document) {
+      const last = lineRects(range).at(-1)
+      if (last) return { x: last.right, y: last.top + last.height / 2 }
     }
+    const r = viewportRect(el, document)
+    return {
+      x: r.left + anchor.offset.x * r.width,
+      y: r.top + anchor.offset.y * r.height,
+    }
+  }
+
+  /**
+   * Text comments underline their words, and the open comment (or the one
+   * being written) also shows its words or its area strongly.
+   */
+  private renderMarks() {
+    const marks: HTMLElement[] = []
+    const add = (box: ViewBox, cls: string) => {
+      const mark = h("div", { class: cls })
+      Object.assign(mark.style, {
+        left: `${box.left}px`,
+        top: `${box.top}px`,
+        width: `${box.width}px`,
+        height: `${box.height}px`,
+      })
+      marks.push(mark)
+    }
+    const show = (
+      anchor: Anchor,
+      el: Element | null | undefined,
+      range: Range | undefined,
+      active: boolean
+    ) => {
+      if (!el) return
+      if (range && range.startContainer.ownerDocument === document) {
+        for (const r of lineRects(range)) {
+          add(r, active ? "mark mark-active" : "mark")
+        }
+      }
+      if (active) {
+        const box = regionBox(anchor, el)
+        if (box) add(box, "area")
+      }
+    }
+    if (this.card?.kind === "composer") {
+      const { draft } = this.card
+      show(draft.anchor, draft.element, draft.range, true)
+    }
+    for (const comment of this.visibleComments()) {
+      const placement = this.placements.get(comment._id)
+      const active = this.activeId === comment._id
+      if (!active && (comment.status !== "open" || !comment.anchor.quote)) {
+        continue
+      }
+      if (this.pins.get(comment._id)?.hidden) continue
+      show(comment.anchor, placement?.element, placement?.range, active)
+    }
+    this.markLayer.replaceChildren(...marks)
   }
 
   private scheduleLayout() {
@@ -595,8 +762,10 @@ export class NuniWidget {
       this.pinPositions.set(comment._id, { x, y })
       pin.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`
     }
+    this.renderMarks()
     this.positionCard()
-    if (this.picking && this.hoverEl) this.renderHighlight()
+    if (this.picking && (this.hoverEl || this.dragBox)) this.renderHighlight()
+    this.placeSelectButton()
   }
 
   // --------------------------------------------------------------- picking
@@ -605,6 +774,8 @@ export class NuniWidget {
     if (this.picking === on) return
     this.picking = on
     const html = document.documentElement
+    this.dragStart = null
+    this.dragBox = null
     if (on) {
       this.card = null
       if (window.matchMedia(MOBILE_QUERY).matches) this.panelOpen = false
@@ -676,12 +847,50 @@ export class NuniWidget {
         this.hoverEl = pickTarget(target)
         this.renderHighlight()
       }
+      // A mouse drag on the page itself draws an area (not on touch, where
+      // dragging scrolls).
+      this.dragEnded = false
+      this.dragStart =
+        e.pointerType !== "touch" &&
+        e.button === 0 &&
+        (target?.ownerDocument ?? null) === document
+          ? { x: e.clientX, y: e.clientY }
+          : null
+    }
+    if (e.type === "pointerup" && this.dragBox) {
+      const box = this.dragBox
+      this.dragStart = null
+      this.dragBox = null
+      // Finish after this press's mouseup and click, which still have to be
+      // kept from the page while picking is on.
+      this.dragEnded = true
+      setTimeout(() => {
+        this.dragEnded = false
+        if (this.picking) this.commentOnArea(box)
+      }, 0)
+    } else if (e.type === "pointerup") {
+      this.dragStart = null
     }
     e.preventDefault()
     e.stopPropagation()
   }
 
   private onPickMove = (e: PointerEvent) => {
+    const start = this.dragStart
+    if (start) {
+      const dx = e.clientX - start.x
+      const dy = e.clientY - start.y
+      if (this.dragBox || Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+        this.dragBox = {
+          left: Math.min(start.x, e.clientX),
+          top: Math.min(start.y, e.clientY),
+          width: Math.abs(dx),
+          height: Math.abs(dy),
+        }
+        this.renderHighlight()
+        return
+      }
+    }
     const target = this.fromPage(e)
     const next = target ? pickTarget(target) : null
     if (next === this.hoverEl) return
@@ -695,14 +904,90 @@ export class NuniWidget {
     e.preventDefault()
     e.stopPropagation()
     e.stopImmediatePropagation()
+    // The click that ends an area drag.
+    if (this.dragEnded) return
     const element = pickTarget(target)
     const anchor = captureAnchor(
       element,
       { x: e.clientX, y: e.clientY },
       { ignoreAttributePrefixes: [], document }
     )
+    this.openComposer({ anchor, element })
+  }
+
+  /** An area drawn while picking: anchored to the element that covers it. */
+  private commentOnArea(box: ViewBox) {
+    const element = areaContainer(document, box, this.isIgnored)
+    const anchor = captureArea(element, box, {
+      ignoreAttributePrefixes: [],
+      document,
+    })
+    this.openComposer({ anchor, element })
+  }
+
+  /** The page's selected text, if it can take a text comment. */
+  private pageSelection(): Range | null {
+    const selection = document.getSelection()
+    if (!selection || selection.isCollapsed || !selection.rangeCount) {
+      return null
+    }
+    const range = selection.getRangeAt(0)
+    const node = range.commonAncestorContainer
+    const el = node.nodeType === 1 ? (node as Element) : node.parentElement
+    if (!el || el === this.host || this.host.contains(el)) return null
+    // Text being typed (a field, an editor) is not page content.
+    if (el.closest("input, textarea, select, [contenteditable]")) return null
+    if (el.closest("[data-nuni]")) return null
+    return collapse(range.toString()) ? range : null
+  }
+
+  private commentOnSelection() {
+    const range = this.pageSelection()
+    if (!range) return
+    const captured = captureSelection(range, {
+      ignoreAttributePrefixes: [],
+      document,
+    })
+    if (!captured) return
+    const kept = range.cloneRange()
+    document.getSelection()?.removeAllRanges()
+    this.selection = null
+    this.openComposer({ ...captured, range: kept })
+  }
+
+  private scheduleSelection() {
+    if (this.selectionFrame) return
+    this.selectionFrame = requestAnimationFrame(() => {
+      this.selectionFrame = 0
+      this.selection =
+        this.picking || this.pointerDown ? null : this.pageSelection()
+      this.placeSelectButton()
+    })
+  }
+
+  /** A small "Comment" button under the selected text. */
+  private placeSelectButton() {
+    const button = this.selectButton
+    const range = this.selection
+    const last = range ? lineRects(range).at(-1) : undefined
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    if (!range || !last || last.bottom < 0 || last.top > vh) {
+      button.hidden = true
+      return
+    }
+    button.hidden = false
+    const width = button.offsetWidth || 96
+    const height = button.offsetHeight || 32
+    let top = last.bottom + 8
+    if (top + height > vh - 8) top = last.top - height - 8
+    const left = Math.max(8, Math.min(last.right - width / 2, vw - width - 8))
+    button.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`
+  }
+
+  private openComposer(draft: Draft) {
+    const { element } = draft
     this.setPicking(false)
-    const draft: Draft = { anchor, element }
     if (this.config.capture.dom) {
       try {
         draft.dom = domContext(element)
@@ -711,6 +996,7 @@ export class NuniWidget {
       }
     }
     this.card = { kind: "composer", draft }
+    this.activeId = null
     this.render()
     this.focusComposer()
     void this.takeScreenshot(draft)
@@ -728,8 +1014,23 @@ export class NuniWidget {
       // Let the composer paint first; the capture clones part of the page.
       await new Promise((resolve) => setTimeout(resolve, 60))
       const capture = await load()
+      const { range, anchor, element } = draft
+      // Selected text or an area: the image centers on that part.
+      const focus = range
+        ? () => range.getBoundingClientRect()
+        : anchor.region
+          ? () => {
+              const box = regionBox(anchor, element)!
+              return {
+                left: box.left,
+                top: box.top,
+                right: box.left + box.width,
+                bottom: box.top + box.height,
+              }
+            }
+          : undefined
       const blob = capture
-        ? await capture(draft.element, { exclude: this.host, accent })
+        ? await capture(element, { exclude: this.host, accent, focus })
         : null
       // Only attach what the commenter can still see and remove: a capture
       // that finishes after Post was clicked is dropped.
@@ -782,13 +1083,27 @@ export class NuniWidget {
   private renderHighlight() {
     this.overlayLayer.replaceChildren()
     if (!this.picking) return
+    const mobile = window.matchMedia(MOBILE_QUERY).matches
     this.overlayLayer.append(
       h(
         "div",
         { class: "pick-hint" },
-        "Click anything to comment · Esc to cancel"
+        mobile
+          ? "Tap anything to comment"
+          : "Click anything to comment, or drag to mark an area · Esc to cancel"
       )
     )
+    if (this.dragBox) {
+      const box = h("div", { class: "highlight drag-box" })
+      Object.assign(box.style, {
+        left: `${this.dragBox.left}px`,
+        top: `${this.dragBox.top}px`,
+        width: `${this.dragBox.width}px`,
+        height: `${this.dragBox.height}px`,
+      })
+      this.overlayLayer.append(box)
+      return
+    }
     const el = this.hoverEl
     if (!el || el === el.ownerDocument.documentElement) return
     const r = viewportRect(el, document)
@@ -829,7 +1144,9 @@ export class NuniWidget {
       return
     if (e.key === "c" || e.key === "C") {
       e.preventDefault()
-      this.setPicking(!this.picking)
+      // Selected text on the page: comment on those words.
+      if (!this.picking && this.pageSelection()) this.commentOnSelection()
+      else this.setPicking(!this.picking)
     }
   }
 
@@ -966,7 +1283,11 @@ export class NuniWidget {
       })
       if (shot) void this.attachScreenshot(id, shot.blob)
       // Show the new pin exactly where it was dropped until it syncs.
-      this.placements.set(id, { element: draft.element, confidence: "exact" })
+      this.placements.set(id, {
+        element: draft.element,
+        confidence: "exact",
+        range: draft.range,
+      })
       if (this.card?.kind === "composer" && this.card.draft === draft)
         this.card = null
       this.showToast("Comment added")
@@ -1241,9 +1562,11 @@ export class NuniWidget {
     draftPin?.remove()
     if (this.card?.kind === "composer") {
       const { draft } = this.card
-      const r = viewportRect(draft.element, document)
-      const x = r.left + draft.anchor.offset.x * r.width
-      const y = r.top + draft.anchor.offset.y * r.height
+      const { x, y } = this.anchorPoint(
+        draft.anchor,
+        draft.element,
+        draft.range
+      )
       const pin = h(
         "div",
         { class: "pin pin-draft pin-pending", "aria-hidden": "true" },
@@ -1367,6 +1690,9 @@ export class NuniWidget {
               )
             : null
         ),
+        c.anchor.quote
+          ? h("div", { class: "item-quote" }, c.anchor.quote.exact)
+          : null,
         h("div", { class: "item-text" }, c.body)
       )
 
@@ -1575,6 +1901,9 @@ export class NuniWidget {
                   "Not you?"
                 )
               ),
+          draft.anchor.quote
+            ? h("blockquote", { class: "quote" }, draft.anchor.quote.exact)
+            : null,
           textarea,
           draft.screenshot
             ? h(
@@ -1722,6 +2051,9 @@ export class NuniWidget {
             icon(ICONS.close)
           )
         ),
+        comment.anchor.quote
+          ? h("blockquote", { class: "quote" }, comment.anchor.quote.exact)
+          : null,
         h("div", { class: "comment-body" }, comment.body),
         this.ownerDetail?._id === comment._id && this.ownerDetail.screenshotUrl
           ? h(
@@ -2155,11 +2487,7 @@ export class NuniWidget {
     let point: { x: number; y: number } | null = null
     if (this.card?.kind === "composer") {
       const { draft } = this.card
-      const r = viewportRect(draft.element, document)
-      point = {
-        x: r.left + draft.anchor.offset.x * r.width,
-        y: r.top + draft.anchor.offset.y * r.height,
-      }
+      point = this.anchorPoint(draft.anchor, draft.element, draft.range)
     } else if (this.card?.kind === "thread") {
       const comment = this.comments.find(
         (c) => this.card?.kind === "thread" && c._id === this.card.id

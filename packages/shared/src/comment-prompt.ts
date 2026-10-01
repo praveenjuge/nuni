@@ -80,6 +80,16 @@ export function buildCommentPrompt(
   out.push("", "## Element", "")
   out.push(`- Tag: <${anchor.tag}>`)
   if (anchor.text) out.push(`- Text: ${inline(anchor.text)}`)
+  if (anchor.quote) {
+    out.push(`- Selected text: ${inline(anchor.quote.exact)}`)
+  }
+  if (anchor.region) {
+    const pct = (n: number) => `${Math.round(n * 100)}%`
+    const r = anchor.region
+    out.push(
+      `- Area: ${pct(r.w)} × ${pct(r.h)} of the element, from ${pct(r.x)} left and ${pct(r.y)} top`
+    )
+  }
   if (anchor.componentName) {
     out.push(`- React component: ${anchor.componentName}`)
   }

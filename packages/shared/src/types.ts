@@ -48,6 +48,20 @@ export interface Anchor {
    * outermost first. The selectors above are relative to the innermost one.
    */
   scope?: AnchorScope[]
+  /** A text comment: the selected words inside the element. */
+  quote?: AnchorQuote
+  /** An area comment: a box inside the element, 0..1 of its size. */
+  region?: Rect
+}
+
+/**
+ * Selected text, found again by its exact words and the text around them
+ * (like the W3C TextQuoteSelector). Whitespace is collapsed.
+ */
+export interface AnchorQuote {
+  exact: string
+  prefix: string
+  suffix: string
 }
 
 /** One shadow host or <iframe>, captured like any element in its own scope. */

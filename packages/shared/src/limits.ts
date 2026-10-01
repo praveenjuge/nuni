@@ -9,6 +9,9 @@ export const LIMITS = {
   /** How long a `nuni login` code waits for approval in the dashboard. */
   cliLoginTtlMs: 10 * 60 * 1000,
   anchorTextMaxLength: 120,
+  /** Selected text kept with a text comment, and the context around it. */
+  quoteMaxLength: 500,
+  quoteContextLength: 32,
   /** Per page, the widget loads this many newest open and resolved comments. */
   pageOpenLimit: 1000,
   pageResolvedLimit: 200,

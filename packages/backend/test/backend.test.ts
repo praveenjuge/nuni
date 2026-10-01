@@ -181,6 +181,37 @@ describe("widget comments", () => {
       await t.query(api.comments.getById, { publicId, id: "not-an-id" })
     ).toBeNull()
   })
+
+  it("keeps text and area comments within limits", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId, {
+      anchor: {
+        quote: {
+          exact: ` ${"x".repeat(LIMITS.quoteMaxLength + 50)}`,
+          prefix: "p".repeat(100),
+          suffix: "s".repeat(100),
+        },
+        region: { x: -0.5, y: 0.8, w: 3, h: 0.5 },
+      },
+    })
+    const comment = await t.query(api.comments.getById, { publicId, id })
+    expect(comment?.anchor.quote?.exact).toHaveLength(LIMITS.quoteMaxLength)
+    expect(comment?.anchor.quote?.prefix).toHaveLength(
+      LIMITS.quoteContextLength
+    )
+    expect(comment?.anchor.region).toMatchObject({ x: 0, y: 0.8, w: 1 })
+    expect(comment?.anchor.region?.h).toBeCloseTo(0.2)
+
+    // A quote with no words is dropped, not stored empty.
+    const blank = await addComment(t, publicId, {
+      anchor: { quote: { exact: "  ", prefix: "", suffix: "" } },
+    })
+    expect(
+      (await t.query(api.comments.getById, { publicId, id: blank }))?.anchor
+        .quote
+    ).toBeUndefined()
+  })
 })
 
 describe("claiming and owner actions", () => {

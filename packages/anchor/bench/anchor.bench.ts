@@ -6,6 +6,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { build } from "tsdown"
 
 import { scenarios } from "./fixtures"
+import type * as Engine from "./entry-types"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const MIN_CORRECT_RATE = 0.95
@@ -61,7 +62,7 @@ test("pin reliability benchmark", async ({ page }) => {
     await page.addScriptTag({ content: bundle })
 
     const anchor = await page.evaluate(
-      ({ scrollBefore, scrollContainer }) => {
+      ({ scrollBefore, scrollContainer, quote }) => {
         if (scrollContainer) {
           document.querySelector(scrollContainer.selector)!.scrollTop =
             scrollContainer.top
@@ -85,15 +86,34 @@ test("pin reliability benchmark", async ({ page }) => {
         const el = find(document)!
         el.scrollIntoView({ block: "center" })
         const r = el.getBoundingClientRect()
-        const api = (window as never as { NuniAnchor: typeof import("../src") })
+        const api = (window as never as { NuniAnchor: typeof Engine })
           .NuniAnchor
+        if (quote) {
+          // Select the nth copy of the words, the way a person would.
+          const map = api.textMap(el)
+          let at = -1
+          for (let i = 0; i <= (quote.before ?? 0); i++) {
+            at = map.text.indexOf(quote.text, at + 1)
+          }
+          const range = document.createRange()
+          const end = at + quote.text.length - 1
+          range.setStart(map.nodes[map.node[at]!]!, map.offset[at]!)
+          range.setEnd(map.nodes[map.node[end]!]!, map.offset[end]! + 1)
+          return api.captureSelection(range, {
+            ignoreAttributePrefixes: ["data-bench"],
+          })!.anchor
+        }
         return api.captureAnchor(
           el,
           { x: r.left + r.width / 2, y: r.top + r.height / 2 },
           { ignoreAttributePrefixes: ["data-bench"] }
         )
       },
-      { scrollBefore: s.scrollBefore, scrollContainer: s.scrollContainer }
+      {
+        scrollBefore: s.scrollBefore,
+        scrollContainer: s.scrollContainer,
+        quote: s.quote,
+      }
     )
 
     const [aw, ah] = s.viewport?.after ?? [1280, 800]
@@ -103,23 +123,48 @@ test("pin reliability benchmark", async ({ page }) => {
     await page.addScriptTag({ content: bundle })
 
     const resolved = await page.evaluate(
-      ({ anchor, scrollAfter }) => {
+      ({ anchor, scrollAfter, quote }) => {
         window.scrollTo(0, scrollAfter ?? 0)
-        const api = (window as never as { NuniAnchor: typeof import("../src") })
+        const api = (window as never as { NuniAnchor: typeof Engine })
           .NuniAnchor
         const result = api.resolveAnchor(anchor, document, {
           ignoreAttributePrefixes: ["data-bench"],
         })
+        // A text comment is right when the same words come back, in the
+        // marked element, at the expected copy.
+        let quoteCorrect = false
+        if (quote && result.range) {
+          const target = document.querySelector("[data-bench-target]")
+          if (target?.contains(result.range.commonAncestorContainer)) {
+            const map = api.textMap(target)
+            const words = quote.afterText ?? quote.text
+            let at = -1
+            for (let i = 0; i <= (quote.after ?? 0); i++) {
+              at = map.text.indexOf(words, at + 1)
+            }
+            const r = result.range
+            quoteCorrect =
+              at >= 0 &&
+              api.textOffset(map, r.startContainer, r.startOffset) === at &&
+              api.textOffset(map, r.endContainer, r.endOffset) ===
+                at + words.length
+          }
+        }
+        const found = quote ? Boolean(result.range) : Boolean(result.element)
         return {
-          found: Boolean(result.element),
-          correct: Boolean(result.element?.hasAttribute("data-bench-target")),
+          found,
+          correct: quote
+            ? quoteCorrect
+            : Boolean(result.element?.hasAttribute("data-bench-target")),
           confidence: result.confidence,
           score: Math.round(result.score * 1000) / 1000,
           tag: result.element?.tagName.toLowerCase() ?? null,
-          text: result.element?.textContent?.trim().slice(0, 40) ?? null,
+          text: quote
+            ? (result.range?.toString().slice(0, 40) ?? null)
+            : (result.element?.textContent?.trim().slice(0, 40) ?? null),
         }
       },
-      { anchor, scrollAfter: s.scrollAfter }
+      { anchor, scrollAfter: s.scrollAfter, quote: s.quote }
     )
 
     let outcome: Result["outcome"]
@@ -189,8 +234,7 @@ test("large page performance", async ({ page }) => {
   )
   await page.addScriptTag({ content: bundle })
   const timing = await page.evaluate((pins) => {
-    const api = (window as never as { NuniAnchor: typeof import("../src") })
-      .NuniAnchor
+    const api = (window as never as { NuniAnchor: typeof Engine }).NuniAnchor
     const targets = Array.from(
       document.querySelectorAll("button, h3, li span, a")
     ).filter((_, i) => i % 13 === 0)

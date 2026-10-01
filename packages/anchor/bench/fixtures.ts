@@ -20,8 +20,15 @@ export interface Scenario {
   scrollAfter?: number
   /** Scroll a container (selector) before capture. */
   scrollContainer?: { selector: string; top: number }
+  /**
+   * A text comment: the words selected in the target before (the nth copy
+   * there), and the copy of them (or of `afterText`) expected in the target
+   * after.
+   */
+  quote?: { text: string; before?: number; after?: number; afterText?: string }
 }
 
+import { quoteScenarios } from "./fixtures-quotes"
 import { scopedScenarios } from "./fixtures-scoped"
 
 const T = "data-bench-target"
@@ -524,4 +531,5 @@ export const scenarios: Scenario[] = [
     expect: "lost",
   },
   ...scopedScenarios,
+  ...quoteScenarios,
 ]

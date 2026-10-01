@@ -289,9 +289,15 @@ function CommentList({
                     </Badge>
                     <Badge variant="outline">{hostOf(c.page.origin)}</Badge>
                   </div>
+                  {c.anchor.quote && (
+                    <blockquote className="line-clamp-3 border-l-2 border-primary pl-3 text-sm text-muted-foreground italic">
+                      {c.anchor.quote.exact}
+                    </blockquote>
+                  )}
                   <p className="text-sm whitespace-pre-wrap">{c.body}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    On <code className="font-mono">&lt;{c.anchor.tag}&gt;</code>
+                    {c.anchor.region ? "An area of " : "On "}
+                    <code className="font-mono">&lt;{c.anchor.tag}&gt;</code>
                     {c.anchor.text ? ` "${c.anchor.text}"` : ""} ·{" "}
                     {c.viewport.w}×{c.viewport.h}
                   </p>

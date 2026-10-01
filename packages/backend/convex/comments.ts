@@ -1,5 +1,6 @@
 import {
   LIMITS,
+  type AnchorQuote,
   stripHtmlUrlQueries,
   stripUrlQueries,
   withoutQuery,
@@ -179,6 +180,26 @@ export const pagesWithComments = query({
   },
 })
 
+/** A text comment's words and the text around them, within the limits. */
+function cleanQuote(quote: AnchorQuote | undefined): AnchorQuote | undefined {
+  const exact = clampString(quote?.exact.trim() ?? "", LIMITS.quoteMaxLength)
+  if (!quote || !exact) return undefined
+  return {
+    exact,
+    prefix: clampString(quote.prefix, LIMITS.quoteContextLength),
+    suffix: clampString(quote.suffix, LIMITS.quoteContextLength),
+  }
+}
+
+/** An area inside the element, kept to 0..1 of its box. */
+function cleanRegion(r: { x: number; y: number; w: number; h: number }) {
+  const unit = (n: number) =>
+    Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0
+  const x = unit(r.x)
+  const y = unit(r.y)
+  return { x, y, w: Math.min(unit(r.w), 1 - x), h: Math.min(unit(r.h), 1 - y) }
+}
+
 function cleanAnchor<A extends { text: string; ancestors: unknown[] }>(
   anchor: A
 ): A {
@@ -255,6 +276,8 @@ export const createFromWidget = internalMutation({
           kind: step.kind,
           host: cleanAnchor(step.host),
         })),
+        quote: cleanQuote(args.anchor.quote),
+        region: args.anchor.region && cleanRegion(args.anchor.region),
       },
       viewport: args.viewport,
       context: cleanContext(args.context),

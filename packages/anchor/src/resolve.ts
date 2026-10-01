@@ -8,9 +8,10 @@ import {
   scopeDocument,
   type ScopeRoot,
 } from "./scope"
+import { findQuote } from "./quote"
 import { cssEscape, queryPath } from "./selector"
 import { stableClasses } from "./stable"
-import { elementText, textSimilarity } from "./text"
+import { elementText, normalizeText, textSimilarity } from "./text"
 
 export type Confidence = "exact" | "high" | "low" | "lost"
 
@@ -18,6 +19,11 @@ export interface ResolveResult {
   element: Element | null
   confidence: Confidence
   score: number
+  /**
+   * For a text comment, the quoted words when they are found (in the element,
+   * or next to it when the sentence moved).
+   */
+  range?: Range
 }
 
 /**
@@ -30,6 +36,7 @@ export interface ResolveCache {
   elements: Map<ScopeRoot, Element[]>
   text: WeakMap<Element, Map<number, string>>
   content: WeakMap<Element, string>
+  words: WeakMap<Element, string>
 }
 
 export function createResolveCache(): ResolveCache {
@@ -38,6 +45,7 @@ export function createResolveCache(): ResolveCache {
     elements: new Map(),
     text: new WeakMap(),
     content: new WeakMap(),
+    words: new WeakMap(),
   }
 }
 
@@ -57,6 +65,16 @@ function contentOf(el: Element, cache?: ResolveCache): string {
     cache.content.set(el, (content = el.textContent ?? ""))
   }
   return content
+}
+
+/** All of an element's text with whitespace collapsed, for quote checks. */
+function wordsOf(el: Element, cache?: ResolveCache): string {
+  let words = cache?.words.get(el)
+  if (words === undefined) {
+    words = normalizeText(contentOf(el, cache))
+    cache?.words.set(el, words)
+  }
+  return words
 }
 
 function elementsByTag(
@@ -188,7 +206,12 @@ function scoreCandidate(
   anchor: Anchor,
   el: Element,
   doc: Document,
-  ctx: { pathMatch: Element | null; viewportRatio: number },
+  ctx: {
+    pathMatch: Element | null
+    viewportRatio: number
+    /** The only candidate (innermost) that still holds the quoted words. */
+    quoteOnly: Element | null
+  },
   options: AnchorOptions,
   cache?: ResolveCache
 ): Scored {
@@ -266,6 +289,13 @@ function scoreCandidate(
       : 1
   add(anchor.text ? 3 : 1, textSim)
 
+  // A text comment: the element still holding the quoted words is the
+  // strongest sign, even when the rest of the paragraph was edited.
+  const quoteHit = anchor.quote
+    ? wordsOf(el, cache).includes(anchor.quote.exact)
+    : null
+  if (quoteHit !== null) add(3, quoteHit ? 1 : 0)
+
   // Ancestor structure, plus context text from the closest ancestor whose
   // text says more than the element itself (a card title, a row, a form).
   let ancTotal = 0
@@ -324,13 +354,17 @@ function scoreCandidate(
 
   // Text is identity for repeated items (list rows, cards), and a softer
   // signal for one-off elements whose copy may be edited.
-  if (anchor.text.length >= 2 && textSim < 0.999) {
+  // When only this element still holds the quote, an edit to the rest of
+  // its text doesn't make it a different element.
+  const identity = ctx.quoteOnly === el ? Math.max(textSim, 0.9) : textSim
+  if (anchor.text.length >= 2 && identity < 0.999) {
     const repeated = peerCount(el) > 0
     const factor = repeated
-      ? 0.2 + 0.8 * textSim * textSim
-      : 0.7 + 0.3 * textSim
+      ? 0.2 + 0.8 * identity * identity
+      : 0.7 + 0.3 * identity
     score *= strong || structural ? Math.max(factor, 0.92) : factor
   }
+  if (quoteHit === false) score *= 0.85
 
   return {
     el,
@@ -441,7 +475,16 @@ export function resolveAnchor(
     ...result
   } = resolveIn(anchor, root, options, cache)
   if (result.element && RANK[floor] < RANK[result.confidence]) {
-    return { ...result, confidence: floor }
+    result.confidence = floor
+  }
+  if (result.element && anchor.quote) {
+    // The words themselves: an edited quote, or one that is gone, leaves a
+    // pin on the element that is only approximate.
+    const quote = findQuote(result.element, anchor.quote)
+    if (quote) result.range = quote.range
+    if ((!quote || !quote.exact) && RANK[result.confidence] > RANK.low) {
+      result.confidence = "low"
+    }
   }
   return result
 }
@@ -486,6 +529,18 @@ function resolveIn(
       ? view.innerWidth / anchor.viewport.w
       : 1
 
+  let quoteOnly: Element | null = null
+  if (anchor.quote) {
+    const exact = anchor.quote.exact
+    const hits = [...candidates].filter((el) =>
+      wordsOf(el, cache).includes(exact)
+    )
+    const innermost = hits.filter(
+      (el) => !hits.some((other) => other !== el && el.contains(other))
+    )
+    if (innermost.length === 1) quoteOnly = innermost[0]!
+  }
+
   const scored: Scored[] = []
   for (const el of candidates) {
     scored.push(
@@ -493,7 +548,7 @@ function resolveIn(
         anchor,
         el,
         doc,
-        { pathMatch, viewportRatio },
+        { pathMatch, viewportRatio, quoteOnly },
         options,
         cache
       )

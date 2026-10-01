@@ -53,6 +53,7 @@ export async function addComment(
     path?: string
     origin?: string
     context?: Record<string, unknown>
+    anchor?: Record<string, unknown>
   } = {}
 ) {
   return t.mutation(internal.comments.createFromWidget, {
@@ -63,7 +64,7 @@ export async function addComment(
     authorName: "Sam",
     authorSecret: opts.secret ?? generateSecret(),
     page: page(opts.path, opts.origin),
-    anchor,
+    anchor: { ...anchor, ...opts.anchor },
     viewport: { w: 1280, h: 800, dpr: 2 },
     userAgent: "test",
   })

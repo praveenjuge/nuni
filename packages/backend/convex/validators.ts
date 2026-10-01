@@ -45,6 +45,10 @@ const anchorFields = {
 
 export const anchorValidator = v.object({
   ...anchorFields,
+  quote: v.optional(
+    v.object({ exact: v.string(), prefix: v.string(), suffix: v.string() })
+  ),
+  region: v.optional(rectValidator),
   /** Shadow hosts and iframes on the way to the element, outermost first. */
   scope: v.optional(
     v.array(

@@ -1,4 +1,10 @@
-export { captureAnchor } from "./capture"
+export {
+  areaContainer,
+  captureAnchor,
+  captureArea,
+  captureSelection,
+  type Box,
+} from "./capture"
 export { reactComponentName } from "./component"
 export { documentRect, isRendered } from "./geometry"
 export type { AnchorOptions } from "./options"
@@ -22,3 +28,9 @@ export { buildCssSelector, buildPath } from "./selector"
 export { isStableClass, isStableId } from "./stable"
 export { pickTarget } from "./target"
 export { elementText, textSimilarity } from "./text"
+export {
+  captureQuote,
+  findQuote,
+  quoteContainer,
+  type QuoteMatch,
+} from "./quote"
