@@ -171,6 +171,7 @@ describe("masked areas", () => {
         <h2>Your account</h2>
         <p data-nuni-mask title="Card ending 4242">Balance: $1,234</p>
         <div data-nuni-mask><button id="secret" aria-label="Pay $1,234">Pay</button></div>
+        <div data-nuni-mask><button aria-label="Refund $1,234">Refund</button></div>
         <button id="pay">Pay now</button>
       </section>`
   })
@@ -194,5 +195,12 @@ describe("masked areas", () => {
     expect(masked.attrs).toEqual({})
     expect(JSON.stringify(masked)).not.toContain("1,234")
     expect(resolveAnchor(masked, document).element).toBe(secret)
+  })
+
+  it("keeps masked labels out of the selectors", () => {
+    const refund = document.querySelectorAll("[data-nuni-mask] button")[1]!
+    const anchor = captureAnchor(refund)
+    expect(JSON.stringify(anchor)).not.toContain("1,234")
+    expect(resolveAnchor(anchor, document).element).toBe(refund)
   })
 })

@@ -714,6 +714,7 @@ describe("captured context and screenshots", () => {
         message: `warn ${i}`,
         at: i,
       })),
+      { level: "error", message: "POST /reset?token=secret failed", at: 40 },
     ],
     network: [
       {
@@ -725,10 +726,16 @@ describe("captured context and screenshots", () => {
     ],
     dom: {
       html:
-        '<a href="/reset?token=secret">Reset</a><button>' +
+        '<a href="/reset?token=secret">Reset</a>' +
+        '<img data-src="i.png?sig=secret" style="background: url(/bg.png?t=secret)">' +
+        "<button>" +
         "y".repeat(9000) +
         "</button>",
-      styles: { "font-size": "14px", color: "rgb(0, 0, 0)" },
+      styles: {
+        "font-size": "14px",
+        color: "rgb(0, 0, 0)",
+        "background-image": 'url("https://cdn.example.com/bg.png?t=secret")',
+      },
     },
   }
 
@@ -755,12 +762,18 @@ describe("captured context and screenshots", () => {
 
     const mine = await alice.query(api.comments.getForOwner, { publicId, id })
     expect(mine?.context?.console).toHaveLength(LIMITS.contextEntryMax)
-    expect(mine?.context?.console?.[0]?.message).toBe("warn 10")
+    expect(mine?.context?.console?.[0]?.message).toBe("warn 11")
     expect(mine?.context?.network?.[0]?.method).toBe("GET")
     // Stripped on the server, whatever the client sent.
     expect(mine?.context?.network?.[0]?.url).toBe("https://api.example.com/v1")
     expect(mine?.context?.dom?.html).toHaveLength(LIMITS.domSnippetMaxLength)
     expect(mine?.context?.dom?.html).toContain('<a href="/reset">')
+    expect(mine?.context?.dom?.html).toContain('<img data-src="i.png"')
+    expect(mine?.context?.console?.at(-1)?.message).toBe("POST /reset failed")
+    expect(mine?.context?.dom?.styles["background-image"]).toBe(
+      'url("https://cdn.example.com/bg.png")'
+    )
+    expect(JSON.stringify(mine?.context)).not.toContain("secret")
     expect(mine?.screenshotUrl).toBeNull()
 
     const { token } = await alice.mutation(api.sessions.create, {
@@ -780,7 +793,10 @@ describe("captured context and screenshots", () => {
       status: "open",
       paginationOpts: { numItems: 10, cursor: null },
     })
-    expect(listed.page[0]?.context?.dom?.styles).toEqual(context.dom.styles)
+    expect(listed.page[0]?.context?.dom?.styles).toEqual({
+      ...context.dom.styles,
+      "background-image": 'url("https://cdn.example.com/bg.png")',
+    })
   })
 
   it("strips query strings from console messages on the server", async () => {

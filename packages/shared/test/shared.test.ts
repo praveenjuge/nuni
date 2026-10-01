@@ -185,6 +185,24 @@ describe("URL secrets", () => {
       )
     ).toBe("GET https://a.com/me failed, see http://b.io/x and done?")
   })
+
+  it("strips relative URLs and key=value queries, and keeps plain text", () => {
+    expect(
+      stripUrlQueries(
+        'POST /reset?token=1 failed {"url":"api/me?key=2"} ?code=3 #access_token=4'
+      )
+    ).toBe('POST /reset failed {"url":"api/me"}  ')
+    expect(stripUrlQueries("Error #12 in 1/2? What?")).toBe(
+      "Error #12 in 1/2? What?"
+    )
+  })
+
+  it("stays fast on long words", () => {
+    const long = `src="data:image/png;base64,${"ab/c".repeat(250_000)}"`
+    const started = performance.now()
+    expect(stripUrlQueries(long)).toBe(long)
+    expect(performance.now() - started).toBeLessThan(500)
+  })
 })
 
 describe("stripHtmlUrlQueries", () => {
@@ -195,6 +213,16 @@ describe("stripHtmlUrlQueries", () => {
       )
     ).toBe(
       `<a href="/reset" title="a?b">Go</a><img src='https://cdn.a.com/i.png' srcset="a.png 1x, b.png 2x">`
+    )
+  })
+
+  it("covers lazy-loading attributes, inline styles and text", () => {
+    expect(
+      stripHtmlUrlQueries(
+        `<img data-src="i.png?sig=1" data-lazy-srcset="a.png?x=1 1x" style="background: url(/bg.png?t=2)"><p>See https://a.com/x?key=3</p>`
+      )
+    ).toBe(
+      `<img data-src="i.png" data-lazy-srcset="a.png 1x" style="background: url(/bg.png"><p>See https://a.com/x</p>`
     )
   })
 })

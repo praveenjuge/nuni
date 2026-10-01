@@ -102,7 +102,7 @@ function cleanContext(context: CommentContext | undefined) {
       0,
       30
     )) {
-      styles[clampString(name, 40)] = clampString(value, 200)
+      styles[clampString(name, 40)] = clampString(stripUrlQueries(value), 200)
     }
     out.dom = {
       html: clampString(

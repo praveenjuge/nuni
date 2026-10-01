@@ -185,6 +185,11 @@ async function commentFlow(
   await page.goto(options.url)
   const toolbar = page.locator("#nuni-root .toolbar")
   await expect(toolbar).toBeVisible({ timeout: 30_000 })
+  // Read before posting, so cleanup works whatever fails after the post.
+  const authorSecret = await page.evaluate(() =>
+    localStorage.getItem("nuni:author-secret")
+  )
+  expect(authorSecret).toBeTruthy()
   await page.evaluate(() => console.error("Release smoke test error"))
 
   await toolbar.getByRole("button", { name: "Add a comment" }).click()
@@ -209,14 +214,11 @@ async function commentFlow(
       r.url().endsWith("/widget/comments") && r.request().method() === "POST"
   )
   await composer.getByRole("button", { name: "Post" }).click()
-  const response = await created
-  expect(response.status()).toBe(201)
-  const { id } = (await response.json()) as { id: string }
-  const authorSecret = await page.evaluate(() =>
-    localStorage.getItem("nuni:author-secret")
-  )
 
   try {
+    const response = await created
+    expect(response.status()).toBe(201)
+    const { id } = (await response.json()) as { id: string }
     await expect(page.locator("#nuni-root .toast")).toHaveText("Comment added")
     if (upload) expect((await upload).status()).toBe(201)
 
@@ -238,18 +240,25 @@ async function commentFlow(
       ).toBeNull()
     }
   } finally {
-    // Clean up production: deleting the comment deletes its screenshot.
-    await callConvex(request, "mutation", "comments:deleteOwn", {
-      id,
-      authorSecret,
-    })
+    // Clean up production, found by its body so it works even when the
+    // response was never read. Deleting a comment deletes its screenshot.
+    const listed = (await callConvex(request, "query", "comments:listForPage", {
+      publicId: options.project,
+      path: "/",
+    })) as { _id: string; body: string }[]
+    for (const c of listed.filter((c) => c.body === body)) {
+      await callConvex(request, "mutation", "comments:deleteOwn", {
+        id: c._id,
+        authorSecret,
+      })
+    }
+    await context.close()
   }
   const after = (await callConvex(request, "query", "comments:listForPage", {
     publicId: options.project,
     path: "/",
-  })) as { _id: string }[]
-  expect(after.some((c) => c._id === id)).toBe(false)
-  await context.close()
+  })) as { body: string }[]
+  expect(after.some((c) => c.body === body)).toBe(false)
 }
 
 test("CDN script tag", async ({ browser, request }) => {

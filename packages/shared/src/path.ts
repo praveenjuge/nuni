@@ -88,22 +88,52 @@ export function withoutQuery(input: string, base?: string): string {
   }
 }
 
-/** Remove query strings and hashes from every URL inside free text (log lines). */
-export function stripUrlQueries(text: string): string {
-  return text.replace(/(\bhttps?:\/\/[^\s?#"'<>]+)[?#][^\s"'<>]*/gi, "$1")
+/**
+ * Cut a word of free text at the query or hash of the URL in it: after a
+ * path ("/reset?token=1", "https://a.com/x#t") or before a key=value pair
+ * ("?token=1", "#access_token=1"). One pass, so long words stay cheap.
+ */
+function stripWord(word: string): string {
+  const slash = word.indexOf("/")
+  const equals = word.lastIndexOf("=")
+  for (let i = 0; i < word.length - 1; i++) {
+    const c = word[i]
+    if ((c === "?" || c === "#") && ((slash >= 0 && slash < i) || equals > i))
+      return word.slice(0, i)
+  }
+  return word
 }
 
-const URL_ATTRIBUTES =
-  /(\s(?:href|src|srcset|action|formaction|poster|cite|ping|data|background)\s*=\s*)("[^"]*"|'[^']*')/gi
+/**
+ * Remove query strings and hashes from every URL inside free text (log
+ * lines, markup, CSS values), absolute or relative.
+ */
+export function stripUrlQueries(text: string): string {
+  return text.replace(/[^\s"'<>`]+/g, stripWord)
+}
+
+const ATTRIBUTE = /(\s([^\s"'<>/=]+)\s*=\s*)("[^"]*"|'[^']*')/g
+/** Attributes that hold URLs, including lazy-loading ones like data-src. */
+const URL_ATTRIBUTE =
+  /^(?:action|formaction|poster|cite|ping|data|background|(?:[\w-]*[-:])?(?:href|src|srcset|url|uri))$/i
 
 /**
- * Remove query strings and hashes from URL attributes in serialized HTML
- * (links, images, srcset lists), relative or absolute.
+ * Remove query strings and hashes from serialized HTML: URL attributes
+ * (links, images, srcset lists, data-src) always, relative or absolute,
+ * and URLs anywhere else (inline styles, other attributes, text).
  */
 export function stripHtmlUrlQueries(html: string): string {
-  return html.replace(URL_ATTRIBUTES, (_all, name: string, quoted: string) => {
-    const quote = quoted[0]
-    const value = quoted.slice(1, -1).replace(/[?#][^\s,]*/g, "")
-    return `${name}${quote}${value}${quote}`
-  })
+  const attributes = html.replace(
+    ATTRIBUTE,
+    (all, prefix: string, name: string, quoted: string) => {
+      if (!URL_ATTRIBUTE.test(name)) return all
+      const quote = quoted[0]
+      const value = quoted.slice(1, -1)
+      const clean = /srcset$/i.test(name)
+        ? value.replace(/[?#][^\s,]*/g, "")
+        : value.replace(/[?#][\s\S]*$/, "")
+      return `${prefix}${quote}${clean}${quote}`
+    }
+  )
+  return stripUrlQueries(attributes)
 }

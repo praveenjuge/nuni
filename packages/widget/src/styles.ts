@@ -213,9 +213,9 @@ button { cursor: pointer; }
 .shot-preview img {
   display: block;
   width: 100%;
-  max-height: 120px;
-  object-fit: cover;
-  object-position: top;
+  max-height: 200px;
+  /* The whole image, so the commenter sees everything that is attached. */
+  object-fit: contain;
   border: 1px solid var(--n-border);
   border-radius: 8px;
   background: var(--n-bg-subtle);
