@@ -147,6 +147,58 @@ describe("widget comments", () => {
       /owner/
     )
   })
+
+  it("rejects page paths that would hijack the origin in links", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    let n = 0
+    for (const bad of [
+      ".evil.example/verify",
+      "@evil.example/",
+      "//evil.example/x",
+      "/\\evil.example/x",
+      "\t@evil.example/login",
+    ]) {
+      n += 1
+      await expect(
+        t.mutation(internal.comments.createFromWidget, {
+          publicId,
+          ip: `10.0.0.${n}`,
+          body: "Hi",
+          authorName: "Sam",
+          authorSecret: generateSecret(),
+          // The attacker supplies a url consistent with the origin, so the
+          // payload reaches the path check.
+          page: { ...page(), path: bad },
+          anchor,
+          viewport: { w: 1, h: 1, dpr: 1 },
+          userAgent: "",
+        })
+      ).rejects.toThrow(/continue the host/)
+    }
+    // Normal, hash-router and custom getPageKey paths still work.
+    await addComment(t, publicId, { path: "/docs" })
+    await addComment(t, publicId, { path: "/#/settings" })
+    await t.mutation(internal.comments.createFromWidget, {
+      publicId,
+      ip: "10.0.0.99",
+      body: "Hi",
+      authorName: "Sam",
+      authorSecret: generateSecret(),
+      // Custom keys are opaque: the real URL stays a normal page URL.
+      page: { ...page(), path: "product-123" },
+      anchor,
+      viewport: { w: 1, h: 1, dpr: 1 },
+      userAgent: "",
+    })
+    const pages = await t.query(api.comments.pagesWithComments, { publicId })
+    expect(pages.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+      { path: "/#/settings", count: 1 },
+      { path: "/docs", count: 1 },
+      { path: "product-123", count: 1 },
+    ])
+  })
+
   it("rejects a page URL that does not match its origin", async () => {
     const t = setup()
     await expect(
