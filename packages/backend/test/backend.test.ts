@@ -449,6 +449,95 @@ describe("claiming and owner actions", () => {
     ).rejects.toThrow()
   })
 
+  it("only mints owner sessions for origins registered to the project", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId) // registers http://localhost:3000
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+
+    // A crafted claim link naming an outside origin cannot mint a session.
+    await expect(
+      alice.mutation(api.sessions.create, {
+        publicId,
+        origin: "https://attacker.example",
+      })
+    ).rejects.toThrow(/not registered/)
+    // The registered origin still works.
+    const { token } = await alice.mutation(api.sessions.create, {
+      publicId,
+      origin: "http://localhost:3000",
+    })
+    expect(
+      await t.query(api.sessions.validate, { publicId, sessionToken: token })
+    ).toMatchObject({ valid: true })
+  })
+
+  it("stops anonymous traffic from registering origins on claimed projects", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId)
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+
+    // Neither widget loads nor new comments append origins once claimed,
+    // so the session origin check cannot be pre-defeated by pollution.
+    await t.mutation(api.projects.touch, {
+      publicId,
+      origin: "https://attacker.example",
+    })
+    await addComment(t, publicId, { origin: "https://attacker.example" })
+    const project = await alice.query(api.projects.getMine, { publicId })
+    expect(project?.origins).toEqual(["http://localhost:3000"])
+    await expect(
+      alice.mutation(api.sessions.create, {
+        publicId,
+        origin: "https://attacker.example",
+      })
+    ).rejects.toThrow(/not registered/)
+  })
+
+  it("lets only the owner register origins", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId)
+    const alice = await signIn(t, "user_alice", "Alice")
+    const bob = await signIn(t, "user_bob", "Bob")
+    await alice.mutation(api.projects.claim, { publicId })
+    const projectId = (await alice.query(api.projects.getMine, { publicId }))!
+      ._id
+
+    await expect(
+      bob.mutation(api.projects.addOrigin, {
+        projectId,
+        origin: "https://attacker.example",
+      })
+    ).rejects.toThrow()
+    await alice.mutation(api.projects.addOrigin, {
+      projectId,
+      origin: "https://staging.example.com",
+    })
+    // Adding the same origin twice is a no-op.
+    await alice.mutation(api.projects.addOrigin, {
+      projectId,
+      origin: "https://staging.example.com",
+    })
+    const project = await alice.query(api.projects.getMine, { publicId })
+    expect(project?.origins).toEqual([
+      "http://localhost:3000",
+      "https://staging.example.com",
+    ])
+    // Sessions can now be minted for the newly registered origin.
+    const { token } = await alice.mutation(api.sessions.create, {
+      publicId,
+      origin: "https://staging.example.com",
+    })
+    expect(
+      (await t.query(api.sessions.validate, { publicId, sessionToken: token }))
+        .valid
+    ).toBe(true)
+  })
+
   it("expires widget sessions", async () => {
     const t = setup()
     const publicId = generateProjectId()

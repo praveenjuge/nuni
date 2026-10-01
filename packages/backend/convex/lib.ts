@@ -113,7 +113,12 @@ export async function ensureProject(
     fail("deleting", "This project is being deleted")
   }
   if (existing) {
+    // Origins auto-register only while a project is unclaimed. Widget owner
+    // sessions are bound to this list, so once a project has an owner, new
+    // origins must be added by the owner - otherwise anyone could register
+    // an origin they control and pass the session origin check.
     if (
+      !existing.ownerId &&
       !existing.origins.includes(origin) &&
       existing.origins.length < LIMITS.maxOriginsPerProject
     ) {

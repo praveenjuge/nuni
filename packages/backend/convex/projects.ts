@@ -129,6 +129,29 @@ export const getMine = query({
   },
 })
 
+/**
+ * Register a new origin for a claimed project, so the owner can allow owner
+ * tools on it. Unclaimed projects collect origins automatically; claimed
+ * ones only grow here, because widget owner sessions are bound to this list.
+ */
+export const addOrigin = mutation({
+  args: { projectId: v.id("projects"), origin: v.string() },
+  handler: async (ctx, { projectId, origin }) => {
+    await requireOwner(ctx, projectId)
+    const project = await ctx.db.get(projectId)
+    if (!project) fail("not_found", "Project not found")
+    const clean = parseOrigin(origin)
+    if (project.origins.includes(clean)) return
+    if (project.origins.length >= LIMITS.maxOriginsPerProject) {
+      fail(
+        "cap_reached",
+        `A project can have at most ${LIMITS.maxOriginsPerProject} origins`
+      )
+    }
+    await ctx.db.patch(projectId, { origins: [...project.origins, clean] })
+  },
+})
+
 export const rename = mutation({
   args: { projectId: v.id("projects"), name: v.string() },
   handler: async (ctx, { projectId, name }) => {

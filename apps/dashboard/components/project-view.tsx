@@ -1,10 +1,12 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
+import type { Id } from "@nuni/backend/dataModel"
 import { buildAgentPrompt, buildCommentPrompt, LIMITS } from "@nuni/shared"
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react"
 import {
   ArrowLeftIcon,
+  PlusIcon,
   CheckIcon,
   ExternalLinkIcon,
   RotateCcwIcon,
@@ -113,6 +115,7 @@ export function ProjectView({ publicId }: { publicId: string }) {
               {hostOf(o)}
             </Badge>
           ))}
+          <AddOrigin projectId={project._id} />
         </div>
       </div>
 
@@ -128,6 +131,48 @@ export function ProjectView({ publicId }: { publicId: string }) {
         <CommentList publicId={publicId} status={status} />
       </section>
     </div>
+  )
+}
+
+function AddOrigin({ projectId }: { projectId: Id<"projects"> }) {
+  const addOrigin = useMutation(api.projects.addOrigin)
+  const [value, setValue] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  return (
+    <form
+      className="flex flex-wrap items-center gap-2"
+      onSubmit={async (e) => {
+        e.preventDefault()
+        const origin = value.trim()
+        if (!origin) return
+        setBusy(true)
+        try {
+          await addOrigin({ projectId, origin })
+          setValue("")
+          setError(null)
+        } catch (err) {
+          setError(
+            (err as { data?: { message?: string } })?.data?.message ??
+              "Could not add that origin."
+          )
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      <Input
+        className="h-7 w-56 text-xs"
+        placeholder="https://staging.example.com"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        aria-label="Add a site origin"
+      />
+      <Button type="submit" size="sm" variant="outline" disabled={busy}>
+        <PlusIcon /> Add site
+      </Button>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </form>
   )
 }
 

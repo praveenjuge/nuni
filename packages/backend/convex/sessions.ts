@@ -33,6 +33,16 @@ export const create = mutation({
     if (project.ownerId !== user._id) {
       fail("forbidden", "Only the project owner can do this")
     }
+    // The token is postMessage'd to this origin verbatim, so it must be one
+    // of the project's registered origins - otherwise a crafted claim link
+    // could deliver an owner session to any host.
+    const cleanOrigin = parseOrigin(origin)
+    if (!project.origins.includes(cleanOrigin)) {
+      fail(
+        "unknown_origin",
+        "This origin is not registered for the project. Add it from the dashboard first."
+      )
+    }
     const { ok } = await rateLimiter.limit(ctx, "sessionPerUser", {
       key: user._id,
     })
@@ -43,7 +53,7 @@ export const create = mutation({
       tokenHash: await sha256Hex(token),
       userId: user._id,
       projectId: project._id,
-      origin: parseOrigin(origin),
+      origin: cleanOrigin,
       userAgent: userAgent?.slice(0, 400),
       expiresAt: Date.now() + LIMITS.sessionTtlMs,
     })

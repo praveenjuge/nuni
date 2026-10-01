@@ -154,6 +154,7 @@ function SessionsCard({
   const sessions = useQuery(api.sessions.listMine, { publicId })
   const revoke = useMutation(api.sessions.revoke)
   const revokeAll = useMutation(api.sessions.revokeAll)
+  const [error, setError] = useState<string | null>(null)
   return (
     <Card>
       <CardHeader>
@@ -165,6 +166,7 @@ function SessionsCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
+        {error && <p className="text-sm text-destructive">{error}</p>}
         {sessions === undefined ? (
           <Skeleton className="h-16" />
         ) : sessions.length === 0 ? (
@@ -200,7 +202,12 @@ function SessionsCard({
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => void revoke({ id: s._id })}
+                    onClick={() => {
+                      setError(null)
+                      revoke({ id: s._id }).catch((err) =>
+                        setError(errorMessage(err))
+                      )
+                    }}
                   >
                     Sign out
                   </Button>
@@ -213,7 +220,9 @@ function SessionsCard({
                 className="w-fit"
                 onClick={() => {
                   if (confirm("Sign out every device from this project?"))
-                    void revokeAll({ projectId })
+                    revokeAll({ projectId }).catch((err) =>
+                      setError(errorMessage(err))
+                    )
                 }}
               >
                 <LogOutIcon /> Sign out everywhere

@@ -63,7 +63,9 @@ export function ClaimFlow({
       })
       const opener = window.opener as Window | null
       if (opener && !opener.closed) {
-        // Only the site that opened this popup, at exactly this origin, can receive it.
+        // targetOrigin only constrains which origin may receive the message;
+        // the guarantee that this origin belongs to the project is enforced
+        // server-side when the session is created.
         opener.postMessage({ type: "nuni:session", project, token }, origin)
         setResult({ step: "done", handedOff: true })
         setTimeout(() => window.close(), 1200)
