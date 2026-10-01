@@ -55,6 +55,18 @@ export function buildCommentPrompt(
       (comment.status === "resolved" ? " (already resolved)" : "")
   )
 
+  if (comment.replies?.length) {
+    out.push("", `## Replies (${comment.replies.length})`, "")
+    for (const reply of comment.replies) {
+      out.push(
+        `${reply.authorName}${reply.isOwner ? " (owner)" : ""}:`,
+        quote(reply.body),
+        ""
+      )
+    }
+    out.pop()
+  }
+
   out.push("", "## Where", "")
   out.push(`- Page: ${page.title ? `${page.title} ` : ""}(${page.path})`)
   out.push(`- Open it: ${commentUrl(page, comment._id)}`)

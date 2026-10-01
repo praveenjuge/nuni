@@ -189,20 +189,50 @@ export function createMcpServer(options: McpOptions) {
       },
     },
     {
+      name: "reply_to_comment",
+      title: "Reply to a Nuni comment",
+      description:
+        "Reply in a comment's thread as the project owner, for example to ask a question or say what changed. Everyone on the site can read replies.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The comment id." },
+          body: { type: "string", description: "The reply." },
+        },
+        required: ["id", "body"],
+        additionalProperties: false,
+      },
+      async run(args) {
+        const { publicId, token } = session()
+        const id = str(args, "id")
+        await remote.reply(publicId, token, id, str(args, "body"))
+        return text(`Replied to ${id}.`)
+      },
+    },
+    {
       name: "resolve_comment",
       title: "Resolve a Nuni comment",
       description:
-        "Mark a comment as resolved once the change it asks for is made. Visitors see it as resolved on the site.",
+        "Mark a comment as resolved once the change it asks for is made. Visitors see it as resolved on the site. Add a note to say what changed; it is posted as a reply.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "string" } },
+        properties: {
+          id: { type: "string" },
+          note: {
+            type: "string",
+            description: "Optional: what was changed, posted as a reply first.",
+          },
+        },
         required: ["id"],
         additionalProperties: false,
       },
       annotations: { idempotentHint: true },
       async run(args) {
-        const { token } = session()
+        const { publicId, token } = session()
         const id = str(args, "id")
+        if (typeof args.note === "string" && args.note.trim()) {
+          await remote.reply(publicId, token, id, args.note.trim())
+        }
         await remote.setStatus(token, id, "resolved")
         return text(`Resolved ${id}.`)
       },

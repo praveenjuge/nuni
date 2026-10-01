@@ -15,6 +15,7 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 
 import { CommentContext } from "@/components/comment-context"
+import { CommentThread } from "@/components/comment-thread"
 import { CopyButton } from "@/components/copy-button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -298,6 +299,11 @@ function CommentList({
                     context={c.context}
                     screenshotUrl={c.screenshotUrl}
                     userAgent={c.userAgent}
+                  />
+                  <CommentThread
+                    publicId={publicId}
+                    commentId={c._id}
+                    replies={c.replies}
                   />
                   <div className="flex flex-wrap gap-2 pt-1">
                     <a

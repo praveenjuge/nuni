@@ -225,14 +225,35 @@ export async function showComment(
   return 0
 }
 
+export async function reply(
+  ctx: CommandContext,
+  id: string | undefined,
+  body: string | undefined
+): Promise<number> {
+  if (!id || !body?.trim()) {
+    throw new CommandError(
+      'Pass a comment id and a message: reply <id> "message"'
+    )
+  }
+  const { publicId, token } = signedIn(ctx)
+  await ctx.remote.reply(publicId, token, id, body)
+  ctx.out(
+    ctx.json ? JSON.stringify({ id, replied: true }) : `Replied to ${id}.`
+  )
+  return 0
+}
+
 export async function setStatus(
   ctx: CommandContext,
   id: string | undefined,
-  status: CommentStatus
+  status: CommentStatus,
+  note?: string
 ): Promise<number> {
   const verb = status === "resolved" ? "resolve" : "reopen"
   if (!id) throw new CommandError(`Pass a comment id: ${verb} <id>`)
-  const { token } = signedIn(ctx)
+  const { publicId, token } = signedIn(ctx)
+  // The note goes in the thread first, so it is there when people look.
+  if (note?.trim()) await ctx.remote.reply(publicId, token, id, note)
   await ctx.remote.setStatus(token, id, status)
   ctx.out(
     ctx.json

@@ -166,6 +166,41 @@ http.route({
 })
 
 http.route({
+  path: "/widget/replies",
+  method: "OPTIONS",
+  handler: httpAction(async (_ctx, request) => {
+    return new Response(null, { status: 204, headers: corsHeaders(request) })
+  }),
+})
+
+/** A reply in a comment's thread, rate limited per IP like comments. */
+http.route({
+  path: "/widget/replies",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const payload = await readJson(request, 16_000)
+    if (payload instanceof Response) return payload
+    try {
+      const id = await ctx.runMutation(internal.replies.createFromWidget, {
+        publicId: String(payload.publicId ?? ""),
+        commentId: String(payload.commentId ?? ""),
+        ip: clientIp(request),
+        body: String(payload.body ?? ""),
+        authorName: String(payload.authorName ?? ""),
+        authorSecret: String(payload.authorSecret ?? ""),
+        sessionToken:
+          typeof payload.sessionToken === "string"
+            ? payload.sessionToken
+            : undefined,
+      })
+      return json(request, 201, { id })
+    } catch (error) {
+      return errorResponse(request, error, "Invalid reply")
+    }
+  }),
+})
+
+http.route({
   path: "/widget/screenshot",
   method: "OPTIONS",
   handler: httpAction(async (_ctx, request) => {

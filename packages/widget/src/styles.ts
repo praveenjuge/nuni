@@ -151,6 +151,22 @@ button { cursor: pointer; }
 .pin:hover, .pin[data-active="true"] { z-index: 2; }
 .pin[data-active="true"] { box-shadow: 0 0 0 3px var(--n-accent), 0 2px 8px rgba(0,0,0,0.25); }
 .pin[data-status="resolved"] { opacity: 0.55; filter: grayscale(0.6); }
+.pin[data-replies]::after {
+  content: attr(data-replies);
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--n-bg);
+  color: var(--n-fg);
+  border: 1px solid var(--n-border);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
 .pin[data-confidence="low"] { border-style: dashed; }
 .pin[hidden] { display: none; }
 .pin-pending { opacity: 0.7; }
@@ -169,6 +185,43 @@ button { cursor: pointer; }
   overflow: hidden;
 }
 .card-body { padding: 12px; display: grid; gap: 10px; }
+.card[data-card="thread"] { display: flex; flex-direction: column; max-height: calc(100vh - 24px); }
+.thread { border-top: 1px solid var(--n-border); display: grid; min-height: 0; }
+.replies { display: grid; gap: 12px; padding: 12px; overflow-y: auto; max-height: 45vh; }
+.reply { display: grid; gap: 6px; }
+.avatar-sm { width: 20px; height: 20px; font-size: 9px; }
+.badge-owner { background: var(--n-accent-soft); color: var(--n-accent); }
+.reply-form { display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px 12px; flex-wrap: wrap; }
+.reply-form .field { flex: 1 1 100%; }
+/* A fixed size: growing on focus would move the Send button mid-click. */
+.reply-form .field-reply { flex: 1 1 0; min-height: 56px; height: 56px; resize: none; }
+.reactions { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; position: relative; }
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--n-border);
+  border-radius: 999px;
+  background: var(--n-bg);
+  color: var(--n-fg);
+  font-size: 12px;
+}
+.reaction:hover { background: var(--n-bg-subtle); }
+.reaction[aria-pressed="true"] { border-color: var(--n-accent); background: var(--n-accent-soft); }
+.reaction-add { color: var(--n-fg-muted); padding: 0 6px; }
+.reaction-picker {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--n-border);
+  border-radius: 999px;
+  background: var(--n-bg);
+  box-shadow: var(--n-shadow);
+}
+.reaction-picker .reaction { border-color: transparent; font-size: 14px; }
+.btn-xs { width: 24px; height: 24px; }
 .card-head { display: flex; align-items: center; gap: 8px; }
 .card-head .spacer { flex: 1; }
 .avatar {

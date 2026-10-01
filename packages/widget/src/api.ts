@@ -3,6 +3,7 @@ import type {
   Anchor,
   CommentContext,
   OwnerComment,
+  Thread,
   WidgetComment,
 } from "@nuni/shared"
 import { ConvexClient } from "convex/browser"
@@ -126,6 +127,16 @@ export class NuniApi {
     )
   }
 
+  /** Replies and reactions of one thread, live while its card is open. */
+  onThread(commentId: string, cb: (thread: Thread) => void) {
+    return this.client.onUpdate(
+      api.replies.listForComment,
+      { publicId: this.config.project, commentId },
+      (thread) => cb(thread as Thread),
+      () => {}
+    )
+  }
+
   /** One comment by id, for deep links outside the page listing window. */
   getComment(id: string): Promise<WidgetComment | null> {
     return this.client
@@ -156,6 +167,41 @@ export class NuniApi {
     if (!response.ok || !data.id) {
       throw new NuniApiError(
         data.message ?? "Couldn't post the comment",
+        data.code ?? "error"
+      )
+    }
+    return data.id
+  }
+
+  /** Through the HTTP action, so replies are rate limited per IP. */
+  async createReply(reply: {
+    commentId: string
+    body: string
+    authorName: string
+    authorSecret: string
+    sessionToken?: string
+  }): Promise<string> {
+    let response: Response
+    try {
+      response = await fetch(`${this.config.convexSiteUrl}/widget/replies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ publicId: this.config.project, ...reply }),
+      })
+    } catch {
+      throw new NuniApiError(
+        "Couldn't reach Nuni. Check your connection.",
+        "network"
+      )
+    }
+    const data = (await response.json().catch(() => ({}))) as {
+      id?: string
+      code?: string
+      message?: string
+    }
+    if (!response.ok || !data.id) {
+      throw new NuniApiError(
+        data.message ?? "Couldn't post the reply",
         data.code ?? "error"
       )
     }
@@ -230,6 +276,51 @@ export class NuniApi {
       this.client.mutation(api.comments.reopen, {
         id: id as never,
         sessionToken,
+      })
+    )
+  }
+
+  editReply(id: string, authorSecret: string, body: string) {
+    return this.run(
+      this.client.mutation(api.replies.editOwn, {
+        id: id as never,
+        authorSecret,
+        body,
+      })
+    )
+  }
+
+  deleteReply(id: string, authorSecret: string) {
+    return this.run(
+      this.client.mutation(api.replies.deleteOwn, {
+        id: id as never,
+        authorSecret,
+      })
+    )
+  }
+
+  removeReply(id: string, sessionToken: string) {
+    return this.run(
+      this.client.mutation(api.replies.remove, {
+        id: id as never,
+        sessionToken,
+      })
+    )
+  }
+
+  toggleReaction(
+    commentId: string,
+    targetId: string,
+    emoji: string,
+    authorSecret: string
+  ) {
+    return this.run(
+      this.client.mutation(api.reactions.toggle, {
+        publicId: this.config.project,
+        commentId,
+        targetId,
+        emoji,
+        authorSecret,
       })
     )
   }

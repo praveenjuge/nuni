@@ -13,10 +13,13 @@ import {
   generateSecret,
   LIMITS,
   normalizePath,
+  REACTIONS,
   type Anchor,
   type CommentContext,
   type DomContext,
   type OwnerComment,
+  type ReplyView,
+  type Thread,
   type WidgetComment,
 } from "@nuni/shared"
 
@@ -68,6 +71,11 @@ type Card =
       editing?: boolean
       error?: string
       busy?: boolean
+      /** The reply being edited. */
+      replyEditing?: string
+      /** The message (comment or reply id) whose emoji picker is open. */
+      picker?: string | null
+      sendingReply?: boolean
     }
   | null
 
@@ -146,6 +154,10 @@ export class NuniWidget {
   /** The subscription answered (possibly null), so the copy is complete. */
   private ownerDetailLoaded = false
   private ownerDetailUnsub: (() => void) | null = null
+  /** Replies and reactions of the open thread. */
+  private thread: Thread | null = null
+  private threadId: string | null = null
+  private threadUnsub: (() => void) | null = null
 
   private layoutFrame = 0
   private pinPositions = new Map<string, { x: number; y: number }>()
@@ -257,6 +269,7 @@ export class NuniWidget {
     this.pageUnsub?.()
     this.sessionUnsub?.()
     this.ownerDetailUnsub?.()
+    this.threadUnsub?.()
     for (const cleanup of this.cleanups) cleanup()
     cancelAnimationFrame(this.layoutFrame)
     clearTimeout(this.resolveTimer)
@@ -336,6 +349,22 @@ export class NuniWidget {
       if (this.ownerDetailId !== id) return
       this.ownerDetail = comment
       this.ownerDetailLoaded = true
+      this.render()
+    })
+  }
+
+  /** Keep the open thread's replies and reactions subscribed. */
+  private syncThread() {
+    const id = this.card?.kind === "thread" ? this.card.id : null
+    if (id === this.threadId) return
+    this.threadUnsub?.()
+    this.threadUnsub = null
+    this.thread = null
+    this.threadId = id
+    if (!id) return
+    this.threadUnsub = this.api.onThread(id, (thread) => {
+      if (this.threadId !== id) return
+      this.thread = thread
       this.render()
     })
   }
@@ -602,7 +631,9 @@ export class NuniWidget {
   private copyForAgent(comment: WidgetComment) {
     const detail =
       this.ownerDetail?._id === comment._id ? this.ownerDetail : null
-    const prompt = buildCommentPrompt(detail ?? comment, {
+    const replies =
+      this.threadId === comment._id ? this.thread?.replies : undefined
+    const prompt = buildCommentPrompt(detail ?? { ...comment, replies }, {
       includeContext: Boolean(detail),
     })
     void copyText(prompt).then((ok) =>
@@ -891,6 +922,101 @@ export class NuniWidget {
     })
   }
 
+  private isMyReply(reply: ReplyView) {
+    return Boolean(this.secretHash) && reply.authorKeyHash === this.secretHash
+  }
+
+  private async sendReply(comment: WidgetComment, body: string, name: string) {
+    const card = this.card
+    if (card?.kind !== "thread" || card.id !== comment._id) return
+    const authorName = (this.isOwner ? this.ownerName : name)
+      ?.trim()
+      .slice(0, LIMITS.nameMaxLength)
+    const clean = body.trim()
+    if (!clean) return
+    if (!authorName) {
+      card.error = "Enter your name"
+      this.render()
+      return
+    }
+    if (clean.length > LIMITS.bodyMaxLength) {
+      card.error = `Replies are limited to ${LIMITS.bodyMaxLength} characters`
+      this.render()
+      return
+    }
+    if (!this.isOwner) {
+      this.name = authorName
+      write(KEYS.name, authorName)
+    }
+    card.sendingReply = true
+    card.error = undefined
+    this.render()
+    try {
+      await this.api.createReply({
+        commentId: comment._id,
+        body: clean,
+        authorName,
+        authorSecret: this.secret,
+        sessionToken: this.ownerToken ?? undefined,
+      })
+      const box = this.uiLayer.querySelector<HTMLTextAreaElement>(
+        '[data-focus-key="reply"]'
+      )
+      if (box) box.value = ""
+    } catch (error) {
+      card.error =
+        error instanceof NuniApiError
+          ? error.message
+          : "Couldn't post the reply"
+    }
+    card.sendingReply = false
+    this.render()
+  }
+
+  private toggleReaction(
+    comment: WidgetComment,
+    targetId: string,
+    emoji: string
+  ) {
+    void this.api
+      .toggleReaction(comment._id, targetId, emoji, this.secret)
+      .catch((error: unknown) => {
+        if (this.card?.kind === "thread" && this.card.id === comment._id) {
+          this.card.error =
+            error instanceof Error ? error.message : "Couldn't react"
+          this.render()
+        }
+      })
+  }
+
+  private deleteReply(comment: WidgetComment, reply: ReplyView) {
+    if (!window.confirm("Delete this reply?")) return
+    const token = this.ownerToken
+    const action = this.isMyReply(reply)
+      ? () => this.api.deleteReply(reply._id, this.secret)
+      : token
+        ? () => this.api.removeReply(reply._id, token)
+        : null
+    if (action) void this.act(comment._id, action, "Reply deleted")
+  }
+
+  private saveReplyEdit(
+    comment: WidgetComment,
+    reply: ReplyView,
+    body: string
+  ) {
+    void this.act(
+      comment._id,
+      () => this.api.editReply(reply._id, this.secret, body),
+      "Saved"
+    ).then((ok) => {
+      if (ok && this.card?.kind === "thread") {
+        this.card.replyEditing = undefined
+        this.render()
+      }
+    })
+  }
+
   private saveEdit(c: WidgetComment, body: string) {
     void this.act(
       c._id,
@@ -925,6 +1051,7 @@ export class NuniWidget {
 
   private render() {
     this.syncOwnerDetail()
+    this.syncThread()
     this.renderPins()
     this.renderUi()
     this.renderHighlight()
@@ -964,6 +1091,8 @@ export class NuniWidget {
         "aria-label",
         `Comment by ${comment.authorName}: ${comment.body.slice(0, 80)}`
       )
+      if (comment.replyCount) pin.dataset.replies = String(comment.replyCount)
+      else delete pin.dataset.replies
       pin.dataset.status = comment.status
       pin.dataset.active = String(this.activeId === comment._id)
       pin.dataset.confidence =
@@ -1084,7 +1213,14 @@ export class NuniWidget {
             initials(c.authorName)
           ),
           h("span", { class: "author" }, c.authorName),
-          h("span", { class: "meta" }, timeAgo(c.createdAt)),
+          h(
+            "span",
+            { class: "meta" },
+            timeAgo(c.createdAt) +
+              (c.replyCount
+                ? ` · ${c.replyCount} ${c.replyCount === 1 ? "reply" : "replies"}`
+                : "")
+          ),
           c.page.origin !== location.origin
             ? h(
                 "span",
@@ -1504,6 +1640,7 @@ export class NuniWidget {
               )
             : null
         ),
+        this.renderReactions(comment, comment._id),
         card.error
           ? h("div", { class: "error", role: "alert" }, card.error)
           : null
@@ -1604,7 +1741,273 @@ export class NuniWidget {
         "aria-label": `Comment by ${comment.authorName}`,
       },
       body,
-      actions.length ? h("div", { class: "actions" }, ...actions) : null
+      actions.length ? h("div", { class: "actions" }, ...actions) : null,
+      card.editing ? null : this.renderThread(comment)
+    )
+  }
+
+  /** Emoji chips for one message, plus a picker to add one. */
+  private renderReactions(comment: WidgetComment, targetId: string) {
+    const card = this.card
+    if (card?.kind !== "thread") return null
+    const loaded = this.threadId === comment._id && this.thread
+    const summaries = loaded
+      ? this.thread!.reactions.filter((r) => r.targetId === targetId)
+      : []
+    const open = card.picker === targetId
+    return h(
+      "div",
+      { class: "reactions" },
+      ...summaries.map((r) => {
+        const mine = r.authorKeyHashes.includes(this.secretHash)
+        return h(
+          "button",
+          {
+            class: "reaction",
+            type: "button",
+            "aria-pressed": String(mine),
+            "aria-label": `${r.emoji} ${r.count}${mine ? ", including you" : ""}`,
+            onclick: () => this.toggleReaction(comment, targetId, r.emoji),
+          },
+          `${r.emoji} ${r.count}`
+        )
+      }),
+      h(
+        "button",
+        {
+          class: "reaction reaction-add",
+          type: "button",
+          "aria-label": "Add a reaction",
+          "aria-expanded": String(open),
+          title: "Add a reaction",
+          onclick: () => {
+            card.picker = open ? null : targetId
+            this.render()
+          },
+        },
+        icon(ICONS.smile)
+      ),
+      open
+        ? h(
+            "div",
+            {
+              class: "reaction-picker",
+              role: "group",
+              "aria-label": "Reactions",
+            },
+            ...REACTIONS.map((emoji) =>
+              h(
+                "button",
+                {
+                  class: "reaction",
+                  type: "button",
+                  "aria-label": `React with ${emoji}`,
+                  onclick: () => {
+                    card.picker = null
+                    this.toggleReaction(comment, targetId, emoji)
+                    this.render()
+                  },
+                },
+                emoji
+              )
+            )
+          )
+        : null
+    )
+  }
+
+  /** The replies under a comment and the box to add one. */
+  private renderThread(comment: WidgetComment) {
+    const card = this.card
+    if (card?.kind !== "thread") return null
+    const replies =
+      this.threadId === comment._id ? (this.thread?.replies ?? []) : []
+    const owner = this.isOwner
+
+    const items = replies.map((reply) => {
+      const mine = this.isMyReply(reply)
+      if (card.replyEditing === reply._id) {
+        const box = h("textarea", {
+          class: "field",
+          maxlength: LIMITS.bodyMaxLength,
+          "data-focus-key": `reply-edit-${reply._id}`,
+          "aria-label": "Edit reply",
+        })
+        const prev = this.uiLayer.querySelector<HTMLTextAreaElement>(
+          `[data-focus-key="reply-edit-${reply._id}"]`
+        )
+        box.value = prev ? prev.value : reply.body
+        return h(
+          "div",
+          { class: "reply" },
+          box,
+          h(
+            "div",
+            { class: "row" },
+            h("span", { class: "spacer" }),
+            h(
+              "button",
+              {
+                class: "btn btn-ghost",
+                type: "button",
+                onclick: () => {
+                  card.replyEditing = undefined
+                  this.render()
+                },
+              },
+              "Cancel"
+            ),
+            h(
+              "button",
+              {
+                class: "btn btn-primary",
+                type: "button",
+                disabled: Boolean(card.busy),
+                onclick: () => this.saveReplyEdit(comment, reply, box.value),
+              },
+              "Save"
+            )
+          )
+        )
+      }
+      return h(
+        "div",
+        { class: "reply", "data-reply": reply._id },
+        h(
+          "div",
+          { class: "card-head" },
+          h(
+            "span",
+            {
+              class: "avatar avatar-sm",
+              style: `background:${colorFor(reply.authorName)}`,
+            },
+            initials(reply.authorName)
+          ),
+          h("span", { class: "author" }, reply.authorName),
+          reply.isOwner
+            ? h("span", { class: "badge badge-owner" }, "Owner")
+            : null,
+          h(
+            "span",
+            { class: "meta" },
+            timeAgo(reply.createdAt) + (reply.editedAt ? " · edited" : "")
+          ),
+          h("span", { class: "spacer" }),
+          mine
+            ? h(
+                "button",
+                {
+                  class: "btn btn-ghost btn-icon btn-xs",
+                  type: "button",
+                  "aria-label": "Edit reply",
+                  title: "Edit",
+                  onclick: () => {
+                    card.replyEditing = reply._id
+                    this.render()
+                  },
+                },
+                icon(ICONS.edit)
+              )
+            : null,
+          mine || owner
+            ? h(
+                "button",
+                {
+                  class: "btn btn-ghost btn-icon btn-xs btn-danger",
+                  type: "button",
+                  "aria-label": "Delete reply",
+                  title: "Delete",
+                  disabled: Boolean(card.busy),
+                  onclick: () => this.deleteReply(comment, reply),
+                },
+                icon(ICONS.trash)
+              )
+            : null
+        ),
+        h("div", { class: "comment-body" }, reply.body),
+        this.renderReactions(comment, reply._id)
+      )
+    })
+
+    const needsName = !owner && !this.name
+    const nameInput = h("input", {
+      class: "field",
+      placeholder: "Your name",
+      value: this.name,
+      maxlength: LIMITS.nameMaxLength,
+      autocomplete: "name",
+      "data-focus-key": "reply-name",
+      "aria-label": "Your name",
+    })
+    const prevName = this.uiLayer.querySelector<HTMLInputElement>(
+      '[data-focus-key="reply-name"]'
+    )
+    if (prevName) nameInput.value = prevName.value
+    const box = h("textarea", {
+      class: "field field-reply",
+      placeholder: replies.length ? "Reply" : "Reply to start a thread",
+      maxlength: LIMITS.bodyMaxLength,
+      "data-focus-key": "reply",
+      "aria-label": "Reply",
+    })
+    const prev = this.uiLayer.querySelector<HTMLTextAreaElement>(
+      '[data-focus-key="reply"]'
+    )
+    if (prev) box.value = prev.value
+    const send = () =>
+      void this.sendReply(
+        comment,
+        box.value,
+        needsName ? nameInput.value : this.name
+      )
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        send()
+      }
+    })
+
+    return h(
+      "div",
+      { class: "thread" },
+      items.length
+        ? h(
+            "div",
+            {
+              class: "replies",
+              role: "list",
+              "aria-label": `${items.length} ${items.length === 1 ? "reply" : "replies"}`,
+            },
+            ...items.map((item) => {
+              item.setAttribute("role", "listitem")
+              return item
+            })
+          )
+        : null,
+      h(
+        "form",
+        {
+          class: "reply-form",
+          onsubmit: (e: Event) => {
+            e.preventDefault()
+            send()
+          },
+        },
+        needsName ? nameInput : null,
+        box,
+        h(
+          "button",
+          {
+            class: "btn btn-primary btn-icon",
+            type: "submit",
+            "aria-label": "Send reply",
+            title: "Send reply",
+            disabled: Boolean(card.sendingReply),
+          },
+          icon(ICONS.send)
+        )
+      )
     )
   }
 

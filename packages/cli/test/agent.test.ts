@@ -95,6 +95,9 @@ function fakeRemote(polls: LoginPoll[] = []): Remote & {
     setStatus: async (token, id, status) => {
       calls.push(`${status} ${id} ${token}`)
     },
+    reply: async (_p, token, id, body) => {
+      calls.push(`reply ${id} ${token} ${body}`)
+    },
   }
 }
 
@@ -281,6 +284,28 @@ describe("comment commands", () => {
     })
 
     expect(
+      await run(["reply", "jd7abc123", "Looking into it", "--cwd", dir], {
+        remote,
+        ...io.options,
+      })
+    ).toBe(0)
+    expect(
+      await run(
+        ["resolve", "jd7abc123", "--note", "Made it bigger", "--cwd", dir],
+        { remote, ...io.options }
+      )
+    ).toBe(0)
+    const calls = remote.calls.slice(-3)
+    expect(calls).toEqual([
+      "reply jd7abc123 nuni_s_good Looking into it",
+      "reply jd7abc123 nuni_s_good Made it bigger",
+      "resolved jd7abc123 nuni_s_good",
+    ])
+    expect(
+      await run(["reply", "jd7abc123", "--cwd", dir], { remote, ...io.options })
+    ).toBe(1)
+
+    expect(
       await run(["comments", "--cwd", dir, "--status", "closed"], {
         remote,
         ...io.options,
@@ -347,6 +372,7 @@ describe("MCP server", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "list_comments",
       "get_comment",
+      "reply_to_comment",
       "resolve_comment",
       "reopen_comment",
     ])
@@ -368,10 +394,18 @@ describe("MCP server", () => {
 
     const resolved = await client.callTool({
       name: "resolve_comment",
-      arguments: { id: "jd7abc123" },
+      arguments: { id: "jd7abc123", note: "Bigger now" },
     })
     expect(resolved.isError).toBeFalsy()
-    expect(remote.calls).toContain("resolved jd7abc123 nuni_s_good")
+    expect(remote.calls.slice(-2)).toEqual([
+      "reply jd7abc123 nuni_s_good Bigger now",
+      "resolved jd7abc123 nuni_s_good",
+    ])
+    await client.callTool({
+      name: "reply_to_comment",
+      arguments: { id: "jd7abc123", body: "Thanks!" },
+    })
+    expect(remote.calls.at(-1)).toBe("reply jd7abc123 nuni_s_good Thanks!")
 
     const missing = await client.callTool({
       name: "get_comment",
@@ -418,7 +452,7 @@ describe("MCP server", () => {
     await client.connect(transport)
     expect(await client.ping()).toEqual({})
     const { tools } = await client.listTools()
-    expect(tools).toHaveLength(4)
+    expect(tools).toHaveLength(5)
     const result = await client.callTool({
       name: "list_comments",
       arguments: {},

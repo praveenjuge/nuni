@@ -18,6 +18,15 @@ export const LIMITS = {
   /** Trimmed outerHTML of the commented element. */
   domSnippetMaxLength: 4000,
   screenshotMaxBytes: 600_000,
+  /** Replies kept per comment thread. */
+  repliesPerComment: 200,
+  /** Reactions kept per thread (the comment and its replies). */
+  reactionsPerComment: 2000,
   /** How long after posting the author can still attach the screenshot. */
   screenshotUploadWindowMs: 5 * 60 * 1000,
 } as const
+
+/** The reactions anyone can add to a comment or reply. */
+export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "😄"] as const
+
+export type Reaction = (typeof REACTIONS)[number]

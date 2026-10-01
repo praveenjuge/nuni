@@ -100,6 +100,35 @@ export interface WidgetComment {
   createdAt: number
   editedAt?: number
   resolvedAt?: number
+  /** Replies in the thread (not counting the comment itself). */
+  replyCount?: number
+}
+
+/** A reply in a comment's thread. */
+export interface ReplyView {
+  _id: string
+  commentId: string
+  body: string
+  authorName: string
+  authorKeyHash: string
+  /** Written by the project owner (widget session, dashboard or CLI). */
+  isOwner: boolean
+  createdAt: number
+  editedAt?: number
+}
+
+/** One emoji on a comment or reply, with who added it. */
+export interface ReactionSummary {
+  /** The comment or reply id. */
+  targetId: string
+  emoji: string
+  count: number
+  authorKeyHashes: string[]
+}
+
+export interface Thread {
+  replies: ReplyView[]
+  reactions: ReactionSummary[]
 }
 
 /** A comment as the owner sees it (dashboard, owner widget, agents). */
@@ -107,4 +136,5 @@ export interface OwnerComment extends WidgetComment {
   userAgent?: string
   context?: CommentContext
   screenshotUrl?: string | null
+  replies?: ReplyView[]
 }

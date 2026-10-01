@@ -18,6 +18,29 @@ export function fail(code: string, message: string): never {
   throw new ConvexError({ code, message })
 }
 
+export function clampString(value: string, max: number) {
+  return value.length > max ? value.slice(0, max) : value
+}
+
+/** A comment or reply body: trimmed, not empty, within the limit. */
+export function cleanBody(body: string): string {
+  const clean = body.replace(/\r\n/g, "\n").trim()
+  if (!clean) fail("invalid_body", "Comment cannot be empty")
+  if (clean.length > LIMITS.bodyMaxLength) {
+    fail(
+      "invalid_body",
+      `Comments are limited to ${LIMITS.bodyMaxLength} characters`
+    )
+  }
+  return clean
+}
+
+export function cleanName(name: string): string {
+  const clean = name.trim().replace(/\s+/g, " ").slice(0, LIMITS.nameMaxLength)
+  if (!clean) fail("invalid_name", "Enter your name")
+  return clean
+}
+
 export function assertProjectId(publicId: string) {
   if (!isProjectId(publicId)) fail("invalid_project", "Invalid project ID")
 }

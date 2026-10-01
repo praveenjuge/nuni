@@ -60,6 +60,12 @@ export interface Remote {
     id: string
   ): Promise<OwnerComment | null>
   setStatus(token: string, id: string, status: CommentStatus): Promise<void>
+  reply(
+    publicId: string,
+    token: string,
+    id: string,
+    body: string
+  ): Promise<void>
 }
 
 /** The message from a Convex error, with a stable code. */
@@ -169,6 +175,16 @@ export function createRemote(): Remote {
         const fn =
           status === "resolved" ? api.comments.resolve : api.comments.reopen
         await client.mutation(fn, { id: id as never, sessionToken: token })
+      }),
+
+    reply: (publicId, token, id, body) =>
+      call(async () => {
+        await client.mutation(api.replies.replyAsOwner, {
+          publicId,
+          commentId: id,
+          body,
+          sessionToken: token,
+        })
       }),
   }
 }

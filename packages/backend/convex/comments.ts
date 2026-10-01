@@ -19,6 +19,9 @@ import {
 import {
   actingOwner,
   bumpPageOpen,
+  clampString,
+  cleanBody,
+  cleanName,
   ensureProject,
   fail,
   parseOrigin,
@@ -28,6 +31,7 @@ import {
   currentUser,
 } from "./lib"
 import { rateLimiter } from "./rateLimits"
+import { deleteThread, repliesFor } from "./replies"
 import {
   anchorValidator,
   contextValidator,
@@ -52,6 +56,7 @@ function toPublic(c: Doc<"comments">) {
     createdAt: c.createdAt,
     editedAt: c.editedAt,
     resolvedAt: c.resolvedAt,
+    replyCount: c.replyCount ?? 0,
   }
 }
 
@@ -65,6 +70,7 @@ async function toOwner(ctx: QueryCtx, c: Doc<"comments">) {
     screenshotUrl: c.screenshotId
       ? await ctx.storage.getUrl(c.screenshotId)
       : null,
+    replies: c.replyCount ? await repliesFor(ctx, c._id) : [],
   }
 }
 
@@ -115,24 +121,6 @@ function cleanContext(context: CommentContext | undefined) {
   return out.console || out.network || out.dom ? out : undefined
 }
 
-function cleanBody(body: string): string {
-  const clean = body.replace(/\r\n/g, "\n").trim()
-  if (!clean) fail("invalid_body", "Comment cannot be empty")
-  if (clean.length > LIMITS.bodyMaxLength) {
-    fail(
-      "invalid_body",
-      `Comments are limited to ${LIMITS.bodyMaxLength} characters`
-    )
-  }
-  return clean
-}
-
-function cleanName(name: string): string {
-  const clean = name.trim().replace(/\s+/g, " ").slice(0, LIMITS.nameMaxLength)
-  if (!clean) fail("invalid_name", "Enter your name")
-  return clean
-}
-
 function searchTextFor(body: string, authorName: string) {
   return `${authorName}\n${body}`
 }
@@ -143,10 +131,6 @@ function originOf(url: string): string | null {
   } catch {
     return null
   }
-}
-
-function clampString(value: string, max: number) {
-  return value.length > max ? value.slice(0, max) : value
 }
 
 /**
@@ -305,7 +289,11 @@ export const editOwn = mutation({
   },
 })
 
-async function removeComment(ctx: MutationCtx, comment: Doc<"comments">) {
+export async function removeComment(
+  ctx: MutationCtx,
+  comment: Doc<"comments">
+) {
+  await deleteThread(ctx, comment._id)
   await ctx.db.delete(comment._id)
   if (comment.screenshotId) await ctx.storage.delete(comment.screenshotId)
   if (comment.status === "open") {

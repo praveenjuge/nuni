@@ -15,6 +15,18 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     period: MINUTE,
     capacity: 60,
   },
+  replyPerIp: {
+    kind: "token bucket",
+    rate: 20,
+    period: MINUTE,
+    capacity: 20,
+  },
+  reactPerAuthor: {
+    kind: "token bucket",
+    rate: 60,
+    period: MINUTE,
+    capacity: 30,
+  },
   touchPerProject: {
     kind: "token bucket",
     rate: 100,

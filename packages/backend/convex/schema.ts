@@ -50,6 +50,10 @@ export default defineSchema({
     editedAt: v.optional(v.number()),
     resolvedAt: v.optional(v.number()),
     resolvedBy: v.optional(v.id("users")),
+    /** Replies in the thread, kept in sync by replies.ts. */
+    replyCount: v.optional(v.number()),
+    /** Reactions on the comment and its replies, for the per-thread cap. */
+    reactionCount: v.optional(v.number()),
   })
     .index("by_project_path", ["projectId", "page.path", "createdAt"])
     .index("by_project_path_status", [
@@ -63,6 +67,34 @@ export default defineSchema({
       searchField: "searchText",
       filterFields: ["projectId", "status"],
     }),
+
+  /** Replies in a comment's thread. Public, like the comment. */
+  replies: defineTable({
+    commentId: v.id("comments"),
+    projectId: v.id("projects"),
+    body: v.string(),
+    authorName: v.string(),
+    authorKeyHash: v.string(),
+    /** Set when the project owner wrote it (shown with an Owner badge). */
+    ownerId: v.optional(v.id("users")),
+    createdAt: v.number(),
+    editedAt: v.optional(v.number()),
+  })
+    .index("by_comment", ["commentId", "createdAt"])
+    .index("by_project", ["projectId"]),
+
+  /** One emoji from one author on a comment or one of its replies. */
+  reactions: defineTable({
+    commentId: v.id("comments"),
+    projectId: v.id("projects"),
+    /** The comment id, or a reply id in its thread. */
+    targetId: v.string(),
+    emoji: v.string(),
+    authorKeyHash: v.string(),
+  })
+    .index("by_comment", ["commentId"])
+    .index("by_target_author_emoji", ["targetId", "authorKeyHash", "emoji"])
+    .index("by_project", ["projectId"]),
 
   /** Open comment count per page, so the widget can list other pages. */
   pageStats: defineTable({

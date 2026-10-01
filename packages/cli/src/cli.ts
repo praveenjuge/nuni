@@ -16,6 +16,7 @@ import {
   listComments,
   login,
   logout,
+  reply,
   setStatus,
   showComment,
   whoami,
@@ -39,7 +40,8 @@ Usage
   npx @nuniapp/cli@latest login              sign in to this project's comments
   npx @nuniapp/cli@latest comments [--status open|resolved] [--page /path] [--limit 20]
   npx @nuniapp/cli@latest comment <id> [--save-screenshot <dir>]
-  npx @nuniapp/cli@latest resolve <id>
+  npx @nuniapp/cli@latest reply <id> "message"
+  npx @nuniapp/cli@latest resolve <id> [--note "what changed"]
   npx @nuniapp/cli@latest reopen <id>
   npx @nuniapp/cli@latest whoami | logout
   npx @nuniapp/cli@latest mcp                MCP server for coding agents (stdio)
@@ -51,7 +53,8 @@ Commands
   login     Approve this terminal in the Nuni dashboard (works over SSH too)
   comments  List comments, newest first
   comment   One comment with the element, DOM, styles, console and screenshot
-  resolve   Mark a comment resolved; reopen does the opposite
+  reply     Reply in a comment's thread, as the owner
+  resolve   Mark a comment resolved (with an optional note); reopen does the opposite
   mcp       Run the MCP server: claude mcp add nuni -- npx -y @nuniapp/cli@latest mcp
 
 The project comes from --project, $NUNI_PROJECT, or the nuni_ ID in your code.
@@ -70,6 +73,7 @@ const OPTIONS = {
   page: { type: "string" },
   limit: { type: "string" },
   "save-screenshot": { type: "string" },
+  note: { type: "string" },
   json: { type: "boolean", default: false },
   help: { type: "boolean", short: "h", default: false },
   version: { type: "boolean", short: "v", default: false },
@@ -81,6 +85,7 @@ const ACCOUNT_COMMANDS = new Set([
   "whoami",
   "comments",
   "comment",
+  "reply",
   "resolve",
   "reopen",
   "mcp",
@@ -109,7 +114,7 @@ export async function run(
   const command = positionals[0] ?? "init"
 
   if (ACCOUNT_COMMANDS.has(command) && !values.help) {
-    return runAccountCommand(command, positionals[1], values, options)
+    return runAccountCommand(command, positionals, values, options)
   }
 
   if (values.version) {
@@ -200,10 +205,11 @@ type Values = ReturnType<typeof parse>["values"]
 
 async function runAccountCommand(
   command: string,
-  arg: string | undefined,
+  positionals: string[],
   values: Values,
   options: RunOptions
 ): Promise<number> {
+  const arg = positionals[1]
   const ctx: CommandContext = {
     remote: options.remote ?? createRemote(),
     version: VERSION,
@@ -229,8 +235,10 @@ async function runAccountCommand(
         return await showComment(ctx, arg, {
           saveScreenshot: values["save-screenshot"],
         })
+      case "reply":
+        return await reply(ctx, arg, positionals[2])
       case "resolve":
-        return await setStatus(ctx, arg, "resolved")
+        return await setStatus(ctx, arg, "resolved", values.note)
       case "reopen":
         return await setStatus(ctx, arg, "open")
       default: {
