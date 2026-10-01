@@ -6,6 +6,10 @@ export const LIMITS = {
   sessionTtlMs: 30 * 24 * 60 * 60 * 1000,
   /** CLI and MCP sessions, created by `nuni login`. */
   cliSessionTtlMs: 90 * 24 * 60 * 60 * 1000,
+  /** How long a project transfer link works. */
+  transferTtlMs: 7 * 24 * 60 * 60 * 1000,
+  /** Comments changed at once from the dashboard. */
+  bulkMax: 100,
   /** How long a `nuni login` code waits for approval in the dashboard. */
   cliLoginTtlMs: 10 * 60 * 1000,
   anchorTextMaxLength: 120,

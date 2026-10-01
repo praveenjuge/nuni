@@ -26,6 +26,8 @@ export default defineSchema({
     commentCount: v.number(),
     openCount: v.number(),
     lastActivityAt: v.number(),
+    /** Set while the owner's delete runs; the project takes no new comments. */
+    deletingAt: v.optional(v.number()),
   })
     .index("by_publicId", ["publicId"])
     .index("by_owner", ["ownerId", "lastActivityAt"]),
@@ -143,6 +145,20 @@ export default defineSchema({
   })
     .index("by_secretHash", ["secretHash"])
     .index("by_userCode", ["userCode"])
+    .index("by_expires", ["expiresAt"]),
+
+  /**
+   * A link the owner made to hand the project to someone else. Only the
+   * token's hash is stored; the link is shown once.
+   */
+  transfers: defineTable({
+    projectId: v.id("projects"),
+    fromUserId: v.id("users"),
+    tokenHash: v.string(),
+    expiresAt: v.number(),
+  })
+    .index("by_tokenHash", ["tokenHash"])
+    .index("by_project", ["projectId"])
     .index("by_expires", ["expiresAt"]),
 
   claims: defineTable({

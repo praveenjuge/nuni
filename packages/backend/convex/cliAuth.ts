@@ -165,7 +165,7 @@ export const approve = mutation({
       fail("expired", "This code has expired. Run nuni login again.")
     }
     const project = await projectByPublicId(ctx, login.publicId)
-    if (!project) fail("not_found", "Project not found")
+    if (!project || project.deletingAt) fail("not_found", "Project not found")
     if (!project.ownerId) await claimFor(ctx, project, user._id)
     else if (project.ownerId !== user._id) {
       fail("forbidden", "Only the project owner can sign in to it")

@@ -28,6 +28,7 @@ import {
   parseOrigin,
   projectByPublicId,
   requireOwner,
+  requireUser,
   sha256Hex,
   currentUser,
 } from "./lib"
@@ -406,6 +407,101 @@ export const remove = mutation({
     if (!comment) return
     await requireOwner(ctx, comment.projectId, widget)
     await removeComment(ctx, comment)
+  },
+})
+
+const bulkArgs = { ids: v.array(v.id("comments")) }
+
+/**
+ * Comments picked in the dashboard: all in one project the signed-in user
+ * owns. Missing ids (deleted meanwhile) are skipped.
+ */
+async function loadBulk(ctx: MutationCtx, ids: Id<"comments">[]) {
+  if (ids.length > LIMITS.bulkMax) {
+    fail("too_many", `Pick up to ${LIMITS.bulkMax} comments at a time`)
+  }
+  const user = await requireUser(ctx)
+  const comments = (
+    await Promise.all([...new Set(ids)].map((id) => ctx.db.get(id)))
+  ).filter((c): c is Doc<"comments"> => c !== null)
+  const projectIds = new Set(comments.map((c) => c.projectId))
+  if (projectIds.size > 1) fail("invalid", "Comments from several projects")
+  const projectId = comments[0]?.projectId
+  const project = projectId ? await ctx.db.get(projectId) : null
+  if (comments.length && project?.ownerId !== user._id) {
+    fail("forbidden", "Only the project owner can do this")
+  }
+  if (project?.deletingAt) fail("not_found", "Project not found")
+  return { user, project, comments }
+}
+
+/** Open-comment counts per page, applied once for a whole batch. */
+async function applyPageDeltas(
+  ctx: MutationCtx,
+  projectId: Id<"projects">,
+  deltas: Map<string, number>
+) {
+  for (const [path, delta] of deltas) {
+    if (delta) await bumpPageOpen(ctx, projectId, path, delta)
+  }
+}
+
+export const bulkSetStatus = mutation({
+  args: { ...bulkArgs, status: statusValidator },
+  handler: async (ctx, { ids, status }) => {
+    const { user, project, comments } = await loadBulk(ctx, ids)
+    if (!project) return 0
+    const now = Date.now()
+    const deltas = new Map<string, number>()
+    let changed = 0
+    for (const comment of comments) {
+      if (comment.status === status) continue
+      changed++
+      const path = comment.page.path
+      deltas.set(path, (deltas.get(path) ?? 0) + (status === "open" ? 1 : -1))
+      await ctx.db.patch(comment._id, {
+        status,
+        resolvedAt: status === "resolved" ? now : undefined,
+        resolvedBy: status === "resolved" ? user._id : undefined,
+      })
+    }
+    if (!changed) return 0
+    await applyPageDeltas(ctx, project._id, deltas)
+    await ctx.db.patch(project._id, {
+      openCount: Math.max(
+        0,
+        project.openCount + (status === "open" ? changed : -changed)
+      ),
+      lastActivityAt: now,
+    })
+    return changed
+  },
+})
+
+export const bulkRemove = mutation({
+  args: bulkArgs,
+  handler: async (ctx, { ids }) => {
+    const { project, comments } = await loadBulk(ctx, ids)
+    if (!project) return 0
+    const deltas = new Map<string, number>()
+    let open = 0
+    for (const comment of comments) {
+      await deleteThread(ctx, comment._id)
+      await ctx.db.delete(comment._id)
+      if (comment.screenshotId) await ctx.storage.delete(comment.screenshotId)
+      if (comment.status === "open") {
+        open++
+        const path = comment.page.path
+        deltas.set(path, (deltas.get(path) ?? 0) - 1)
+      }
+    }
+    await applyPageDeltas(ctx, project._id, deltas)
+    await ctx.db.patch(project._id, {
+      commentCount: Math.max(0, project.commentCount - comments.length),
+      openCount: Math.max(0, project.openCount - open),
+      lastActivityAt: Date.now(),
+    })
+    return comments.length
   },
 })
 

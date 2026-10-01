@@ -109,6 +109,9 @@ export async function ensureProject(
 ): Promise<Doc<"projects">> {
   assertProjectId(publicId)
   const existing = await projectByPublicId(ctx, publicId)
+  if (existing?.deletingAt) {
+    fail("deleting", "This project is being deleted")
+  }
   if (existing) {
     if (
       !existing.origins.includes(origin) &&
@@ -219,4 +222,35 @@ export async function actingOwner(
   const user = await currentUser(ctx)
   if (user && project.ownerId === user._id) return user._id
   return null
+}
+
+/**
+ * The signed-in dashboard user, who must own the project. Management
+ * (transfer, release, delete, sessions) is never allowed with a widget or
+ * CLI session token.
+ */
+export async function requireDashboardOwner(
+  ctx: Ctx,
+  projectId: Id<"projects">
+): Promise<{ user: Doc<"users">; project: Doc<"projects"> }> {
+  const user = await requireUser(ctx)
+  const project = await ctx.db.get(projectId)
+  if (!project || project.deletingAt) fail("not_found", "Project not found")
+  if (project.ownerId !== user._id) {
+    fail("forbidden", "Only the project owner can do this")
+  }
+  return { user, project }
+}
+
+/** Sign out every widget and CLI session of a project. */
+export async function revokeSessions(
+  ctx: MutationCtx,
+  projectId: Id<"projects">
+): Promise<number> {
+  const sessions = await ctx.db
+    .query("widgetSessions")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .collect()
+  for (const session of sessions) await ctx.db.delete(session._id)
+  return sessions.length
 }

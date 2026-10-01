@@ -20,6 +20,7 @@ import type * as reactions from "../reactions.js";
 import type * as replies from "../replies.js";
 import type * as sessions from "../sessions.js";
 import type * as testing from "../testing.js";
+import type * as transfers from "../transfers.js";
 import type * as users from "../users.js";
 import type * as validators from "../validators.js";
 
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   replies: typeof replies;
   sessions: typeof sessions;
   testing: typeof testing;
+  transfers: typeof transfers;
   users: typeof users;
   validators: typeof validators;
 }>;

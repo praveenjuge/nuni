@@ -16,4 +16,10 @@ crons.daily(
   internal.cliAuth.cleanupExpired
 )
 
+crons.daily(
+  "delete expired transfer links",
+  { hourUTC: 3, minuteUTC: 41 },
+  internal.transfers.cleanupExpired
+)
+
 export default crons
