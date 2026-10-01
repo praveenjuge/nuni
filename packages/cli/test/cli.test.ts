@@ -106,14 +106,14 @@ describe("snippets", () => {
 describe("run", () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it("prints json for agents", () => {
+  it("prints json for agents", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
     const dir = project({
       "package.json": pkg({ next: "16" }),
       "app/layout.tsx": "",
       "bun.lock": "",
     })
-    expect(run(["init", "--json", "--cwd", dir])).toBe(0)
+    expect(await run(["init", "--json", "--cwd", dir])).toBe(0)
     const out = JSON.parse(log.mock.calls[0]![0] as string)
     expect(out).toMatchObject({
       frameworkId: "next-app",
@@ -124,18 +124,18 @@ describe("run", () => {
     expect(out.snippet).toContain(out.projectId)
   })
 
-  it("reuses a given id and rejects invalid ones", () => {
+  it("reuses a given id and rejects invalid ones", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
     const err = vi.spyOn(console, "error").mockImplementation(() => {})
-    expect(run(["prompt", "--id", "nuni_JJHAES8DaHHYNVh4JoWWXw"])).toBe(0)
+    expect(await run(["prompt", "--id", "nuni_JJHAES8DaHHYNVh4JoWWXw"])).toBe(0)
     expect(log.mock.calls[0]![0]).toContain("nuni_JJHAES8DaHHYNVh4JoWWXw")
-    expect(run(["init", "--id", "bad"])).toBe(1)
+    expect(await run(["init", "--id", "bad"])).toBe(1)
     expect(err).toHaveBeenCalled()
   })
 
-  it("prints a fresh id", () => {
+  it("prints a fresh id", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
-    expect(run(["id"])).toBe(0)
+    expect(await run(["id"])).toBe(0)
     expect(log.mock.calls[0]![0]).toMatch(/^nuni_[1-9A-HJ-NP-Za-km-z]{22}$/)
   })
 })

@@ -1,4 +1,7 @@
+import { MASK_SELECTOR } from "@nuni/shared"
+
 import { attributeAllowed, type AnchorOptions } from "./options"
+import { isShadowRoot, scopeRootOf, type ScopeRoot } from "./scope"
 import { isStableId, stableClasses, TEST_ID_ATTRIBUTES } from "./stable"
 
 export function cssEscape(value: string): string {
@@ -44,7 +47,8 @@ export function nthOfType(el: Element): number {
 }
 
 function countOfType(el: Element): number {
-  const parent = el.parentElement
+  // parentNode, so top-level elements of a shadow root count their siblings.
+  const parent = el.parentNode as ParentNode | null
   if (!parent) return 1
   let count = 0
   for (const child of Array.from(parent.children)) {
@@ -61,22 +65,24 @@ function queryCount(root: ParentNode, selector: string): number {
   }
 }
 
-function isUniqueId(doc: Document, id: string): boolean {
-  return queryCount(doc, `#${cssEscape(id)}`) === 1
+function isUniqueId(root: ScopeRoot, id: string): boolean {
+  return queryCount(root, `#${cssEscape(id)}`) === 1
 }
 
 /**
  * Structural path: nth-of-type chain from the nearest ancestor with a
  * stable unique id (or from <html>). Always resolvable when the DOM is
- * unchanged; the last-resort selector.
+ * unchanged; the last-resort selector. Inside a shadow root it starts at
+ * the root's top-level element instead of <html>.
  */
 export function buildPath(el: Element): string {
+  const root = scopeRootOf(el)
   const doc = el.ownerDocument
   const parts: string[] = []
   let node: Element | null = el
   while (node && node !== doc.documentElement) {
     const id = stableIdOf(node)
-    if (id && node !== el && isUniqueId(doc, id)) {
+    if (id && node !== el && isUniqueId(root, id)) {
       parts.unshift(`#${cssEscape(id)}`)
       return parts.join(" > ")
     }
@@ -86,7 +92,30 @@ export function buildPath(el: Element): string {
     )
     node = node.parentElement
   }
+  if (isShadowRoot(root)) return parts.join(" > ")
   return parts.length ? `html > ${parts.join(" > ")}` : "html"
+}
+
+/**
+ * The element a path points to in a scope. Shadow paths are matched from
+ * the root's top-level elements, like document paths are from <html>.
+ */
+export function queryPath(root: ScopeRoot, path: string): Element | null {
+  let matches: Element[]
+  try {
+    matches = Array.from(root.querySelectorAll(path)).slice(0, 50)
+  } catch {
+    return null
+  }
+  if (!isShadowRoot(root) || path.startsWith("#")) return matches[0] ?? null
+  const depth = path.split(" > ").length
+  return (
+    matches.find((el) => {
+      let node: Element | null = el
+      for (let i = 1; i < depth && node; i++) node = node.parentElement
+      return node?.parentNode === root
+    }) ?? null
+  )
 }
 
 function describeSegment(el: Element, options: AnchorOptions): string {
@@ -105,8 +134,10 @@ function describeSegment(el: Element, options: AnchorOptions): string {
       segment += attrSelector(name, value)
     }
   }
+  // Selectors are public; a label in a masked area can be as private as its text.
   const label = el.getAttribute("aria-label")
-  if (label && label.length <= 60) segment += attrSelector("aria-label", label)
+  if (label && label.length <= 60 && !el.closest(MASK_SELECTOR))
+    segment += attrSelector("aria-label", label)
   return segment
 }
 
@@ -120,8 +151,9 @@ export function buildCssSelector(
   options: AnchorOptions = {}
 ): string | undefined {
   const doc = el.ownerDocument
+  const root = scopeRootOf(el)
   const id = stableIdOf(el)
-  if (id && isUniqueId(doc, id)) return `#${cssEscape(id)}`
+  if (id && isUniqueId(root, id)) return `#${cssEscape(id)}`
 
   const segments: string[] = []
   let node: Element | null = el
@@ -131,26 +163,26 @@ export function buildCssSelector(
       break
     }
     const nodeId = stableIdOf(node)
-    if (depth > 0 && nodeId && isUniqueId(doc, nodeId)) {
+    if (depth > 0 && nodeId && isUniqueId(root, nodeId)) {
       segments.unshift(`#${cssEscape(nodeId)}`)
       const selector = segments.join(" > ")
-      if (queryCount(doc, selector) === 1) return selector
+      if (queryCount(root, selector) === 1) return selector
       break
     }
 
     segments.unshift(describeSegment(node, options))
     let selector = segments.join(" > ")
-    if (queryCount(doc, selector) === 1) return selector
+    if (queryCount(root, selector) === 1) return selector
 
     // Disambiguate this level among siblings.
     const parent = node.parentElement
     if (parent && queryCount(parent, `:scope > ${segments[0]}`) > 1) {
       segments[0] = `${segments[0]}:nth-of-type(${nthOfType(node)})`
       selector = segments.join(" > ")
-      if (queryCount(doc, selector) === 1) return selector
+      if (queryCount(root, selector) === 1) return selector
     }
     node = node.parentElement
   }
   const selector = segments.join(" > ")
-  return queryCount(doc, selector) === 1 ? selector : undefined
+  return queryCount(root, selector) === 1 ? selector : undefined
 }

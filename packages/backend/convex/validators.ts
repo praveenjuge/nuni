@@ -7,7 +7,7 @@ export const rectValidator = v.object({
   h: v.number(),
 })
 
-export const anchorValidator = v.object({
+const anchorFields = {
   v: v.literal(1),
   selectors: v.object({
     id: v.optional(v.string()),
@@ -41,6 +41,23 @@ export const anchorValidator = v.object({
     scrollY: v.number(),
   }),
   docSize: v.object({ w: v.number(), h: v.number() }),
+}
+
+export const anchorValidator = v.object({
+  ...anchorFields,
+  quote: v.optional(
+    v.object({ exact: v.string(), prefix: v.string(), suffix: v.string() })
+  ),
+  region: v.optional(rectValidator),
+  /** Shadow hosts and iframes on the way to the element, outermost first. */
+  scope: v.optional(
+    v.array(
+      v.object({
+        kind: v.union(v.literal("shadow"), v.literal("frame")),
+        host: v.object(anchorFields),
+      })
+    )
+  ),
 })
 
 export const pageValidator = v.object({
@@ -56,6 +73,31 @@ export const viewportValidator = v.object({
   w: v.number(),
   h: v.number(),
   dpr: v.number(),
+})
+
+export const contextValidator = v.object({
+  console: v.optional(
+    v.array(
+      v.object({
+        level: v.union(v.literal("error"), v.literal("warn")),
+        message: v.string(),
+        at: v.number(),
+      })
+    )
+  ),
+  network: v.optional(
+    v.array(
+      v.object({
+        method: v.string(),
+        url: v.string(),
+        status: v.number(),
+        at: v.number(),
+      })
+    )
+  ),
+  dom: v.optional(
+    v.object({ html: v.string(), styles: v.record(v.string(), v.string()) })
+  ),
 })
 
 export const statusValidator = v.union(v.literal("open"), v.literal("resolved"))

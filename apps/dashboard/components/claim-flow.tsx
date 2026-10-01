@@ -170,7 +170,8 @@ export function ClaimFlow({
             </CardTitle>
             <CardDescription>
               {host} is managed by {view.ownerName}. Ask them to resolve
-              comments, or contact support if this is your site.
+              comments, or to transfer the project to you from its settings if
+              this is your site.
             </CardDescription>
           </CardHeader>
         )}

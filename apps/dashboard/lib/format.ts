@@ -38,15 +38,48 @@ export function initials(name: string): string {
 }
 
 /** URL that opens the page with the comment focused by the widget. */
-export function jumpUrl(
-  page: { origin: string; path: string; search: string },
-  id: string
-): string {
-  const [pathname, hashRoute] = page.path.split("#")
-  const url = new URL(pathname ?? "/", page.origin)
-  const params = new URLSearchParams(page.search)
-  params.set("nuni", id)
-  url.search = params.toString()
-  if (hashRoute) url.hash = hashRoute
-  return url.toString()
+export { commentUrl as jumpUrl } from "@nuni/shared"
+
+/** The message a Convex error carries, for showing to the person. */
+export function errorMessage(error: unknown): string {
+  const data = (error as { data?: { message?: string } })?.data
+  return (
+    data?.message ??
+    (error instanceof Error ? error.message : "Please try again.")
+  )
+}
+
+/** "in 6 days", "in 3 hours": time left until `ts`. */
+export function timeLeft(ts: number, now = Date.now()): string {
+  const h = Math.max(0, Math.round((ts - now) / 3_600_000))
+  if (h < 1) return "in less than an hour"
+  if (h < 48) return `in ${h} hour${h === 1 ? "" : "s"}`
+  return `in ${Math.round(h / 24)} days`
+}
+
+/** A short "Chrome on macOS" from a user agent string. */
+export function describeAgent(ua: string | undefined): string {
+  if (!ua) return "Unknown device"
+  if (ua.startsWith("nuni-cli") || /node|bun/i.test(ua)) return ua.slice(0, 60)
+  const browser = /Edg\//.test(ua)
+    ? "Edge"
+    : /Firefox\//.test(ua)
+      ? "Firefox"
+      : /Chrome\//.test(ua)
+        ? "Chrome"
+        : /Safari\//.test(ua)
+          ? "Safari"
+          : "Browser"
+  const os = /iPhone|iPad/.test(ua)
+    ? "iOS"
+    : /Android/.test(ua)
+      ? "Android"
+      : /Mac OS X/.test(ua)
+        ? "macOS"
+        : /Windows/.test(ua)
+          ? "Windows"
+          : /Linux/.test(ua)
+            ? "Linux"
+            : ""
+  return os ? `${browser} on ${os}` : browser
 }
