@@ -4,6 +4,7 @@ import { v } from "convex/values"
 import { mutation, query } from "./_generated/server"
 import {
   assertProjectId,
+  claimFor,
   ensureProject,
   fail,
   parseOrigin,
@@ -83,16 +84,7 @@ export const claim = mutation({
       }
     }
 
-    await ctx.db.patch(project._id, {
-      ownerId: user._id,
-      claimedAt: Date.now(),
-      lastActivityAt: Date.now(),
-    })
-    await ctx.db.insert("claims", {
-      projectId: project._id,
-      userId: user._id,
-      origin: cleanOrigin,
-    })
+    await claimFor(ctx, project, user._id, cleanOrigin)
     return { status: "claimed" as const, projectId: project._id }
   },
 })

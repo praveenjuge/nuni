@@ -433,6 +433,45 @@ export const listForOwner = query({
   },
 })
 
+/**
+ * The CLI and MCP server (`nuni login` session token): owner comments,
+ * newest first, with the full context. Throws when the token is not an
+ * owner session for this project, so the agent can tell the person to log in.
+ */
+export const listForAgent = query({
+  args: {
+    publicId: v.string(),
+    sessionToken: v.string(),
+    status: v.optional(statusValidator),
+    path: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const project = await projectByPublicId(ctx, args.publicId)
+    if (
+      !project ||
+      !(await actingOwner(ctx, project, { sessionToken: args.sessionToken }))
+    ) {
+      fail("unauthenticated", "Not signed in to this project")
+    }
+    const status = args.status ?? "open"
+    const numItems = Math.min(50, Math.max(1, Math.trunc(args.limit ?? 20)))
+    const result = await ctx.db
+      .query("comments")
+      .withIndex("by_project_status", (q) =>
+        q.eq("projectId", project._id).eq("status", status)
+      )
+      .order("desc")
+      .filter((q) => (args.path ? q.eq(q.field("page.path"), args.path) : true))
+      .paginate({ numItems, cursor: args.cursor ?? null })
+    return {
+      comments: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
+      cursor: result.isDone ? null : result.continueCursor,
+    }
+  },
+})
+
 /** Filter choices for the dashboard: every page and environment seen. */
 export const ownerFilters = query({
   args: { publicId: v.string() },

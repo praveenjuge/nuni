@@ -96,6 +96,26 @@ async function readLimited(
   return bytes
 }
 
+/** A small JSON body, or a ready error response. */
+async function readJson(
+  request: Request,
+  max: number
+): Promise<Record<string, unknown> | Response> {
+  const raw = await request.text()
+  if (raw.length > max) {
+    return json(request, 413, { code: "too_large", message: "Too large" })
+  }
+  try {
+    const value: unknown = JSON.parse(raw)
+    if (value && typeof value === "object") {
+      return value as Record<string, unknown>
+    }
+  } catch {
+    // Falls through to the error below.
+  }
+  return json(request, 400, { code: "bad_json", message: "Invalid JSON" })
+}
+
 /** The real image type from the file's first bytes, whatever the header says. */
 function sniffImage(bytes: Uint8Array): string | null {
   const at = (i: number, ...values: number[]) =>
@@ -120,17 +140,8 @@ http.route({
   path: "/widget/comments",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
-    const raw = await request.text()
-    if (raw.length > 64_000) {
-      return json(request, 413, { code: "too_large", message: "Too large" })
-    }
-    let payload: Record<string, unknown>
-    try {
-      payload = JSON.parse(raw)
-    } catch {
-      return json(request, 400, { code: "bad_json", message: "Invalid JSON" })
-    }
-
+    const payload = await readJson(request, 64_000)
+    if (payload instanceof Response) return payload
     const ip = clientIp(request)
 
     try {
@@ -210,6 +221,47 @@ http.route({
       return json(request, 201, { ok: true })
     } catch (error) {
       return errorResponse(request, error, "Invalid screenshot")
+    }
+  }),
+})
+
+/** `nuni login`, step 1: see cliAuth.ts. */
+http.route({
+  path: "/cli/login/start",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const payload = await readJson(request, 2_000)
+    if (payload instanceof Response) return payload
+    try {
+      const login = await ctx.runMutation(internal.cliAuth.start, {
+        publicId: String(payload.publicId ?? ""),
+        client: String(payload.client ?? ""),
+        ip: clientIp(request),
+      })
+      return json(request, 201, login)
+    } catch (error) {
+      return errorResponse(request, error, "Invalid sign-in request")
+    }
+  }),
+})
+
+const POLL_STATUS = { pending: 202, approved: 200, denied: 403, expired: 410 }
+
+/** `nuni login`, step 3: the CLI waits for the owner to approve. */
+http.route({
+  path: "/cli/login/poll",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const payload = await readJson(request, 2_000)
+    if (payload instanceof Response) return payload
+    try {
+      const result = await ctx.runMutation(internal.cliAuth.poll, {
+        deviceSecret: String(payload.deviceSecret ?? ""),
+        ip: clientIp(request),
+      })
+      return json(request, POLL_STATUS[result.status], result)
+    } catch (error) {
+      return errorResponse(request, error, "Invalid sign-in request")
     }
   }),
 })

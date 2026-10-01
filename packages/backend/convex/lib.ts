@@ -109,6 +109,21 @@ export async function ensureProject(
   return (await ctx.db.get(id))!
 }
 
+/** Make the user the owner of an unclaimed project, and record the claim. */
+export async function claimFor(
+  ctx: MutationCtx,
+  project: Doc<"projects">,
+  userId: Id<"users">,
+  origin?: string
+) {
+  await ctx.db.patch(project._id, {
+    ownerId: userId,
+    claimedAt: Date.now(),
+    lastActivityAt: Date.now(),
+  })
+  await ctx.db.insert("claims", { projectId: project._id, userId, origin })
+}
+
 /** The signed-in dashboard user (WorkOS JWT), if any. */
 export async function currentUser(ctx: Ctx): Promise<Doc<"users"> | null> {
   const identity = await ctx.auth.getUserIdentity()

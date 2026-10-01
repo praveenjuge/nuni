@@ -83,6 +83,7 @@ export const listMine = query({
       .map((s) => ({
         _id: s._id,
         _creationTime: s._creationTime,
+        kind: s.kind ?? "widget",
         origin: s.origin,
         userAgent: s.userAgent,
         expiresAt: s.expiresAt,

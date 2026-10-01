@@ -1,3 +1,5 @@
 import { run } from "./cli"
 
-process.exitCode = run(process.argv.slice(2))
+void run(process.argv.slice(2)).then((code) => {
+  process.exitCode = code
+})

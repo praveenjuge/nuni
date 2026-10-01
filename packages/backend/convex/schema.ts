@@ -77,6 +77,8 @@ export default defineSchema({
     tokenHash: v.string(),
     userId: v.id("users"),
     projectId: v.id("projects"),
+    /** "cli" for `nuni login` (CLI and MCP), otherwise the widget. */
+    kind: v.optional(v.union(v.literal("widget"), v.literal("cli"))),
     origin: v.string(),
     userAgent: v.optional(v.string()),
     expiresAt: v.number(),
@@ -85,6 +87,30 @@ export default defineSchema({
     .index("by_tokenHash", ["tokenHash"])
     .index("by_project", ["projectId"])
     .index("by_user", ["userId"])
+    .index("by_expires", ["expiresAt"]),
+
+  /**
+   * A `nuni login` waiting for the owner to approve it in the dashboard. The
+   * CLI holds the device secret (only its hash is stored) and polls with it;
+   * the person compares the user code. Deleted once the CLI collects its
+   * session, or when it expires.
+   */
+  cliLogins: defineTable({
+    secretHash: v.string(),
+    userCode: v.string(),
+    publicId: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("denied")
+    ),
+    userId: v.optional(v.id("users")),
+    /** What the CLI says it is, shown on the approval page. */
+    client: v.string(),
+    expiresAt: v.number(),
+  })
+    .index("by_secretHash", ["secretHash"])
+    .index("by_userCode", ["userCode"])
     .index("by_expires", ["expiresAt"]),
 
   claims: defineTable({

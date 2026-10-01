@@ -10,4 +10,10 @@ crons.daily(
   internal.sessions.cleanupExpired
 )
 
+crons.daily(
+  "delete unfinished CLI logins",
+  { hourUTC: 3, minuteUTC: 29 },
+  internal.cliAuth.cleanupExpired
+)
+
 export default crons

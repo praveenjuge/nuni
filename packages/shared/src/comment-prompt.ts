@@ -1,4 +1,5 @@
 import { commentUrl } from "./path"
+import { PACKAGES } from "./prompt"
 import type { OwnerComment } from "./types"
 
 export interface CommentPromptOptions {
@@ -124,7 +125,8 @@ export function buildCommentPrompt(
     "",
     "1. Find the code that renders this element. Search for the text, the component name, the test ID or the selector.",
     "2. Make the change the comment asks for, and keep the fix focused on it.",
-    "3. Tell me what you changed, so the comment can be resolved in Nuni."
+    "3. Tell me what you changed, so the comment can be resolved in Nuni.",
+    `   If the Nuni CLI is signed in to this project (\`npx ${PACKAGES.cli}@latest login\`), resolve it with \`npx ${PACKAGES.cli}@latest resolve ${comment._id}\` or the \`resolve_comment\` MCP tool.`
   )
   return out.join("\n")
 }
