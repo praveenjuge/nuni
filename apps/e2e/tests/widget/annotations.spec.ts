@@ -78,6 +78,7 @@ async function expectBox(
     .toBe(true)
 }
 
+/** Submit the annotation composer and wait for persisted-comment confirmation. */
 async function post(page: Page, body: string, name?: string) {
   if (name) await composer(page).getByPlaceholder("Your name").fill(name)
   await composer(page).getByPlaceholder("Leave a comment").fill(body)
@@ -85,6 +86,7 @@ async function post(page: Page, body: string, name?: string) {
   await expect(root(page).locator(".toast")).toHaveText("Comment added")
 }
 
+/** Compare every rectangle edge within the pixel tolerance used for moving overlays. */
 function near(a: Box, b: Box, slack = 4) {
   return (
     Math.abs(a.x - b.x) <= slack &&

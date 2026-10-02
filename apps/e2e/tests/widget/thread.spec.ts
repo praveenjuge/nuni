@@ -3,6 +3,7 @@ import { generateProjectId as projectId } from "@nuni/shared"
 
 import { expect, test, type Page } from "@playwright/test"
 
+/** Seed widget credentials for legacy thread regressions; product flows use real sign-in. */
 function seedOwner(publicId: string): string {
   return convexRun<{ token: string }>("testing:seedOwner", {
     publicId,
@@ -13,6 +14,7 @@ function seedOwner(publicId: string): string {
 
 const thread = (page: Page) => page.locator('#nuni-root [data-card="thread"]')
 
+/** Open a comment from the widget panel and verify its body before interacting. */
 async function openThread(page: Page, body: string) {
   await page
     .locator("#nuni-root .toolbar")
@@ -22,6 +24,7 @@ async function openThread(page: Page, body: string) {
   await expect(thread(page)).toContainText(body)
 }
 
+/** Submit a reply through the visible thread form, optionally setting a visitor name. */
 async function sendReply(page: Page, body: string, name?: string) {
   const form = thread(page).locator(".reply-form")
   if (name) await form.getByPlaceholder("Your name").fill(name)

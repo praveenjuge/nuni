@@ -5,6 +5,7 @@ import { generateProjectId } from "@nuni/shared"
 import { test as base, expect, type Page } from "@playwright/test"
 
 export const backendDir = fileURLToPath(new URL("./.runtime", import.meta.url))
+/** Run a function against this suite’s isolated backend; void mutations return undefined. */
 export function convexRun<T = unknown>(
   fn: string,
   args: Record<string, unknown> = {}

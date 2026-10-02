@@ -13,6 +13,7 @@ const execute = promisify(execFile)
 const root = fileURLToPath(new URL("../../../../", import.meta.url))
 const entry = resolve(root, "packages/cli/dist/index.mjs")
 
+/** Create isolated CLI credentials and a working directory under the test artifact directory. */
 export function cliSession(testInfo: TestInfo, project?: string) {
   const cwd = testInfo.outputPath("cli-project")
   mkdirSync(cwd, { recursive: true })
@@ -25,6 +26,7 @@ export function cliSession(testInfo: TestInfo, project?: string) {
     NUNI_CONVEX_URL: "http://127.0.0.1:3210",
     NUNI_CONVEX_SITE_URL: "http://127.0.0.1:3211",
   }
+  /** Execute the built CLI against local services, returning stdout or rejecting on failure. */
   const run = async (...args: string[]) => {
     const result = await execute("bun", [entry, ...args], {
       cwd,
@@ -34,6 +36,7 @@ export function cliSession(testInfo: TestInfo, project?: string) {
     return result.stdout
   }
 
+  /** Approve the real CLI device flow in the owner’s browser and stop its process on failure. */
   async function login(page: Page) {
     const child = spawn("bun", [entry, "login", "--json"], { cwd, env })
     const lines = createInterface({ input: child.stdout })
@@ -70,6 +73,7 @@ export function cliSession(testInfo: TestInfo, project?: string) {
     }
   }
 
+  /** Connect a real stdio MCP client; the caller must close the client after use. */
   async function mcp() {
     const client = new Client({ name: "nuni-e2e", version: "1.0.0" })
     const transport = new StdioClientTransport({
@@ -89,6 +93,7 @@ export function cliSession(testInfo: TestInfo, project?: string) {
   return { run, login, mcp, env }
 }
 
+/** Find a posted comment through the public CLI and fail if it is absent. */
 export async function commentId(
   session: ReturnType<typeof cliSession>,
   body: string

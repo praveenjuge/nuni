@@ -6,6 +6,7 @@ const commentButton = (page: Page) =>
   toolbar(page).getByRole("button", { name: "Add a comment" })
 const pins = (page: Page) => page.locator("#nuni-root .pin:not(.pin-draft)")
 
+/** Place feedback on a page target and verify the widget confirms submission. */
 async function addComment(
   page: Page,
   target: ReturnType<Page["locator"]>,

@@ -3,6 +3,7 @@ import { generateProjectId as projectId } from "@nuni/shared"
 
 import { expect, test, type Page } from "@playwright/test"
 
+/** Seed widget credentials for legacy context regressions; product flows use real sign-in. */
 function seedOwner(publicId: string): string {
   return convexRun<{ token: string }>("testing:seedOwner", {
     publicId,
@@ -14,6 +15,7 @@ const thread = (page: Page) => page.locator('#nuni-root [data-card="thread"]')
 const readClipboard = (page: Page) =>
   page.evaluate(() => navigator.clipboard.readText())
 
+/** Open a comment from the widget panel and verify its body before inspecting context. */
 async function openThread(page: Page, body: string) {
   await page
     .locator("#nuni-root .toolbar")

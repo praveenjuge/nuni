@@ -46,6 +46,7 @@ const env = {
   CONVEX_SELF_HOSTED_URL: "",
   CONVEX_SELF_HOSTED_ADMIN_KEY: "",
 }
+/** Run Convex in the isolated runtime; only initial provisioning may fail. */
 function run(args: string[], allowFailure = false) {
   const result = spawnSync("bunx", ["convex", ...args], {
     cwd: runtimeDir,

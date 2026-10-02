@@ -4,6 +4,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test"
 const toolbar = (page: Page) => page.locator("#nuni-root .toolbar")
 const pins = (page: Page) => page.locator("#nuni-root .pin:not(.pin-draft)")
 
+/** Post feedback after screenshot completion; iframe targets have no screenshot preview. */
 async function comment(
   page: Page,
   target: Locator,

@@ -12,6 +12,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "../../../..")
 const cliEntry = join(root, "packages/cli/src/index.ts")
 const SITE_URL = "http://127.0.0.1:3211"
 
+/** Create visitor feedback through the widget endpoint for CLI regression coverage. */
 async function postComment(publicId: string, body: string) {
   const origin = "http://127.0.0.1:5173"
   const res = await fetch(`${SITE_URL}/widget/comments`, {

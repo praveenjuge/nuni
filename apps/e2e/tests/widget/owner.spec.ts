@@ -5,6 +5,7 @@ import { expect, test, type Page } from "@playwright/test"
 
 const APP_URL = process.env.VITE_APP_URL ?? "http://localhost:3000"
 
+/** Seed widget credentials for legacy owner regressions; claim tests use real sign-in. */
 function seedOwner(publicId: string): string {
   return convexRun<{ token: string }>("testing:seedOwner", {
     publicId,
@@ -19,6 +20,7 @@ const openPanel = (page: Page) =>
     .getByRole("button", { name: /open/ })
     .click()
 
+/** Place visitor feedback on the first pricing plan and wait for confirmation. */
 async function postComment(page: Page, body: string) {
   await page
     .locator("#nuni-root .toolbar")

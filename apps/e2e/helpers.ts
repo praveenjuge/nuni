@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test"
 export const dashboardURL = "http://localhost:3000/dashboard"
+/** Authenticate a seeded emulator user, preserving a protected route’s return URL. */
 export async function signIn(page: Page, email = "owner@nuni.test") {
   if (!page.url().startsWith("http://localhost:4100/"))
     await page.goto(`${dashboardURL}/sign-in`)
@@ -11,6 +12,7 @@ export async function signIn(page: Page, email = "owner@nuni.test") {
   await page.getByRole("button", { name: /continue|sign in/i }).click()
   await expect(page).toHaveURL(new RegExp("^" + dashboardURL))
 }
+/** Claim a fresh project through the dashboard with the playground origin allowed. */
 export async function claimProject(page: Page, projectId: string) {
   await page.goto(
     `${dashboardURL}/claim?project=${projectId}&origin=${encodeURIComponent("http://127.0.0.1:5173")}`
@@ -18,6 +20,7 @@ export async function claimProject(page: Page, projectId: string) {
   await page.getByRole("button", { name: "Claim and allow" }).click()
   await expect(page.getByText("All set", { exact: false })).toBeVisible()
 }
+/** Post visitor feedback through the playground and wait for confirmation. */
 export async function addComment(page: Page, projectId: string, body: string) {
   await page.goto(`/pricing?project=${projectId}`)
   await page
