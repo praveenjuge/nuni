@@ -1,0 +1,5 @@
+{
+  "extends": "@nuni/tsconfig/library.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": ["**/*.ts"]
+}

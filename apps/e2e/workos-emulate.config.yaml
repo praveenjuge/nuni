@@ -1,0 +1,17 @@
+users:
+  - id: user_nuni_owner
+    email: owner@nuni.test
+    first_name: Olive
+    last_name: Owner
+    password: nuni-local-password
+    email_verified: true
+  - id: user_nuni_second_owner
+    email: second-owner@nuni.test
+    first_name: Sam
+    last_name: Owner
+    password: nuni-local-password
+    email_verified: true
+webhookEndpoints:
+  - endpoint_url: http://127.0.0.1:3211/workos/webhook
+    secret: whsec_nuni_local
+    events: [user.created, user.updated, user.deleted]

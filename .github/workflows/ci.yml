@@ -55,7 +55,7 @@ jobs:
           path: packages/anchor/bench-report.json
 
   e2e:
-    name: Widget end-to-end
+    name: Product end-to-end
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,28 +66,16 @@ jobs:
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
-      - run: bunx turbo run build --filter=@nuni/playground...
+      - run: bunx turbo run build --filter=@nuni/playground... --filter=@nuni/docs...
       - run: bunx playwright install --with-deps chromium
-        working-directory: apps/playground
-      - name: Start local Convex backend
-        working-directory: packages/backend
-        env:
-          CONVEX_AGENT_MODE: anonymous
-        # The first push creates the local deployment but fails until the
-        # WorkOS env vars exist, so set them and push again.
-        run: |
-          npx convex dev --once || true
-          npx convex env set WORKOS_CLIENT_ID client_ci_placeholder
-          npx convex env set WORKOS_API_KEY placeholder-api-key
-          npx convex env set WORKOS_WEBHOOK_SECRET ci_placeholder
-          npx convex env set NUNI_ALLOW_TESTING 1
-          npx convex dev --once
+        working-directory: apps/e2e
       - run: bun run e2e
-        working-directory: apps/playground
         env:
           CI: "1"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: playwright-report
-          path: apps/playground/test-results
+          path: |
+            apps/e2e/playwright-report
+            apps/e2e/test-results

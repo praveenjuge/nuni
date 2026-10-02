@@ -1,11 +1,5 @@
+import { generateProjectId as projectId } from "@nuni/shared"
 import { expect, test, type Page } from "@playwright/test"
-
-const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-function projectId() {
-  let id = "nuni_"
-  for (let i = 0; i < 22; i++) id += ALPHABET[Math.floor(Math.random() * 58)]
-  return id
-}
 
 const toolbar = (page: Page) => page.locator("#nuni-root .toolbar")
 const commentButton = (page: Page) =>

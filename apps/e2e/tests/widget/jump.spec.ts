@@ -1,8 +1,5 @@
+import { generateProjectId as projectId } from "@nuni/shared"
 import { expect, test } from "@playwright/test"
-
-const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-const projectId = () =>
-  `nuni_${Array.from({ length: 22 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("")}`
 
 for (const nested of [false, true]) {
   test(`comments jump to their exact pin in ${nested ? "a scroll container" : "the page"}`, async ({

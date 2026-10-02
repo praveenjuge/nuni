@@ -1,31 +1,16 @@
+import { convexRun } from "../../fixtures"
+import { generateProjectId as projectId } from "@nuni/shared"
 import { execFileSync, spawn } from "node:child_process"
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { createInterface } from "node:readline"
 import { fileURLToPath } from "node:url"
 
 import { expect, test } from "@playwright/test"
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "../../..")
-const backendDir = join(root, "packages/backend")
+const root = join(dirname(fileURLToPath(import.meta.url)), "../../../..")
 const cliEntry = join(root, "packages/cli/src/index.ts")
 const SITE_URL = "http://127.0.0.1:3211"
-const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-
-function projectId() {
-  let id = "nuni_"
-  for (let i = 0; i < 22; i++) id += ALPHABET[Math.floor(Math.random() * 58)]
-  return id
-}
-
-function convexRun(fn: string, args: Record<string, unknown>) {
-  return execFileSync("npx", ["convex", "run", fn, JSON.stringify(args)], {
-    cwd: backendDir,
-    env: { ...process.env, CONVEX_AGENT_MODE: "anonymous" },
-    encoding: "utf8",
-  })
-}
 
 async function postComment(publicId: string, body: string) {
   const origin = "http://127.0.0.1:5173"
@@ -66,7 +51,10 @@ async function postComment(publicId: string, body: string) {
   return ((await res.json()) as { id: string }).id
 }
 
-test("the CLI signs in, lists, shows and resolves comments", async () => {
+test("the CLI signs in, lists, shows and resolves comments", async ({
+  browserName,
+}, testInfo) => {
+  expect(browserName).toBe("chromium")
   const project = projectId()
   convexRun("testing:seedOwner", {
     publicId: project,
@@ -77,9 +65,14 @@ test("the CLI signs in, lists, shows and resolves comments", async () => {
   const id = await postComment(project, body)
   const env = {
     ...process.env,
-    NUNI_CONFIG_DIR: mkdtempSync(join(tmpdir(), "nuni-cli-e2e-")),
+    NUNI_CONFIG_DIR: testInfo.outputPath("cli-config"),
+    NUNI_TOKEN: "",
     NUNI_PROJECT: project,
+    NUNI_CONVEX_URL: "http://127.0.0.1:3210",
+    NUNI_CONVEX_SITE_URL: "http://127.0.0.1:3211",
+    NUNI_APP_URL: "http://localhost:3000",
   }
+  mkdirSync(env.NUNI_CONFIG_DIR, { recursive: true })
   const cli = (...args: string[]) =>
     execFileSync("bun", [cliEntry, ...args], { env, encoding: "utf8" })
 

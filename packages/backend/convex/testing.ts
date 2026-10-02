@@ -1,7 +1,7 @@
 import { LIMITS, randomBase58 } from "@nuni/shared"
 import { v } from "convex/values"
 
-import { internalMutation } from "./_generated/server"
+import { internalMutation, internalQuery } from "./_generated/server"
 import {
   ensureProject,
   fail,
@@ -64,5 +64,46 @@ export const approveCliLogin = internalMutation({
       status: "approved",
       userId: project.ownerId,
     })
+  },
+})
+
+/** Inspect webhook delivery without signing in (which would upsert the user). */
+export const authUser = internalQuery({
+  args: { workosId: v.string() },
+  handler: async (ctx, { workosId }) => {
+    if (process.env.NUNI_ALLOW_TESTING !== "1")
+      fail("forbidden", "Testing helpers are disabled")
+    return ctx.db
+      .query("users")
+      .withIndex("by_workosId", (q) => q.eq("workosId", workosId))
+      .unique()
+  },
+})
+
+/** Explicit local cleanup only; unique IDs are preferred for ordinary tests. */
+export const reset = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    if (process.env.NUNI_ALLOW_TESTING !== "1")
+      fail("forbidden", "Testing helpers are disabled")
+    const tables = [
+      "reactions",
+      "replies",
+      "comments",
+      "pageStats",
+      "widgetSessions",
+      "cliLogins",
+      "transfers",
+      "claims",
+      "projects",
+      "users",
+    ] as const
+    for (const table of tables) {
+      for (const row of await ctx.db.query(table).collect()) {
+        if (table === "comments" && "screenshotId" in row && row.screenshotId)
+          await ctx.storage.delete(row.screenshotId)
+        await ctx.db.delete(row._id)
+      }
+    }
   },
 })
