@@ -37,6 +37,8 @@ Reference the file in the body as `![alt](./settings-after.png)` to place it inl
 
 ## From CI
 
+Store an OAuth token or personal access token with repository write permission in the `PR_ATTACHMENT_TOKEN` repository secret. Attachments do not support the Actions installation token (`GITHUB_TOKEN`).
+
 Attach the screenshots and videos Playwright Test already saves under `test-results` (`screenshot: 'only-on-failure'`, `video: 'retain-on-failure'`) with the same command:
 
 ```yaml
@@ -47,7 +49,7 @@ steps:
   - name: Attach failure screenshots and videos to the PR
     if: failure() && github.event_name == 'pull_request'
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.PR_ATTACHMENT_TOKEN }}
     run: |
       files=$(find test-results -name '*.png' -o -name '*.webm' | head -20)
       if [ -n "$files" ]; then

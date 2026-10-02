@@ -101,8 +101,9 @@ It allows inserting appropriate pauses between the actions and annotating the vi
 
 **Important**: Overlays are `pointer-events: none` — they do not interfere with page interactions. You can safely keep sticky overlays visible while clicking, filling, or performing any actions on the page.
 
+<!-- prettier-ignore -->
 ```js
-;async (page) => {
+async (page) => {
   await page.screencast.start({
     path: "video.webm",
     size: { width: 1280, height: 800 },

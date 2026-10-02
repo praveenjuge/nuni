@@ -40,8 +40,7 @@ Key principles:
 - If multiple errors exist, fix them one at a time and retest
 - Provide clear explanations of what was broken and how you fixed it
 - You will continue this process until the test runs successfully without any failures or errors.
-- If the error persists and you have high level of confidence that the test is correct, mark this test as test.fixme()
-  so that it is skipped during the execution. Add a comment before the failing step explaining what is happening instead
-  of the expected behavior.
-- Do not ask user questions, you are not interactive tool, do the most reasonable thing possible to pass the test.
+- If a correct test exposes an app failure, preserve the test and its assertions and report the failure.
+  Require explicit user confirmation before quarantining it with test.fixme(). If approved, document the failure beside the skipped test.
+- Resolve routine debugging choices independently; ask the user only when approval or missing information is required.
 - Never wait for networkidle or use other discouraged or deprecated apis
