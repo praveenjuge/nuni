@@ -14,7 +14,8 @@ Turborepo + Bun workspaces.
 | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `apps/docs`                                   | Landing page and docs (Blume). Served at `/`. Rewrites `/dashboard` to the dashboard.    |
 | `apps/dashboard`                              | Owner dashboard (Next.js 16, `basePath: /dashboard`, WorkOS GitHub sign-in, Convex).     |
-| `apps/playground`                             | Vite + React test site and the Playwright end-to-end tests. Not deployed.                |
+| `apps/playground`                             | Vite + React test site. Not deployed.                                                    |
+| `apps/e2e`                                    | Full product Playwright suite, local auth emulator, and test agents.                     |
 | `packages/backend`                            | Convex: schema, widget and owner functions, HTTP comment endpoint, WorkOS, rate limits.  |
 | `packages/anchor`                             | The pin engine: capture, resolve and the reliability benchmark. Bundled into the widget. |
 | `packages/widget`                             | `@nuniapp/widget`: the embeddable widget (Shadow DOM, vanilla TS). ESM + CDN script.     |
@@ -53,9 +54,11 @@ bunx turbo run dev --filter=@nuni/playground --filter=@nuni/dashboard --filter=@
 ```bash
 bunx turbo run build lint typecheck test   # everything
 bun run bench                              # pin reliability benchmark (Playwright)
-bun run e2e                                # widget end-to-end tests (needs the local backend)
+bun run e2e                                # full product end-to-end tests (starts all local servers)
 bun run format:check && bun run readmes:check
 ```
+
+See [the e2e guide](./apps/e2e/README.md) for local auth, interactive debugging, and test agents.
 
 Playwright uses its own Chromium. To use a preinstalled one: `CHROMIUM_PATH=/path/to/chrome bun run bench`.
 

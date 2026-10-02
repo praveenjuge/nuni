@@ -1,42 +1,17 @@
-import { execFileSync } from "node:child_process"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
+import { convexRun } from "../../fixtures"
+import { generateProjectId as projectId } from "@nuni/shared"
 
 import { expect, test, type Page } from "@playwright/test"
 
-const backendDir = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../packages/backend"
-)
-const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 const APP_URL = process.env.VITE_APP_URL ?? "http://localhost:3000"
 
-function projectId() {
-  let id = "nuni_"
-  for (let i = 0; i < 22; i++) id += ALPHABET[Math.floor(Math.random() * 58)]
-  return id
-}
-
+/** Seed widget credentials for legacy owner regressions; claim tests use real sign-in. */
 function seedOwner(publicId: string): string {
-  const out = execFileSync(
-    "npx",
-    [
-      "convex",
-      "run",
-      "testing:seedOwner",
-      JSON.stringify({
-        publicId,
-        origin: "http://127.0.0.1:5173",
-        name: "Olive Owner",
-      }),
-    ],
-    {
-      cwd: backendDir,
-      env: { ...process.env, CONVEX_AGENT_MODE: "anonymous" },
-      encoding: "utf8",
-    }
-  )
-  return (JSON.parse(out.slice(out.indexOf("{"))) as { token: string }).token
+  return convexRun<{ token: string }>("testing:seedOwner", {
+    publicId,
+    origin: "http://127.0.0.1:5173",
+    name: "Olive Owner",
+  }).token
 }
 
 const openPanel = (page: Page) =>
@@ -45,6 +20,7 @@ const openPanel = (page: Page) =>
     .getByRole("button", { name: /open/ })
     .click()
 
+/** Place visitor feedback on the first pricing plan and wait for confirmation. */
 async function postComment(page: Page, body: string) {
   await page
     .locator("#nuni-root .toolbar")

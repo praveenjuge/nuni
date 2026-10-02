@@ -1,15 +1,10 @@
+import { generateProjectId as projectId } from "@nuni/shared"
 import { expect, test, type Locator, type Page } from "@playwright/test"
-
-const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-function projectId() {
-  let id = "nuni_"
-  for (let i = 0; i < 22; i++) id += ALPHABET[Math.floor(Math.random() * 58)]
-  return id
-}
 
 const toolbar = (page: Page) => page.locator("#nuni-root .toolbar")
 const pins = (page: Page) => page.locator("#nuni-root .pin:not(.pin-draft)")
 
+/** Post feedback after screenshot completion; iframe targets have no screenshot preview. */
 async function comment(
   page: Page,
   target: Locator,
@@ -20,6 +15,14 @@ async function comment(
   await target.click()
   const composer = page.locator('#nuni-root [data-card="composer"]')
   await expect(composer).toBeVisible()
+  // Capture redraws the composer. Fill after that redraw, using its visible preview.
+  if (
+    await target.evaluate((el) => el.ownerDocument.defaultView === window.top)
+  ) {
+    await expect(
+      composer.getByRole("img", { name: "Screenshot that will be attached" })
+    ).toBeVisible()
+  }
   if (name) await composer.getByPlaceholder("Your name").fill(name)
   await composer.getByPlaceholder("Leave a comment").fill(body)
   await composer.getByRole("button", { name: "Post" }).click()

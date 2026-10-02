@@ -9,7 +9,6 @@
     "preview": "vite preview --port 5173",
     "typecheck": "tsc",
     "lint": "eslint .",
-    "e2e": "playwright test",
     "smoke:release": "playwright test -c playwright.release.config.ts"
   },
   "dependencies": {
@@ -18,7 +17,6 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.13.0",
     "@nuni/eslint-config": "workspace:*",
     "@nuni/tsconfig": "workspace:*",
     "@playwright/test": "^1.63.0",

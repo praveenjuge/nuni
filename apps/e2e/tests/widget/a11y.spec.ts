@@ -1,12 +1,6 @@
+import { generateProjectId as projectId } from "@nuni/shared"
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page } from "@playwright/test"
-
-const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-function projectId() {
-  let id = "nuni_"
-  for (let i = 0; i < 22; i++) id += ALPHABET[Math.floor(Math.random() * 58)]
-  return id
-}
 
 const root = (page: Page) => page.locator("#nuni-root")
 const toolbar = (page: Page) => root(page).locator(".toolbar")
@@ -62,6 +56,13 @@ test("keyboard only: pick, post, confirm, tabs and focus return", async ({
   await page.keyboard.press("Enter")
   const composer = root(page).locator('[data-card="composer"]')
   await expect(composer).toBeVisible()
+  await expect(
+    composer.getByRole("img", { name: "Screenshot that will be attached" })
+  ).toBeVisible()
+  await composer.getByRole("textbox", { name: "Your name" }).focus()
+  await expect(
+    composer.getByRole("textbox", { name: "Your name" })
+  ).toBeFocused()
   await page.keyboard.type("Sam Tester")
   await page.keyboard.press("Tab")
   await page.keyboard.type("Keyboard comment")

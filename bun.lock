@@ -57,6 +57,30 @@
         "@types/react": "^19",
       },
     },
+    "apps/e2e": {
+      "name": "@nuni/e2e",
+      "version": "0.0.0",
+      "dependencies": {
+        "@nuni/backend": "workspace:*",
+        "@nuni/dashboard": "workspace:*",
+        "@nuni/docs": "workspace:*",
+        "@nuni/playground": "workspace:*",
+        "@nuni/shared": "workspace:*",
+        "@nuniapp/cli": "workspace:*",
+      },
+      "devDependencies": {
+        "@axe-core/playwright": "^4.13.0",
+        "@modelcontextprotocol/sdk": "^1.31.0",
+        "@nuni/eslint-config": "workspace:*",
+        "@nuni/tsconfig": "workspace:*",
+        "@playwright/cli": "^0.1.22",
+        "@playwright/test": "^1.63.0",
+        "@types/node": "^22",
+        "@workos/emulate": "^0.14.0",
+        "eslint": "^10.11.0",
+        "typescript": "^5.9.3",
+      },
+    },
     "apps/playground": {
       "name": "@nuni/playground",
       "version": "0.0.0",
@@ -66,7 +90,6 @@
         "react-dom": "19.2.8",
       },
       "devDependencies": {
-        "@axe-core/playwright": "^4.13.0",
         "@nuni/eslint-config": "workspace:*",
         "@nuni/tsconfig": "workspace:*",
         "@playwright/test": "^1.63.0",
@@ -626,6 +649,8 @@
 
     "@nuni/docs": ["@nuni/docs@workspace:apps/docs"],
 
+    "@nuni/e2e": ["@nuni/e2e@workspace:apps/e2e"],
+
     "@nuni/eslint-config": ["@nuni/eslint-config@workspace:packages/eslint-config"],
 
     "@nuni/playground": ["@nuni/playground@workspace:apps/playground"],
@@ -665,6 +690,8 @@
     "@pierre/theme": ["@pierre/theme@2.0.0", "", {}, "sha512-yNDd9GYLQl1mEUJR8AneJ5e4ohLIHQd/wZLWr4fagt78vS2RwwZNW530vVgHqXFAyFVcFlRmGUD5ramXH46OXw=="],
 
     "@pierre/theming": ["@pierre/theming@1.0.1", "", { "peerDependencies": { "@pierre/theme": "^1.1.0 || ^2.0.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-WCI5Qd7iprDpISL9fBYOLe8RV53+b7mFNA3bPzl60/2CKCSrsKN8zEcep6Y3BAzvARlmca50zGjDodqPGiTUKA=="],
+
+    "@playwright/cli": ["@playwright/cli@0.1.22", "", { "dependencies": { "playwright": "1.64.0-alpha-1790635538000", "playwright-core": "1.64.0-alpha-1790635538000" }, "bin": { "playwright-cli": "playwright-cli.js" } }, "sha512-6WMkQNM4VEzqMkdr/l60X9Cr7i+tI/arK87IWz2K7pB6j8I2ZJ8KN+1JfhJDLnK+SXnab6Op8xGt4adcGLsyfA=="],
 
     "@playwright/test": ["@playwright/test@1.63.0", "", { "dependencies": { "playwright": "1.63.0" }, "bin": { "playwright": "cli.js" } }, "sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ=="],
 
@@ -1067,6 +1094,8 @@
     "@workos-inc/authkit-react": ["@workos-inc/authkit-react@0.16.2", "", { "dependencies": { "@workos-inc/authkit-js": "^0.20.1" }, "peerDependencies": { "react": ">=17" } }, "sha512-Q10bTJ3sd8zfbIlxl8KavLeHLuW7v2aJLfq+syyWsVa9VzbrBVFyr7HNxt3aAVJq1kcMfTJu1p9gSJT3Gswulg=="],
 
     "@workos-inc/node": ["@workos-inc/node@10.14.0", "", {}, "sha512-SnY9OHTzTyOmgJQj9+/6x116m+d+zJoQw5e8teNWKUuGe8FOKngVdBXRvZgdFxaL+3UfQbMlp95V67t43VYOWQ=="],
+
+    "@workos/emulate": ["@workos/emulate@0.14.0", "", { "dependencies": { "@hono/node-server": "^2.1.1", "chalk": "^5.6.2", "hono": "^4", "semver": "^7.7.4", "yaml": "^2.8.2" }, "bin": { "workos-emulate": "dist/cli.js" } }, "sha512-Yh/S/6eqEq3Ul8QivVpi15Jh/rZy+fWt7kCf6w7TEnqhAc+Y7KSpB8dnaTMeQUxZLXDXogyL3C8XM21ghSrICA=="],
 
     "@yuku-codegen/binding-android-arm64": ["@yuku-codegen/binding-android-arm64@0.10.2", "", { "os": "android", "cpu": "arm64" }, "sha512-Oc2KInVkPfUjEB4PeV6X0NvIoyYTzDe/WmqFrTwBqKs6YKnz4A7XwWQvJTb7M0rLz9a6WgpUUiiS5QKaCi4O/g=="],
 
@@ -2807,6 +2836,10 @@
     "@next/eslint-plugin-next/fast-glob": ["fast-glob@3.3.1", "", { "dependencies": { "@nodelib/fs.stat": "^2.0.2", "@nodelib/fs.walk": "^1.2.3", "glob-parent": "^5.1.2", "merge2": "^1.3.0", "micromatch": "^4.0.4" } }, "sha512-kNFPyjhh5cKjrUltxs+wFx+ZkbRaxxmZ+X0ZU31SOsxCEtP9VPgtq2teZw1DebupL5GmDaNQ6yKMMVcM41iqDg=="],
 
     "@pierre/diffs/diff": ["diff@9.0.0", "", {}, "sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw=="],
+
+    "@playwright/cli/playwright": ["playwright@1.64.0-alpha-1790635538000", "", { "dependencies": { "playwright-core": "1.64.0-alpha-1790635538000" }, "bin": { "playwright": "cli.js" } }, "sha512-/5XDUMxpOd/9AojJtWDFIRV3EJZNQ0AwvK69wgt3CPzy8wTgiBG9pX45VfxtqtvIRGwfWzMhrvawNKreG69Snw=="],
+
+    "@playwright/cli/playwright-core": ["playwright-core@1.64.0-alpha-1790635538000", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-pNwaXirhXMRLaRQs4NQ18EpTdtDoFwyPH9FOaaDC7YXG4hpwE2xmwCic/1srbuExVQC7zT9LJSJpDBAru+Vo9A=="],
 
     "@rollup/pluginutils/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 

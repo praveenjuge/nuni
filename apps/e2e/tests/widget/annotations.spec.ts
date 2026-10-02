@@ -1,11 +1,5 @@
+import { generateProjectId as projectId } from "@nuni/shared"
 import { expect, test, type Locator, type Page } from "@playwright/test"
-
-const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-function projectId() {
-  let id = "nuni_"
-  for (let i = 0; i < 22; i++) id += ALPHABET[Math.floor(Math.random() * 58)]
-  return id
-}
 
 const root = (page: Page) => page.locator("#nuni-root")
 const composer = (page: Page) => root(page).locator('[data-card="composer"]')
@@ -32,7 +26,7 @@ async function selectWords(target: Locator, words: string) {
 }
 
 /** Where the words are on screen. */
-async function wordsBox(target: Locator, words: string) {
+async function wordsBoxes(target: Locator, words: string) {
   return target.evaluate((el, words) => {
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -42,8 +36,12 @@ async function wordsBox(target: Locator, words: string) {
       const range = document.createRange()
       range.setStart(text, at)
       range.setEnd(text, at + words.length)
-      const r = range.getBoundingClientRect()
-      return { x: r.x, y: r.y, width: r.width, height: r.height }
+      return Array.from(range.getClientRects(), (r) => ({
+        x: r.x,
+        y: r.y,
+        width: r.width,
+        height: r.height,
+      }))
     }
     throw new Error(`"${words}" not found`)
   }, words)
@@ -80,6 +78,7 @@ async function expectBox(
     .toBe(true)
 }
 
+/** Submit the annotation composer and wait for persisted-comment confirmation. */
 async function post(page: Page, body: string, name?: string) {
   if (name) await composer(page).getByPlaceholder("Your name").fill(name)
   await composer(page).getByPlaceholder("Leave a comment").fill(body)
@@ -87,6 +86,7 @@ async function post(page: Page, body: string, name?: string) {
   await expect(root(page).locator(".toast")).toHaveText("Comment added")
 }
 
+/** Compare every rectangle edge within the pixel tolerance used for moving overlays. */
 function near(a: Box, b: Box, slack = 4) {
   return (
     Math.abs(a.x - b.x) <= slack &&
@@ -116,9 +116,9 @@ test("comments on selected text find the same words after a reload", async ({
   await post(page, `Say what it ships ${Date.now()}`, "Sam Tester")
 
   // The words are marked on the page.
-  const lead1 = await wordsBox(lead, "ship your product")
+  const lead1 = await wordsBoxes(lead, "ship your product")
   await expect(root(page).locator(".mark")).toHaveCount(1)
-  await expectBox(page, ".mark", lead1)
+  for (const box of lead1) await expectBox(page, ".mark", box)
 
   // The same phrase in the second of three cards, commented with C.
   const card = page.locator(".feature").nth(1)
@@ -131,9 +131,12 @@ test("comments on selected text find the same words after a reload", async ({
 
   await page.reload()
   await expect(root(page).locator(".pin:not(.pin-draft)")).toHaveCount(2)
-  await expect(root(page).locator(".mark")).toHaveCount(2)
-  await expectBox(page, ".mark", lead1)
-  await expectBox(page, ".mark", await wordsBox(card, "your team can focus"))
+  const cardBoxes = await wordsBoxes(card, "your team can focus")
+  await expect(root(page).locator(".mark")).toHaveCount(
+    lead1.length + cardBoxes.length
+  )
+  for (const box of lead1) await expectBox(page, ".mark", box)
+  for (const box of cardBoxes) await expectBox(page, ".mark", box)
 
   // The thread shows the words.
   await root(page)
@@ -142,7 +145,7 @@ test("comments on selected text find the same words after a reload", async ({
     .click()
   await root(page).locator(".panel .item", { hasText: "Which team?" }).click()
   await expect(thread(page).locator(".quote")).toHaveText("your team can focus")
-  await expect(root(page).locator(".mark-active")).toHaveCount(1)
+  await expect(root(page).locator(".mark-active")).toHaveCount(cardBoxes.length)
 })
 
 test("an area dragged while picking is shown again on its element", async ({

@@ -7,7 +7,16 @@ Turborepo + Bun workspaces. See README.md for the layout and commands.
 - Backend is Convex in `packages/backend/convex`. Regenerate `_generated` with `npx convex dev` (or `CONVEX_AGENT_MODE=anonymous npx convex dev --once` locally). Test with `bun run --cwd packages/backend test`.
 - Pin reliability is the top priority. Any change to `packages/anchor` must keep `bun run bench` green (≥95% correct, ≤1 wrong).
 - The agent prompt lives in `packages/shared/src/prompt.ts`. After editing it run `bun run readmes`.
-- Run `bunx turbo run build lint typecheck test` and `bun run format:check` before pushing.
+- Run `bunx turbo run build lint typecheck test`, `bun run format:check`, and `bun run e2e` before pushing.
+
+## End-to-end tests
+
+- Every user-facing feature or bug fix adds or updates a spec in `apps/e2e/tests/<area>/`.
+- Use the shared fixtures and a unique project ID per test. Prefer role and label locators; avoid fixed waits.
+- Run `bun run e2e` before pushing. The suite starts WorkOS Emulate, Convex, the playground, dashboard, and docs locally without production secrets.
+- Add test users to `apps/e2e/workos-emulate.config.yaml`.
+- Use the Playwright planner to map new flows, the generator to write specs, and the healer to diagnose failing specs. Their definitions live in `apps/e2e/.claude/agents/`; generated specs must keep meaningful assertions.
+- Use the Playwright CLI skill in `apps/e2e/.claude/skills/` to check running interfaces interactively. See `apps/e2e/README.md` for commands.
 
 <!-- BEGIN:turborepo-agent-rules -->
 

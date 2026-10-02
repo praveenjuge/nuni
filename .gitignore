@@ -35,3 +35,8 @@ yarn-error.log*
 
 # convex local backend state
 .convex
+
+# Local E2E credentials
+.auth/
+!apps/e2e/scripts/workos-test-key.pem
+apps/e2e/.runtime/
