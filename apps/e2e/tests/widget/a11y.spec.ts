@@ -56,6 +56,13 @@ test("keyboard only: pick, post, confirm, tabs and focus return", async ({
   await page.keyboard.press("Enter")
   const composer = root(page).locator('[data-card="composer"]')
   await expect(composer).toBeVisible()
+  await expect(
+    composer.getByRole("img", { name: "Screenshot that will be attached" })
+  ).toBeVisible()
+  await composer.getByRole("textbox", { name: "Your name" }).focus()
+  await expect(
+    composer.getByRole("textbox", { name: "Your name" })
+  ).toBeFocused()
   await page.keyboard.type("Sam Tester")
   await page.keyboard.press("Tab")
   await page.keyboard.type("Keyboard comment")
