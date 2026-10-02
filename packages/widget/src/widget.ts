@@ -53,6 +53,7 @@ import { ICONS } from "./icons"
 import { onLocationChange } from "./navigation"
 import type { CaptureScreenshot } from "./screenshot"
 import { sha256Hex } from "./sha256"
+import { scrollToPin } from "./scroll-to-pin"
 import { KEYS, read, write } from "./storage"
 import { STYLES } from "./styles"
 
@@ -1501,7 +1502,11 @@ export class NuniWidget {
 
   private focusComment(id: string) {
     const placement = this.placements.get(id)
-    placement?.element?.scrollIntoView({ block: "center", behavior: "smooth" })
+    const comment = this.comments.find((c) => c._id === id)
+    if (placement?.element && comment)
+      scrollToPin(placement.element, () =>
+        this.anchorPoint(comment.anchor, placement.element!, placement.range)
+      )
     this.openThread(id)
     if (window.matchMedia(MOBILE_QUERY).matches) this.panelOpen = false
     this.render()

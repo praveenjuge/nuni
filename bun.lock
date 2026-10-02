@@ -122,7 +122,7 @@
     },
     "packages/cli": {
       "name": "@nuniapp/cli",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "bin": {
         "nuni": "dist/index.mjs",
       },
@@ -152,9 +152,9 @@
     },
     "packages/react": {
       "name": "@nuniapp/react",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "dependencies": {
-        "@nuniapp/widget": "^0.1.4",
+        "@nuniapp/widget": "^0.1.6",
       },
       "devDependencies": {
         "@nuni/eslint-config": "workspace:*",
@@ -186,7 +186,7 @@
     },
     "packages/widget": {
       "name": "@nuniapp/widget",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "devDependencies": {
         "@nuni/anchor": "workspace:*",
         "@nuni/backend": "workspace:*",
