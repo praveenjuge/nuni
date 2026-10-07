@@ -40,14 +40,15 @@ export const EN = {
   yourName: "Your name",
   leaveComment: "Leave a comment",
   notYou: "Not you?",
-  screenshotAlt: "Screenshot that will be attached",
-  screenshotNote: "Screenshot attached. Only the site owner sees it.",
-  remove: "Remove",
   cancel: "Cancel",
   post: "Post",
   posting: "Posting…",
   save: "Save",
   send: "{key} + Enter",
+  charsLeft: {
+    one: "{count} character left",
+    other: "{count} characters left",
+  },
 
   pinLabel: "Comment by {name}: {body}",
   commentBy: "Comment by {name}",

@@ -59,13 +59,8 @@ test("comments carry page context, screenshot and a prompt for the owner's agent
   const composer = visitor.locator('#nuni-root [data-card="composer"]')
   await composer.getByPlaceholder("Your name").fill("Val Visitor")
   await composer.getByPlaceholder("Leave a comment").fill(body)
-  // The visitor sees exactly what will be attached before posting.
-  await expect(composer.locator(".shot-preview img")).toBeVisible({
-    timeout: 20_000,
-  })
-  await expect(composer.locator(".shot-note")).toContainText(
-    "Only the site owner sees it"
-  )
+  // The screenshot is attached on its own; the composer doesn't show it.
+  await expect(composer.locator("img")).toHaveCount(0)
   const uploaded = visitor.waitForResponse(
     (r) =>
       r.url().includes("/widget/screenshot") && r.request().method() === "POST"
@@ -111,35 +106,6 @@ test("comments carry page context, screenshot and a prompt for the owner's agent
   expect(prompt).toContain("```html")
   expect(prompt).toContain("## Screenshot")
   expect(prompt).toContain("Browser: ")
-
-  // A second comment where the visitor removes the screenshot: nothing is
-  // uploaded and the owner sees no image.
-  const privateBody = `No screenshot please ${Date.now()}`
-  const uploads: string[] = []
-  visitor.on("request", (r) => {
-    if (r.url().includes("/widget/screenshot") && r.method() === "POST")
-      uploads.push(r.url())
-  })
-  await visitor
-    .locator("#nuni-root .toolbar")
-    .getByRole("button", { name: "Add a comment" })
-    .click()
-  await visitor.locator(".plan").first().locator(".price").click()
-  await composer.getByPlaceholder("Leave a comment").fill(privateBody)
-  await expect(composer.locator(".shot-preview img")).toBeVisible({
-    timeout: 20_000,
-  })
-  await composer.getByRole("button", { name: "Remove" }).click()
-  await expect(composer.locator(".shot-preview")).toHaveCount(0)
-  await composer.getByRole("button", { name: "Post" }).click()
-  await expect(visitor.locator("#nuni-root .toast")).toHaveText("Comment added")
-
-  await owner.reload()
-  await openThread(owner, privateBody)
-  // Give a late upload time to show up, then check there was none.
-  await owner.waitForTimeout(1500)
-  await expect(thread(owner).locator(".shot")).toHaveCount(0)
-  expect(uploads).toEqual([])
 
   await visitorContext.close()
   await ownerContext.close()

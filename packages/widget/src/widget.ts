@@ -70,12 +70,8 @@ interface Draft {
   /** The selected words of a text comment. */
   range?: Range
   dom?: DomContext
-  /**
-   * Taken while the person types and shown in the composer, so they see
-   * exactly what is attached (and can remove it). Only a screenshot that was
-   * shown before posting is uploaded.
-   */
-  screenshot?: { blob: Blob; preview: string }
+  /** Taken while the person types and uploaded once the comment is posted. */
+  screenshot?: Promise<Blob | null>
   error?: string
   sending?: boolean
 }
@@ -170,13 +166,12 @@ function isTypingTarget(target: EventTarget | null | undefined) {
   )
 }
 
-function dataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(blob)
-  })
+function avatar(name: string): HTMLSpanElement {
+  return h(
+    "span",
+    { class: "avatar", style: `background:${colorFor(name)}` },
+    initials(name)
+  )
 }
 
 function describeElement(el: Element): string {
@@ -1081,14 +1076,14 @@ export class NuniWidget {
     this.activeId = null
     this.render()
     this.focusComposer()
-    void this.takeScreenshot(draft)
+    draft.screenshot = this.takeScreenshot(draft)
   }
 
   /** Capture while the person types, so posting stays instant. */
-  private async takeScreenshot(draft: Draft) {
+  private async takeScreenshot(draft: Draft): Promise<Blob | null> {
     const load = this.runtime.loadScreenshot
     // An iframe's document can't be rendered from the page.
-    if (!load || draft.element.ownerDocument !== document) return
+    if (!load || draft.element.ownerDocument !== document) return null
     const accent =
       getComputedStyle(this.host).getPropertyValue("--n-accent").trim() ||
       "#d6246e"
@@ -1111,23 +1106,13 @@ export class NuniWidget {
               }
             }
           : undefined
-      const blob = capture
+      return capture
         ? await capture(element, { exclude: this.host, accent, focus })
         : null
-      // Only attach what the commenter can still see and remove: a capture
-      // that finishes after Post was clicked is dropped.
-      if (!blob || !this.isComposing(draft) || draft.sending) return
-      const preview = await dataUrl(blob)
-      if (!this.isComposing(draft) || draft.sending) return
-      draft.screenshot = { blob, preview }
-      this.render()
     } catch {
       // No screenshot then; the comment still works.
+      return null
     }
-  }
-
-  private isComposing(draft: Draft) {
-    return this.card?.kind === "composer" && this.card.draft === draft
   }
 
   private collectContext(draft: Draft): CommentContext | undefined {
@@ -1141,9 +1126,11 @@ export class NuniWidget {
     return Object.keys(context).length ? context : undefined
   }
 
-  private async attachScreenshot(id: string, image: Blob) {
+  private async attachScreenshot(id: string, shot: Promise<Blob | null>) {
     try {
-      await this.api.uploadScreenshot(id, this.secret, image)
+      // A capture still running when Post was clicked is sent when it lands.
+      const image = await shot
+      if (image) await this.api.uploadScreenshot(id, this.secret, image)
     } catch {
       // The comment is posted; the screenshot is optional.
     }
@@ -1533,7 +1520,6 @@ export class NuniWidget {
     this.render()
 
     const loc = describeLocation(location.href)
-    // The screenshot shown when Post was clicked, and nothing that lands later.
     const shot = draft.screenshot
     try {
       const id = await this.api.createComment({
@@ -1553,7 +1539,7 @@ export class NuniWidget {
         },
         context: this.collectContext(draft),
       })
-      if (shot) void this.attachScreenshot(id, shot.blob)
+      if (shot) void this.attachScreenshot(id, shot)
       // Show the new pin exactly where it was dropped until it syncs.
       this.placements.set(id, {
         element: draft.element,
@@ -1800,7 +1786,7 @@ export class NuniWidget {
     this.keepFocus()
     this.activeId = id
     this.card = { kind: "thread", id }
-    this.focusNext = '[data-card="thread"] .card-head button'
+    this.focusNext = '[data-card="thread"] .card-close'
   }
 
   private render() {
@@ -2151,155 +2137,170 @@ export class NuniWidget {
     )
   }
 
+  private renderComposer(draft: Draft, cls: string): HTMLElement {
+    const needsName = !this.name
+    const avatar = h("span", {
+      class: "avatar cmp-avatar",
+      "aria-hidden": "true",
+    })
+    const paintAvatar = (name: string) => {
+      const clean = name.trim()
+      avatar.classList.toggle("avatar-empty", !clean)
+      if (clean) {
+        avatar.textContent = initials(clean)
+        avatar.style.background = colorFor(clean)
+      } else {
+        avatar.replaceChildren(icon(ICONS.user))
+        avatar.style.background = ""
+      }
+    }
+    const nameInput = h("input", {
+      class: "cmp-name",
+      placeholder: this.t("yourName"),
+      value: this.name,
+      maxlength: LIMITS.nameMaxLength,
+      autocomplete: "name",
+      "data-focus-key": "name",
+      "aria-label": this.t("yourName"),
+    })
+    const textarea = h("textarea", {
+      class: "cmp-text",
+      placeholder: this.t("leaveComment"),
+      maxlength: LIMITS.bodyMaxLength,
+      rows: 3,
+      "data-focus-key": "body",
+      "aria-label": this.t("comment"),
+    })
+    const prev = this.uiLayer.querySelector<HTMLTextAreaElement>(
+      '[data-focus-key="body"]'
+    )
+    if (prev) textarea.value = prev.value
+    const prevName = this.uiLayer.querySelector<HTMLInputElement>(
+      '[data-focus-key="name"]'
+    )
+    if (prevName) nameInput.value = prevName.value
+    paintAvatar(needsName ? nameInput.value : this.name)
+    nameInput.addEventListener("input", () => paintAvatar(nameInput.value))
+
+    // Only shown close to the limit, so it never adds noise.
+    const counter = h("span", { class: "cmp-count", "aria-live": "polite" })
+    const post = h(
+      "button",
+      {
+        class: "cmp-post",
+        type: "submit",
+        disabled: Boolean(draft.sending) || !textarea.value.trim(),
+      },
+      draft.sending ? this.t("posting") : this.t("post"),
+      icon(ICONS.arrowUp)
+    )
+    const update = () => {
+      post.disabled = Boolean(draft.sending) || !textarea.value.trim()
+      const left = LIMITS.bodyMaxLength - textarea.value.length
+      counter.textContent =
+        left <= LIMITS.bodyMaxLength * 0.1
+          ? this.t("charsLeft", { count: left })
+          : ""
+      // Grow with the text, up to the max height in the styles.
+      textarea.style.height = "auto"
+      textarea.style.height = `${textarea.scrollHeight + 2}px`
+    }
+    textarea.addEventListener("input", () => {
+      update()
+      this.positionCard()
+    })
+    requestAnimationFrame(() => {
+      if (!textarea.isConnected) return
+      update()
+      this.positionCard()
+    })
+
+    const submit = () =>
+      void this.submitDraft(
+        draft,
+        textarea.value,
+        needsName ? nameInput.value : this.name
+      )
+    textarea.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        submit()
+      }
+    })
+    return h(
+      "form",
+      {
+        class: `${cls} composer`,
+        "data-card": "composer",
+        onsubmit: (e: Event) => {
+          e.preventDefault()
+          submit()
+        },
+      },
+      h(
+        "div",
+        { class: "cmp-head" },
+        avatar,
+        needsName ? nameInput : h("span", { class: "author" }, this.name),
+        h("span", { class: "spacer" }),
+        needsName
+          ? null
+          : h(
+              "button",
+              {
+                class: "cmp-link",
+                type: "button",
+                onclick: () => {
+                  this.name = ""
+                  this.render()
+                  this.focusComposer()
+                },
+              },
+              this.t("notYou")
+            )
+      ),
+      draft.anchor.quote
+        ? h("blockquote", { class: "quote" }, draft.anchor.quote.exact)
+        : null,
+      textarea,
+      draft.error
+        ? h("div", { class: "error cmp-error", role: "alert" }, draft.error)
+        : null,
+      h(
+        "div",
+        { class: "cmp-foot" },
+        h(
+          "span",
+          { class: "cmp-keys", title: this.t("send", { key: this.i18n.mod }) },
+          h("kbd", {}, this.i18n.mod),
+          h("kbd", {}, "↵")
+        ),
+        counter,
+        h("span", { class: "spacer" }),
+        post
+      ),
+      // Last in tab order, so Tab goes from the name to the comment.
+      h(
+        "button",
+        {
+          class: "icon-btn cmp-close",
+          type: "button",
+          "aria-label": this.t("cancel"),
+          title: this.t("cancel"),
+          onclick: () => this.closeCard(),
+        },
+        icon(ICONS.close)
+      )
+    )
+  }
+
   private renderCard(): HTMLElement | null {
     const card = this.card
     if (!card) return null
     const mobile = window.matchMedia(MOBILE_QUERY).matches
     const cls = `card${mobile ? " sheet" : ""}`
 
-    if (card.kind === "composer") {
-      const { draft } = card
-      const needsName = !this.name
-      const nameInput = h("input", {
-        class: "field",
-        placeholder: this.t("yourName"),
-        value: this.name,
-        maxlength: LIMITS.nameMaxLength,
-        autocomplete: "name",
-        "data-focus-key": "name",
-        "aria-label": this.t("yourName"),
-      })
-      const textarea = h("textarea", {
-        class: "field",
-        placeholder: this.t("leaveComment"),
-        maxlength: LIMITS.bodyMaxLength,
-        "data-focus-key": "body",
-        "aria-label": this.t("comment"),
-      })
-      const prev = this.uiLayer.querySelector<HTMLTextAreaElement>(
-        '[data-focus-key="body"]'
-      )
-      if (prev) textarea.value = prev.value
-      const prevName = this.uiLayer.querySelector<HTMLInputElement>(
-        '[data-focus-key="name"]'
-      )
-      if (prevName) nameInput.value = prevName.value
-      const submit = () =>
-        void this.submitDraft(
-          draft,
-          textarea.value,
-          needsName ? nameInput.value : this.name
-        )
-      textarea.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault()
-          submit()
-        }
-      })
-      return h(
-        "form",
-        {
-          class: cls,
-          "data-card": "composer",
-          onsubmit: (e: Event) => {
-            e.preventDefault()
-            submit()
-          },
-        },
-        h(
-          "div",
-          { class: "card-body" },
-          needsName
-            ? nameInput
-            : h(
-                "div",
-                { class: "row" },
-                h(
-                  "span",
-                  {
-                    class: "avatar",
-                    style: `background:${colorFor(this.name)}`,
-                  },
-                  initials(this.name)
-                ),
-                h("span", { class: "author" }, this.name),
-                h("span", { class: "spacer" }),
-                h(
-                  "button",
-                  {
-                    class: "link",
-                    type: "button",
-                    onclick: () => {
-                      this.name = ""
-                      this.render()
-                    },
-                  },
-                  this.t("notYou")
-                )
-              ),
-          draft.anchor.quote
-            ? h("blockquote", { class: "quote" }, draft.anchor.quote.exact)
-            : null,
-          textarea,
-          draft.screenshot
-            ? h(
-                "div",
-                { class: "shot-preview" },
-                h("img", {
-                  src: draft.screenshot.preview,
-                  alt: this.t("screenshotAlt"),
-                }),
-                h(
-                  "div",
-                  { class: "shot-note" },
-                  h("span", {}, this.t("screenshotNote")),
-                  h("span", { class: "spacer" }),
-                  h(
-                    "button",
-                    {
-                      class: "link",
-                      type: "button",
-                      onclick: () => {
-                        draft.screenshot = undefined
-                        this.render()
-                      },
-                    },
-                    this.t("remove")
-                  )
-                )
-              )
-            : null,
-          draft.error
-            ? h("div", { class: "error", role: "alert" }, draft.error)
-            : null,
-          h(
-            "div",
-            { class: "row" },
-            h("span", { class: "kbd" }, this.t("send", { key: this.i18n.mod })),
-            h("span", { class: "spacer" }),
-            h(
-              "button",
-              {
-                class: "btn btn-ghost",
-                type: "button",
-                onclick: () => this.closeCard(),
-              },
-              this.t("cancel")
-            ),
-            h(
-              "button",
-              {
-                class: "btn btn-primary",
-                type: "submit",
-                disabled: Boolean(draft.sending),
-              },
-              icon(ICONS.send),
-              draft.sending ? this.t("posting") : this.t("post")
-            )
-          )
-        )
-      )
-    }
+    if (card.kind === "composer") return this.renderComposer(card.draft, cls)
 
     const comment = this.comments.find((c) => c._id === card.id)
     if (!comment) return null
@@ -2351,20 +2352,56 @@ export class NuniWidget {
         )
       )
     } else {
+      const badges = [
+        comment.status === "resolved"
+          ? h(
+              "span",
+              { class: "badge badge-ok" },
+              icon(ICONS.check),
+              this.t("resolved")
+            )
+          : null,
+        comment.page.origin !== location.origin
+          ? h(
+              "span",
+              {
+                class: "badge",
+                title: this.t("leftOn", { origin: comment.page.origin }),
+              },
+              new URL(comment.page.origin).host
+            )
+          : null,
+        placement?.confidence === "low"
+          ? h(
+              "span",
+              { class: "badge", title: this.t("approximateHint") },
+              this.t("approximate")
+            )
+          : null,
+        !placement?.element
+          ? h(
+              "span",
+              {
+                class: "badge",
+                title: this.t("originallyOn", {
+                  text: comment.anchor.text || comment.anchor.tag,
+                }),
+              },
+              this.t("notFound")
+            )
+          : null,
+      ].filter((badge) => badge !== null)
+      // Owners copy the full context, so wait until it has loaded.
+      const contextPending =
+        owner && !(this.ownerDetailLoaded && this.ownerDetailId === comment._id)
+      const resolved = comment.status === "resolved"
       body = h(
         "div",
-        { class: "card-body" },
+        { class: "card-body msg" },
         h(
           "div",
           { class: "card-head" },
-          h(
-            "span",
-            {
-              class: "avatar",
-              style: `background:${colorFor(comment.authorName)}`,
-            },
-            initials(comment.authorName)
-          ),
+          avatar(comment.authorName),
           h("span", { class: "author" }, comment.authorName),
           h(
             "span",
@@ -2373,172 +2410,116 @@ export class NuniWidget {
               (comment.editedAt ? ` · ${this.t("edited")}` : "")
           ),
           h("span", { class: "spacer" }),
+          owner
+            ? h(
+                "button",
+                {
+                  class: `icon-btn${resolved ? " is-resolved" : ""}`,
+                  type: "button",
+                  "aria-label": this.t(resolved ? "reopen" : "resolve"),
+                  title: this.t(resolved ? "reopen" : "resolve"),
+                  disabled: Boolean(card.busy),
+                  onclick: () =>
+                    resolved
+                      ? this.reopenComment(comment)
+                      : this.resolveComment(comment),
+                },
+                icon(ICONS.check)
+              )
+            : null,
           h(
             "button",
             {
-              class: "btn btn-ghost btn-icon",
+              class: "icon-btn card-close",
               type: "button",
               "aria-label": this.t("close"),
+              title: this.t("close"),
               onclick: () => this.closeCard(),
             },
             icon(ICONS.close)
           )
         ),
-        comment.anchor.quote
-          ? h("blockquote", { class: "quote" }, comment.anchor.quote.exact)
-          : null,
-        h("div", { class: "comment-body" }, comment.body),
-        this.ownerDetail?._id === comment._id && this.ownerDetail.screenshotUrl
-          ? h(
-              "a",
-              {
-                class: "shot",
-                href: this.ownerDetail.screenshotUrl,
-                target: "_blank",
-                rel: "noreferrer",
-                title: this.t("openScreenshot"),
-              },
-              h("img", {
-                src: this.ownerDetail.screenshotUrl,
-                alt: this.t("screenshotTaken"),
-              })
-            )
-          : null,
         h(
           "div",
-          { class: "row" },
-          comment.status === "resolved"
+          { class: "msg-main" },
+          comment.anchor.quote
+            ? h("blockquote", { class: "quote" }, comment.anchor.quote.exact)
+            : null,
+          h("div", { class: "comment-body" }, comment.body),
+          this.ownerDetail?._id === comment._id &&
+            this.ownerDetail.screenshotUrl
             ? h(
-                "span",
-                { class: "badge badge-ok" },
-                icon(ICONS.check),
-                this.t("resolved")
+                "a",
+                {
+                  class: "shot",
+                  href: this.ownerDetail.screenshotUrl,
+                  target: "_blank",
+                  rel: "noreferrer",
+                  title: this.t("openScreenshot"),
+                },
+                h("img", {
+                  src: this.ownerDetail.screenshotUrl,
+                  alt: this.t("screenshotTaken"),
+                })
               )
             : null,
-          comment.page.origin !== location.origin
-            ? h(
-                "span",
-                {
-                  class: "badge",
-                  title: this.t("leftOn", { origin: comment.page.origin }),
-                },
-                new URL(comment.page.origin).host
-              )
-            : null,
-          placement?.confidence === "low"
-            ? h(
-                "span",
-                {
-                  class: "badge",
-                  title: this.t("approximateHint"),
-                },
-                this.t("approximate")
-              )
-            : null,
-          !placement?.element
-            ? h(
-                "span",
-                {
-                  class: "badge",
-                  title: this.t("originallyOn", {
-                    text: comment.anchor.text || comment.anchor.tag,
-                  }),
-                },
-                this.t("notFound")
-              )
-            : null
-        ),
-        this.renderReactions(comment, comment._id),
-        card.error
-          ? h("div", { class: "error", role: "alert" }, card.error)
-          : null
-      )
-    }
-
-    const actions: Node[] = []
-    if (!card.editing) {
-      if (owner) {
-        actions.push(
-          comment.status === "open"
-            ? h(
-                "button",
-                {
-                  class: "btn",
-                  type: "button",
-                  disabled: Boolean(card.busy),
-                  onclick: () => this.resolveComment(comment),
-                },
-                icon(ICONS.check),
-                this.t("resolve")
-              )
-            : h(
-                "button",
-                {
-                  class: "btn",
-                  type: "button",
-                  disabled: Boolean(card.busy),
-                  onclick: () => this.reopenComment(comment),
-                },
-                icon(ICONS.undo),
-                this.t("reopen")
-              )
-        )
-      }
-      actions.push(h("span", { class: "spacer" }))
-      // Owners copy the full context, so wait until it has loaded.
-      const contextPending =
-        owner && !(this.ownerDetailLoaded && this.ownerDetailId === comment._id)
-      actions.push(
-        h(
-          "button",
-          {
-            class: "btn btn-ghost btn-icon",
-            type: "button",
-            "aria-label": this.t("copyForAgent"),
-            title: contextPending
-              ? this.t("loadingContext")
-              : this.t("copyForAgentHint"),
-            disabled: contextPending,
-            onclick: () => this.copyForAgent(comment),
-          },
-          icon(ICONS.bot)
-        )
-      )
-      if (mine) {
-        actions.push(
+          badges.length ? h("div", { class: "badges" }, ...badges) : null,
           h(
-            "button",
-            {
-              class: "btn btn-ghost btn-icon",
-              type: "button",
-              "aria-label": this.t("edit"),
-              title: this.t("edit"),
-              onclick: () => {
-                card.editing = true
-                this.render()
+            "div",
+            { class: "msg-foot" },
+            this.renderReactions(comment, comment._id),
+            h("span", { class: "spacer" }),
+            h(
+              "button",
+              {
+                class: "icon-btn",
+                type: "button",
+                "aria-label": this.t("copyForAgent"),
+                title: contextPending
+                  ? this.t("loadingContext")
+                  : this.t("copyForAgentHint"),
+                disabled: contextPending,
+                onclick: () => this.copyForAgent(comment),
               },
-            },
-            icon(ICONS.edit)
-          )
+              icon(ICONS.bot)
+            ),
+            mine
+              ? h(
+                  "button",
+                  {
+                    class: "icon-btn",
+                    type: "button",
+                    "aria-label": this.t("edit"),
+                    title: this.t("edit"),
+                    onclick: () => {
+                      card.editing = true
+                      this.render()
+                    },
+                  },
+                  icon(ICONS.edit)
+                )
+              : null,
+            mine || owner
+              ? h(
+                  "button",
+                  {
+                    class: "icon-btn icon-btn-danger",
+                    type: "button",
+                    "aria-label": this.t("delete"),
+                    title: this.t("delete"),
+                    "data-focus-key": "delete",
+                    disabled: Boolean(card.busy),
+                    onclick: () => void this.deleteComment(comment),
+                  },
+                  icon(ICONS.trash)
+                )
+              : null
+          ),
+          card.error
+            ? h("div", { class: "error", role: "alert" }, card.error)
+            : null
         )
-      }
-      if (mine || owner) {
-        actions.push(
-          h(
-            "button",
-            {
-              class: "btn btn-ghost btn-icon btn-danger",
-              type: "button",
-              "aria-label": this.t("delete"),
-              title: this.t("delete"),
-              "data-focus-key": "delete",
-              disabled: Boolean(card.busy),
-              onclick: () => void this.deleteComment(comment),
-            },
-            icon(ICONS.trash)
-          )
-        )
-      }
+      )
     }
 
     return h(
@@ -2550,13 +2531,19 @@ export class NuniWidget {
         "aria-label": this.t("commentBy", { name: comment.authorName }),
       },
       body,
-      actions.length ? h("div", { class: "actions" }, ...actions) : null,
       card.editing ? null : this.renderThread(comment)
     )
   }
 
-  /** Emoji chips for one message, plus a picker to add one. */
-  private renderReactions(comment: WidgetComment, targetId: string) {
+  /**
+   * Emoji chips for one message and the picker to add one. Replies keep
+   * their add button with their other tools, so `withAdd` is off for them.
+   */
+  private renderReactions(
+    comment: WidgetComment,
+    targetId: string,
+    withAdd = true
+  ) {
     const card = this.card
     if (card?.kind !== "thread") return null
     const loaded = this.threadId === comment._id && this.thread
@@ -2564,6 +2551,7 @@ export class NuniWidget {
       ? this.thread!.reactions.filter((r) => r.targetId === targetId)
       : []
     const open = card.picker === targetId
+    if (!withAdd && !summaries.length && !open) return null
     return h(
       "div",
       { class: "reactions" },
@@ -2581,21 +2569,7 @@ export class NuniWidget {
           `${r.emoji} ${r.count}`
         )
       }),
-      h(
-        "button",
-        {
-          class: "reaction reaction-add",
-          type: "button",
-          "aria-label": this.t("addReaction"),
-          "aria-expanded": String(open),
-          title: this.t("addReaction"),
-          onclick: () => {
-            card.picker = open ? null : targetId
-            this.render()
-          },
-        },
-        icon(ICONS.smile)
-      ),
+      withAdd ? this.reactionAdd(targetId, "reaction reaction-add") : null,
       open
         ? h(
             "div",
@@ -2622,6 +2596,27 @@ export class NuniWidget {
             )
           )
         : null
+    )
+  }
+
+  private reactionAdd(targetId: string, cls: string) {
+    const card = this.card
+    if (card?.kind !== "thread") return null
+    const open = card.picker === targetId
+    return h(
+      "button",
+      {
+        class: cls,
+        type: "button",
+        "aria-label": this.t("addReaction"),
+        "aria-expanded": String(open),
+        title: this.t("addReaction"),
+        onclick: () => {
+          card.picker = open ? null : targetId
+          this.render()
+        },
+      },
+      icon(ICONS.smile)
     )
   }
 
@@ -2681,18 +2676,11 @@ export class NuniWidget {
       }
       return h(
         "div",
-        { class: "reply", "data-reply": reply._id },
+        { class: "reply msg", "data-reply": reply._id },
         h(
           "div",
           { class: "card-head" },
-          h(
-            "span",
-            {
-              class: "avatar avatar-sm",
-              style: `background:${colorFor(reply.authorName)}`,
-            },
-            initials(reply.authorName)
-          ),
+          avatar(reply.authorName),
           h("span", { class: "author" }, reply.authorName),
           reply.isOwner
             ? h("span", { class: "badge badge-owner" }, this.t("owner"))
@@ -2704,46 +2692,55 @@ export class NuniWidget {
               (reply.editedAt ? ` · ${this.t("edited")}` : "")
           ),
           h("span", { class: "spacer" }),
-          mine
-            ? h(
-                "button",
-                {
-                  class: "btn btn-ghost btn-icon btn-xs",
-                  type: "button",
-                  "aria-label": this.t("editReply"),
-                  title: this.t("edit"),
-                  onclick: () => {
-                    card.replyEditing = reply._id
-                    this.render()
+          h(
+            "span",
+            { class: "msg-tools" },
+            this.reactionAdd(reply._id, "icon-btn"),
+            mine
+              ? h(
+                  "button",
+                  {
+                    class: "icon-btn",
+                    type: "button",
+                    "aria-label": this.t("editReply"),
+                    title: this.t("edit"),
+                    onclick: () => {
+                      card.replyEditing = reply._id
+                      this.render()
+                    },
                   },
-                },
-                icon(ICONS.edit)
-              )
-            : null,
-          mine || owner
-            ? h(
-                "button",
-                {
-                  class: "btn btn-ghost btn-icon btn-xs btn-danger",
-                  type: "button",
-                  "aria-label": this.t("deleteReply"),
-                  title: this.t("delete"),
-                  "data-focus-key": `delete-${reply._id}`,
-                  disabled: Boolean(card.busy),
-                  onclick: () => void this.deleteReply(comment, reply),
-                },
-                icon(ICONS.trash)
-              )
-            : null
+                  icon(ICONS.edit)
+                )
+              : null,
+            mine || owner
+              ? h(
+                  "button",
+                  {
+                    class: "icon-btn icon-btn-danger",
+                    type: "button",
+                    "aria-label": this.t("deleteReply"),
+                    title: this.t("delete"),
+                    "data-focus-key": `delete-${reply._id}`,
+                    disabled: Boolean(card.busy),
+                    onclick: () => void this.deleteReply(comment, reply),
+                  },
+                  icon(ICONS.trash)
+                )
+              : null
+          )
         ),
-        h("div", { class: "comment-body" }, reply.body),
-        this.renderReactions(comment, reply._id)
+        h(
+          "div",
+          { class: "msg-main" },
+          h("div", { class: "comment-body" }, reply.body),
+          this.renderReactions(comment, reply._id, false)
+        )
       )
     })
 
     const needsName = !owner && !this.name
     const nameInput = h("input", {
-      class: "field",
+      class: "reply-name",
       placeholder: this.t("yourName"),
       value: this.name,
       maxlength: LIMITS.nameMaxLength,
@@ -2756,9 +2753,10 @@ export class NuniWidget {
     )
     if (prevName) nameInput.value = prevName.value
     const box = h("textarea", {
-      class: "field field-reply",
+      class: "reply-text",
       placeholder: replies.length ? this.t("reply") : this.t("replyFirst"),
       maxlength: LIMITS.bodyMaxLength,
+      rows: 1,
       "data-focus-key": "reply",
       "aria-label": this.t("reply"),
     })
@@ -2766,6 +2764,27 @@ export class NuniWidget {
       '[data-focus-key="reply"]'
     )
     if (prev) box.value = prev.value
+    const sendButton = h(
+      "button",
+      {
+        class: "reply-send",
+        type: "submit",
+        "aria-label": this.t("sendReply"),
+        title: this.t("sendReply"),
+        disabled: Boolean(card.sendingReply) || !box.value.trim(),
+      },
+      icon(ICONS.arrowUp)
+    )
+    // Grow with the text, up to the max height in the styles.
+    const grow = () => {
+      sendButton.disabled = Boolean(card.sendingReply) || !box.value.trim()
+      box.style.height = "auto"
+      box.style.height = `${box.scrollHeight}px`
+    }
+    box.addEventListener("input", grow)
+    requestAnimationFrame(() => {
+      if (box.isConnected) grow()
+    })
     const send = () =>
       void this.sendReply(
         comment,
@@ -2806,18 +2825,7 @@ export class NuniWidget {
           },
         },
         needsName ? nameInput : null,
-        box,
-        h(
-          "button",
-          {
-            class: "btn btn-primary btn-icon",
-            type: "submit",
-            "aria-label": this.t("sendReply"),
-            title: this.t("sendReply"),
-            disabled: Boolean(card.sendingReply),
-          },
-          icon(ICONS.send)
-        )
+        h("div", { class: "reply-row" }, box, sendButton)
       )
     )
   }
