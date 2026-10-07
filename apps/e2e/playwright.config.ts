@@ -37,8 +37,8 @@ export default defineConfig({
       command: "bun run --cwd ../playground dev -- --host 127.0.0.1",
       url: "http://127.0.0.1:5173",
       env: {
-        VITE_CONVEX_URL: "http://127.0.0.1:3210",
-        VITE_CONVEX_SITE_URL: "http://127.0.0.1:3211",
+        VITE_CONVEX_URL: "http://127.0.0.1:3310",
+        VITE_CONVEX_SITE_URL: "http://127.0.0.1:3311",
         VITE_APP_URL: "http://localhost:3000",
       },
     },
@@ -57,7 +57,7 @@ export default defineConfig({
         NEXT_PUBLIC_WORKOS_REDIRECT_URI:
           "http://localhost:3000/dashboard/callback",
         NEXT_PUBLIC_APP_URL: "http://localhost:3000",
-        NEXT_PUBLIC_CONVEX_URL: "http://127.0.0.1:3210",
+        NEXT_PUBLIC_CONVEX_URL: "http://127.0.0.1:3310",
       },
     },
     {
@@ -65,8 +65,8 @@ export default defineConfig({
       url: "http://localhost:4321",
       timeout: 120_000,
       env: {
-        PUBLIC_NUNI_CONVEX_URL: "http://127.0.0.1:3210",
-        PUBLIC_NUNI_CONVEX_SITE_URL: "http://127.0.0.1:3211",
+        PUBLIC_NUNI_CONVEX_URL: "http://127.0.0.1:3310",
+        PUBLIC_NUNI_CONVEX_SITE_URL: "http://127.0.0.1:3311",
         PUBLIC_NUNI_APP_URL: "http://localhost:3000",
       },
     },

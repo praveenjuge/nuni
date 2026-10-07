@@ -10,7 +10,7 @@ import { expect, test } from "@playwright/test"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../../../..")
 const cliEntry = join(root, "packages/cli/src/index.ts")
-const SITE_URL = "http://127.0.0.1:3211"
+const SITE_URL = "http://127.0.0.1:3311"
 
 /** Create visitor feedback through the widget endpoint for CLI regression coverage. */
 async function postComment(publicId: string, body: string) {
@@ -69,8 +69,8 @@ test("the CLI signs in, lists, shows and resolves comments", async ({
     NUNI_CONFIG_DIR: testInfo.outputPath("cli-config"),
     NUNI_TOKEN: "",
     NUNI_PROJECT: project,
-    NUNI_CONVEX_URL: "http://127.0.0.1:3210",
-    NUNI_CONVEX_SITE_URL: "http://127.0.0.1:3211",
+    NUNI_CONVEX_URL: "http://127.0.0.1:3310",
+    NUNI_CONVEX_SITE_URL: "http://127.0.0.1:3311",
     NUNI_APP_URL: "http://localhost:3000",
   }
   mkdirSync(env.NUNI_CONFIG_DIR, { recursive: true })

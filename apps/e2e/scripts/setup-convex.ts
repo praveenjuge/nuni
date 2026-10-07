@@ -56,7 +56,9 @@ function run(args: string[], allowFailure = false) {
   if (result.status !== 0 && !allowFailure)
     throw new Error(`convex ${args[0]} failed`)
 }
-run(["dev", "--once"], true)
+// Not the default 3210, so a developer's own `convex dev` can keep running.
+const PORTS = ["--local-cloud-port", "3310", "--local-site-port", "3311"]
+run(["dev", "--once", ...PORTS], true)
 const localEnv = readFileSync(`${runtimeDir}/.env.local`, "utf8")
 if (!/^CONVEX_DEPLOYMENT=anonymous:/m.test(localEnv))
   throw new Error("Refusing a non-anonymous E2E backend")
@@ -73,15 +75,15 @@ for (const [key, value] of Object.entries({
   NUNI_ALLOW_TESTING: "1",
 }))
   run(["env", "set", key, value])
-run(["dev", "--once"])
-const child = spawn("bunx", ["convex", "dev"], {
+run(["dev", "--once", ...PORTS])
+const child = spawn("bunx", ["convex", "dev", ...PORTS], {
   cwd: runtimeDir,
   env,
   stdio: "inherit",
 })
 const ready = createServer(async (_request, response) => {
   try {
-    const result = await fetch("http://127.0.0.1:3210/api/query", {
+    const result = await fetch("http://127.0.0.1:3310/api/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

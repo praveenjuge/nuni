@@ -8,7 +8,7 @@ bunx playwright install chromium
 bun run e2e
 ```
 
-The suite starts WorkOS Emulate (4100), anonymous Convex (3210/3211), the playground (5173), dashboard (3000), and docs (4321). It signs in through the emulator UI and saves owner sessions in `.auth/`. No production credentials are required. Keep these ports free; use `CHROMIUM_PATH=/path/to/chrome` for an existing Chromium installation.
+The suite starts WorkOS Emulate (4100), anonymous Convex (3310/3311, so a dev backend on 3210 can keep running), the playground (5173), dashboard (3000), and docs (4321). It signs in through the emulator UI and saves owner sessions in `.auth/`. No production credentials are required. Keep these ports free; use `CHROMIUM_PATH=/path/to/chrome` for an existing Chromium installation.
 
 Test users live in `workos-emulate.config.yaml`. The committed signing key is disposable local test data. Backend source is copied into a fresh ignored `.runtime/` directory per run; deployment selection never reads the developer backend environment or provisions hosted AuthKit. The suite refuses a non-anonymous backend. All test helpers are guarded by `NUNI_ALLOW_TESTING`; they must never be enabled in production.
 
