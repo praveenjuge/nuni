@@ -177,7 +177,7 @@
       "name": "@nuniapp/react",
       "version": "0.1.7",
       "dependencies": {
-        "@nuniapp/widget": "^0.1.6",
+        "@nuniapp/widget": "^0.1.7",
       },
       "devDependencies": {
         "@nuni/eslint-config": "workspace:*",
