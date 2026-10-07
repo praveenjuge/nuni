@@ -1,64 +1,36 @@
 import { DOCS_URL } from "@nuni/shared"
-import Image from "next/image"
-import Link from "next/link"
+import type { User } from "@workos-inc/node"
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Logo } from "@/components/logo"
 import { buttonVariants } from "@/components/ui/button"
+import { UserMenu } from "@/components/user-menu"
 
-export function SiteHeader({
-  user,
-}: {
-  user?: { name: string; avatarUrl?: string | null } | null
-}) {
+export function SiteHeader({ user }: { user: User | null }) {
   return (
-    <header className="border-b">
-      <div className="mx-auto flex h-14 max-w-5xl items-center gap-4 px-4">
-        <Link href="/" className="flex items-center gap-2 font-semibold">
-          <Image src="/dashboard/icon.svg" alt="" width={28} height={28} />
-          Nuni
-        </Link>
-        <nav aria-label="Main navigation" className="flex items-center gap-1">
-          <Link
-            href="/"
-            className={buttonVariants({ variant: "ghost", size: "sm" })}
-          >
-            Projects
-          </Link>
+    <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur-md">
+      <div className="mx-auto flex h-14 max-w-5xl items-center gap-2 px-4">
+        <Logo />
+        <nav
+          aria-label="Main navigation"
+          className="ml-auto flex items-center gap-1"
+        >
           <a
             href={DOCS_URL}
             className={buttonVariants({ variant: "ghost", size: "sm" })}
           >
             Docs
           </a>
-        </nav>
-        <div className="ml-auto flex items-center gap-3">
-          {user ? (
-            <>
-              <Avatar className="size-7">
-                {user.avatarUrl ? (
-                  <AvatarImage src={user.avatarUrl} alt="" />
-                ) : null}
-                <AvatarFallback>
-                  {user.name.slice(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <span className="hidden text-sm sm:inline">{user.name}</span>
-              <a
-                href="/dashboard/sign-out"
-                className={buttonVariants({ variant: "ghost", size: "sm" })}
-              >
-                Sign out
-              </a>
-            </>
-          ) : (
-            <a
-              href="/dashboard/sign-in"
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-            >
-              Sign in
-            </a>
+          {user && (
+            <UserMenu
+              name={
+                [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+                user.email
+              }
+              email={user.email}
+              avatarUrl={user.profilePictureUrl}
+            />
           )}
-        </div>
+        </nav>
       </div>
     </header>
   )

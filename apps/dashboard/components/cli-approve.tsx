@@ -10,6 +10,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 
+import { FlowShell } from "@/components/flow-shell"
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Card,
@@ -54,7 +55,7 @@ export function CliApprove({ code }: { code: string }) {
   }
 
   return (
-    <main className="mx-auto grid min-h-svh max-w-md place-items-center p-6">
+    <FlowShell>
       <Card className="w-full min-w-0 [overflow-wrap:anywhere]">
         {done?.step === "approved" ? (
           <>
@@ -167,7 +168,7 @@ export function CliApprove({ code }: { code: string }) {
           </>
         )}
       </Card>
-    </main>
+    </FlowShell>
   )
 }
 

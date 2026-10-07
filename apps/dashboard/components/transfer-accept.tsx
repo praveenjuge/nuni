@@ -7,6 +7,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
+import { FlowShell } from "@/components/flow-shell"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -29,7 +30,7 @@ export function TransferAccept({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null)
 
   return (
-    <main className="mx-auto grid min-h-svh max-w-md place-items-center p-6">
+    <FlowShell>
       <Card className="w-full min-w-0 [overflow-wrap:anywhere]">
         {!ready || transfer === undefined ? (
           <CardContent className="py-6">
@@ -93,6 +94,6 @@ export function TransferAccept({ token }: { token: string }) {
           </>
         )}
       </Card>
-    </main>
+    </FlowShell>
   )
 }

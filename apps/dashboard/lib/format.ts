@@ -10,6 +10,11 @@ export function timeAgo(ts: number, now = Date.now()): string {
   return new Date(ts).toLocaleDateString()
 }
 
+/** "1 comment", "3 comments". */
+export function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`
+}
+
 export function hostOf(origin: string): string {
   try {
     return new URL(origin).host
