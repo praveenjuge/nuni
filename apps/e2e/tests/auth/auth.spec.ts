@@ -7,13 +7,12 @@ test("sign in through AuthKit and sign out", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Projects", exact: true })
   ).toBeVisible()
-  await page.getByRole("link", { name: "Sign out", exact: true }).click()
+  await page.getByRole("button", { name: "Account" }).click()
+  await page.getByRole("menuitem", { name: "Sign out" }).click()
   await expect(
     page.getByRole("link", { name: "Sign in to Nuni" })
   ).toBeVisible()
-  await expect(
-    page.getByRole("link", { name: "Sign out", exact: true })
-  ).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Account" })).toHaveCount(0)
 })
 
 test("claim redirects through sign-in and preserves returnTo", async ({

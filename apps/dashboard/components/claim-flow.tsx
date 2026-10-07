@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 
+import { FlowShell } from "@/components/flow-shell"
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Card,
@@ -90,7 +91,7 @@ export function ClaimFlow({
         : { step: "confirm", mine: status.state === "mine" })
 
   return (
-    <main className="mx-auto grid min-h-svh max-w-md place-items-center p-6">
+    <FlowShell>
       <Card className="w-full min-w-0 [overflow-wrap:anywhere]">
         {view.step === "loading" && (
           <CardHeader>
@@ -182,7 +183,7 @@ export function ClaimFlow({
           </CardHeader>
         )}
       </Card>
-    </main>
+    </FlowShell>
   )
 }
 

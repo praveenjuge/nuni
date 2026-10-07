@@ -23,7 +23,11 @@ test("README journey: init, visitor feedback, owner claim, MCP fix, live result"
   await addComment(page, projectId, body)
   await claimProject(ownerPage, projectId)
   await ownerPage.goto(`http://localhost:3000/dashboard/p/${projectId}`)
-  await expect(ownerPage.getByText(body, { exact: true })).toBeVisible()
+  await expect(
+    ownerPage
+      .getByRole("list", { name: "Open comments" })
+      .getByText(body, { exact: true })
+  ).toBeVisible()
   await session.login(ownerPage)
   const id = await commentId(session, body)
 
@@ -52,7 +56,11 @@ test("README journey: init, visitor feedback, owner claim, MCP fix, live result"
     await expect(thread).toContainText("Resolved")
     await ownerPage.goto(`http://localhost:3000/dashboard/p/${projectId}`)
     await ownerPage.getByRole("tab", { name: /Resolved/ }).click()
-    await expect(ownerPage.getByText(body, { exact: true })).toBeVisible()
+    await expect(
+      ownerPage
+        .getByRole("list", { name: "Resolved comments" })
+        .getByText(body, { exact: true })
+    ).toBeVisible()
     await testInfo.attach("visitor-live-result", {
       body: await page.screenshot(),
       contentType: "image/png",
