@@ -125,7 +125,11 @@ export function CommentThread({
         action="Delete reply"
         destructive
         onConfirm={() => {
-          if (deleting) void remove({ id: deleting as Id<"replies"> })
+          if (!deleting) return
+          setError(null)
+          remove({ id: deleting as Id<"replies"> }).catch((err) =>
+            setError(errorMessage(err))
+          )
         }}
       />
     </div>

@@ -111,8 +111,12 @@ export function CommentDetail({
                   variant="ghost"
                   aria-label="Copy for agent"
                   onClick={async () => {
-                    await navigator.clipboard.writeText(buildCommentPrompt(c))
-                    toast("Copied. Paste it into your agent.")
+                    try {
+                      await navigator.clipboard.writeText(buildCommentPrompt(c))
+                      toast("Copied. Paste it into your agent.")
+                    } catch {
+                      toast.error("Couldn't copy. Allow clipboard access.")
+                    }
                   }}
                 />
               }

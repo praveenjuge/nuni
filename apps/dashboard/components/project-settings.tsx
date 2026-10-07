@@ -415,8 +415,13 @@ function TransferSection({ projectId }: { projectId: Id<"projects"> }) {
             variant="ghost"
             size="sm"
             onClick={async () => {
-              await cancel({ projectId })
-              setLink(null)
+              setError(null)
+              try {
+                await cancel({ projectId })
+                setLink(null)
+              } catch (err) {
+                setError(errorMessage(err))
+              }
             }}
           >
             Cancel transfer

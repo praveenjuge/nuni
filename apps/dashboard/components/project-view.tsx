@@ -154,7 +154,10 @@ function CommentList({
   const hasFilters = Boolean(pageInput || origin || query)
   // Only what is still listed counts (a comment may be gone meanwhile).
   const picked = list.filter((c) => selected.has(c._id))
-  const allPicked = list.length > 0 && picked.length === list.length
+  // Bulk actions take at most LIMITS.bulkMax at once, so "all" means that many.
+  const selectable = list.slice(0, LIMITS.bulkMax)
+  const allPicked =
+    selectable.length > 0 && selectable.every((c) => selected.has(c._id))
   const found = list.findIndex((c) => c._id === active.id)
   const activeIndex =
     found >= 0 ? found : Math.min(active.index, list.length - 1)
@@ -340,9 +343,7 @@ function CommentList({
               indeterminate={picked.length > 0 && !allPicked}
               onCheckedChange={() =>
                 setSelected(
-                  allPicked
-                    ? new Set()
-                    : new Set(list.slice(0, LIMITS.bulkMax).map((c) => c._id))
+                  allPicked ? new Set() : new Set(selectable.map((c) => c._id))
                 )
               }
               aria-label="Select all comments shown"
