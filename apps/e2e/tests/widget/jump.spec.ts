@@ -59,7 +59,7 @@ for (const nested of [false, true]) {
     await expectPin()
     // The dashboard's jump URL uses the same navigation path on a fresh page.
     const id = await page.evaluate(async (project) => {
-      const res = await fetch("http://127.0.0.1:3210/api/query", {
+      const res = await fetch("http://127.0.0.1:3310/api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

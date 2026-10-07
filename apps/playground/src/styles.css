@@ -144,3 +144,8 @@ main {
   border: 1px solid #e4e4e7;
   border-radius: 12px;
 }
+
+.no-router-section {
+  min-height: 600px;
+  margin-bottom: 24px;
+}

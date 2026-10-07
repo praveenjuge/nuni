@@ -192,7 +192,7 @@ test("deep link opens the comment", async ({ page, browser }) => {
 
   // Find the comment id through the public query and open the jump URL.
   const commentId = await visitor.evaluate(async (project) => {
-    const res = await fetch("http://127.0.0.1:3210/api/query", {
+    const res = await fetch("http://127.0.0.1:3310/api/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

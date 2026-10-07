@@ -23,8 +23,8 @@ export function cliSession(testInfo: TestInfo, project?: string) {
     NUNI_PROJECT: project ?? "",
     NUNI_TOKEN: "",
     NUNI_APP_URL: "http://localhost:3000",
-    NUNI_CONVEX_URL: "http://127.0.0.1:3210",
-    NUNI_CONVEX_SITE_URL: "http://127.0.0.1:3211",
+    NUNI_CONVEX_URL: "http://127.0.0.1:3310",
+    NUNI_CONVEX_SITE_URL: "http://127.0.0.1:3311",
   }
   /** Execute the built CLI against local services, returning stdout or rejecting on failure. */
   const run = async (...args: string[]) => {

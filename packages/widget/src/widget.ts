@@ -289,6 +289,8 @@ export class NuniWidget {
   private layoutFrame = 0
   private pinPositions = new Map<string, { x: number; y: number }>()
   private resolveTimer = 0
+  /** The placement summary the UI was last drawn with. */
+  private shownPlacements = ""
   private i18n: I18n
 
   constructor(
@@ -666,9 +668,27 @@ export class NuniWidget {
       this.renderPins()
       this.layout()
       if (queue.length) whenIdle(slice)
-      else if ((onlyStale || run > 1) && this.panelOpen) this.render()
+      // Rebuilding the panel on every page change would swallow clicks on
+      // pages that keep re-rendering, so only redraw when it would change.
+      else if (
+        (onlyStale || run > 1) &&
+        this.panelOpen &&
+        this.placementSummary() !== this.shownPlacements
+      )
+        this.render()
     }
     slice()
+  }
+
+  /** What the panel and cards show from the placements: found, approximate or lost. */
+  private placementSummary() {
+    return this.comments
+      .map((c) => {
+        const placement = this.placements.get(c._id)
+        if (!placement?.element) return "-"
+        return placement.confidence === "low" ? "~" : "+"
+      })
+      .join("")
   }
 
   /**
@@ -1862,6 +1882,7 @@ export class NuniWidget {
   }
 
   private renderUi() {
+    this.shownPlacements = this.placementSummary()
     const nodes: Node[] = [this.renderToolbar()]
     if (this.panelOpen) nodes.push(this.renderPanel())
     const card = this.renderCard()
