@@ -32,9 +32,6 @@ for (const nested of [false, true]) {
       .click()
     await page.mouse.click(400, 450)
     const composer = root.locator('[data-card="composer"]')
-    await expect(
-      composer.getByAltText("Screenshot that will be attached")
-    ).toBeVisible()
     await composer.getByPlaceholder("Your name").fill("Jump Tester")
     await composer
       .getByPlaceholder("Leave a comment")

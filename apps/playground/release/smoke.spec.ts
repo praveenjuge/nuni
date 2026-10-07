@@ -41,6 +41,8 @@ function atLeast(version: string, min: string) {
 const HAS_CONTEXT = atLeast(VERSION, "0.1.4")
 /** The MCP server, replies, reactions and text comments shipped in 0.1.5. */
 const HAS_THREADS = atLeast(VERSION, "0.1.5")
+/** Before 0.1.7 the composer showed the screenshot and only sent it once shown. */
+const SHOWS_SHOT = HAS_CONTEXT && !atLeast(VERSION, "0.1.7")
 const CDN = `https://cdn.jsdelivr.net/npm/@nuniapp/widget@${VERSION}/dist`
 const PACKAGES = ["@nuniapp/widget", "@nuniapp/react", "@nuniapp/cli"]
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -309,9 +311,11 @@ async function commentFlow(
   let upload: Promise<Response> | null = null
   if (lazy) {
     expect((await lazy).status()).toBe(200)
-    await expect(composer.locator(".shot-preview img")).toBeVisible({
-      timeout: 30_000,
-    })
+    if (SHOWS_SHOT) {
+      await expect(composer.locator(".shot-preview img")).toBeVisible({
+        timeout: 30_000,
+      })
+    }
     upload = page.waitForResponse(
       (r) =>
         r.url().endsWith("/widget/screenshot") &&
