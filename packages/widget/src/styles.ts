@@ -71,7 +71,18 @@ button { cursor: pointer; }
   border: 1px solid var(--n-border);
   box-shadow: var(--n-shadow);
   pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
+.toolbar[data-dragging] {
+  cursor: grabbing;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08), 0 16px 40px rgba(0,0,0,0.2);
+}
+/* While dragging, the host covers the page so no move is lost to it. */
+:host([data-dragging]) { pointer-events: auto; cursor: grabbing; }
+:host([data-dragging]) .tb-btn { pointer-events: none; }
 .tb-btn {
   display: inline-flex;
   align-items: center;
@@ -674,8 +685,10 @@ a.item { color: inherit; text-decoration: none; }
   * { transition: none !important; animation: none !important; }
 }
 
-/* The toolbar's corner (the position option) */
+/* The toolbar's spot (the position option, or where it was dragged) */
 :host([data-position$="left"]) .toolbar { right: auto; left: 16px; }
+:host([data-position$="center"]) .toolbar { left: 0; right: 0; width: max-content; margin-inline: auto; }
+:host([data-position="top-center"]) .pick-hint { top: auto; bottom: 12px; }
 :host([data-position^="top"]) .toolbar { bottom: auto; top: 16px; }
 :host([data-position$="left"]) .panel { right: auto; left: 12px; }
 :host([data-position^="top"]) .panel { top: 72px; bottom: 12px; }

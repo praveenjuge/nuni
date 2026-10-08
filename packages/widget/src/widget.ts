@@ -37,7 +37,7 @@ import {
   type PageSummary,
   type ProjectStatus,
 } from "./api"
-import type { ResolvedConfig } from "./config"
+import { oneOf, POSITIONS, type Position, type ResolvedConfig } from "./config"
 import { domContext, type Collectors } from "./context"
 import {
   colorFor,
@@ -206,6 +206,16 @@ export function otherPageHref(
   }
 }
 
+/** A press on the toolbar: the pointer, where it started and how far it went. */
+interface ToolbarDrag {
+  id: number
+  x: number
+  y: number
+  dx: number
+  dy: number
+  moving: boolean
+}
+
 export class NuniWidget {
   private host: HTMLElement
   private root: ShadowRoot
@@ -292,6 +302,13 @@ export class NuniWidget {
   /** The placement summary the UI was last drawn with. */
   private shownPlacements = ""
   private i18n: I18n
+  /** Where the toolbar sits: where this visitor dragged it, or the option. */
+  private position: Position
+  /** A press on the toolbar, which becomes a drag once the pointer moves. */
+  private toolbarDrag: ToolbarDrag | null = null
+  private endToolbarDrag: (() => void) | null = null
+  /** A toolbar drag just ended: the click that follows it is not a press. */
+  private toolbarDropped = false
 
   constructor(
     private config: ResolvedConfig,
@@ -305,6 +322,11 @@ export class NuniWidget {
     }
     this.secret = secret
     this.ownerToken = read(KEYS.session(config.project))
+    this.position = oneOf(
+      read(KEYS.position(config.project)) ?? undefined,
+      POSITIONS,
+      config.position
+    )
 
     this.host = document.createElement("div")
     this.host.id = "nuni-root"
@@ -344,6 +366,15 @@ export class NuniWidget {
       this.live
     )
     this.uiLayer.addEventListener("keydown", (e) => this.trapFocus(e))
+    this.root.addEventListener(
+      "click",
+      (e) => {
+        if (!this.toolbarDropped) return
+        e.preventDefault()
+        e.stopPropagation()
+      },
+      true
+    )
 
     this.api = new NuniApi(config)
   }
@@ -360,8 +391,8 @@ export class NuniWidget {
 
   /** Position, theme, brand color and stacking order from the options. */
   private applyAppearance() {
-    const { position, theme, accentColor, zIndex } = this.config
-    this.host.dataset.position = position
+    const { theme, accentColor, zIndex } = this.config
+    this.host.dataset.position = this.position
     this.host.dataset.theme = theme
     if (zIndex !== null) this.host.style.zIndex = String(zIndex)
     const rgb = accentColor ? parseColor(accentColor) : null
@@ -471,6 +502,7 @@ export class NuniWidget {
 
   destroy() {
     this.setPicking(false)
+    this.endToolbarDrag?.()
     this.pageUnsub?.()
     this.sessionUnsub?.()
     this.ownerDetailUnsub?.()
@@ -1921,9 +1953,17 @@ export class NuniWidget {
 
   private renderToolbar() {
     const open = this.comments.filter((c) => c.status === "open").length
+    const drag = this.toolbarDrag?.moving ? this.toolbarDrag : null
     return h(
       "div",
-      { class: "toolbar", role: "toolbar", "aria-label": this.t("toolbar") },
+      {
+        class: "toolbar",
+        role: "toolbar",
+        "aria-label": this.t("toolbar"),
+        "data-dragging": !!drag,
+        style: drag && `transform: translate(${drag.dx}px, ${drag.dy}px)`,
+        onpointerdown: (e: Event) => this.startToolbarDrag(e as PointerEvent),
+      },
       h(
         "button",
         {
@@ -1960,6 +2000,88 @@ export class NuniWidget {
         icon(ICONS.list),
         h("span", { class: "tb-count" }, String(open))
       )
+    )
+  }
+
+  /**
+   * Drag the toolbar anywhere; on release it glides to the nearest corner or
+   * edge middle, which is remembered for this visitor.
+   */
+  private startToolbarDrag(e: PointerEvent) {
+    if (e.button !== 0 || !e.isPrimary) return
+    this.endToolbarDrag?.()
+    const drag: ToolbarDrag = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      dx: 0,
+      dy: 0,
+      moving: false,
+    }
+    this.toolbarDrag = drag
+    const toolbar = () => this.uiLayer.querySelector<HTMLElement>(".toolbar")
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== drag.id) return
+      drag.dx = ev.clientX - drag.x
+      drag.dy = ev.clientY - drag.y
+      if (!drag.moving && Math.hypot(drag.dx, drag.dy) < 5) return
+      if (!drag.moving) {
+        drag.moving = true
+        // Cover the page (and its iframes) so the drag keeps every move.
+        this.host.dataset.dragging = ""
+        toolbar()?.setAttribute("data-dragging", "")
+      }
+      ev.preventDefault()
+      toolbar()?.style.setProperty(
+        "transform",
+        `translate(${drag.dx}px, ${drag.dy}px)`
+      )
+    }
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== drag.id) return
+      this.endToolbarDrag?.()
+      if (drag.moving) this.dropToolbar(toolbar())
+    }
+    window.addEventListener("pointermove", onMove, true)
+    window.addEventListener("pointerup", onUp, true)
+    window.addEventListener("pointercancel", onUp, true)
+    this.endToolbarDrag = () => {
+      window.removeEventListener("pointermove", onMove, true)
+      window.removeEventListener("pointerup", onUp, true)
+      window.removeEventListener("pointercancel", onUp, true)
+      delete this.host.dataset.dragging
+      this.toolbarDrag = null
+      this.endToolbarDrag = null
+    }
+  }
+
+  private dropToolbar(el: HTMLElement | null) {
+    this.toolbarDropped = true
+    setTimeout(() => (this.toolbarDropped = false))
+    if (!el) return
+    const from = el.getBoundingClientRect()
+    const position = nearestPosition(
+      from.left + from.width / 2,
+      from.top + from.height / 2
+    )
+    this.position = position
+    this.host.dataset.position = position
+    write(
+      KEYS.position(this.config.project),
+      position === this.config.position ? null : position
+    )
+    el.removeAttribute("data-dragging")
+    el.style.removeProperty("transform")
+    const to = el.getBoundingClientRect()
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    el.animate(
+      [
+        {
+          transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)`,
+        },
+        { transform: "none" },
+      ],
+      { duration: 320, easing: "cubic-bezier(0.2, 0.9, 0.3, 1.15)" }
     )
   }
 
@@ -2896,4 +3018,12 @@ export class NuniWidget {
       target?.focus()
     })
   }
+}
+
+/** The toolbar spot nearest a point: thirds across the screen, halves down. */
+function nearestPosition(x: number, y: number): Position {
+  const width = window.innerWidth
+  const across =
+    x < width / 3 ? "left" : x > (width * 2) / 3 ? "right" : "center"
+  return `${y < window.innerHeight / 2 ? "top" : "bottom"}-${across}`
 }

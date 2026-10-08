@@ -23,4 +23,6 @@ export const KEYS = {
   name: "nuni:name",
   secret: "nuni:author-secret",
   session: (project: string) => `nuni:session:${project}`,
+  /** Where this visitor dragged the toolbar. */
+  position: (project: string) => `nuni:position:${project}`,
 } as const
