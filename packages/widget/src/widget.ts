@@ -37,7 +37,7 @@ import {
   type PageSummary,
   type ProjectStatus,
 } from "./api"
-import type { ResolvedConfig } from "./config"
+import { oneOf, POSITIONS, type Position, type ResolvedConfig } from "./config"
 import { domContext, type Collectors } from "./context"
 import {
   colorFor,
@@ -206,6 +206,16 @@ export function otherPageHref(
   }
 }
 
+/** A press on the toolbar: the pointer, where it started and how far it went. */
+interface ToolbarDrag {
+  id: number
+  x: number
+  y: number
+  dx: number
+  dy: number
+  moving: boolean
+}
+
 export class NuniWidget {
   private host: HTMLElement
   private root: ShadowRoot
@@ -230,6 +240,10 @@ export class NuniWidget {
   private picking = false
   private panelOpen = false
   private tab: "open" | "resolved" = "open"
+  /** What the panel's search box filters by. */
+  private search = ""
+  /** The comment opened last, marked in the panel to find your place again. */
+  private lastViewedId: string | null
   private card: Card = null
   private activeId: string | null = null
   private hoverEl: Element | null = null
@@ -292,6 +306,13 @@ export class NuniWidget {
   /** The placement summary the UI was last drawn with. */
   private shownPlacements = ""
   private i18n: I18n
+  /** Where the toolbar sits: where this visitor dragged it, or the option. */
+  private position: Position
+  /** A press on the toolbar, which becomes a drag once the pointer moves. */
+  private toolbarDrag: ToolbarDrag | null = null
+  private endToolbarDrag: (() => void) | null = null
+  /** A toolbar drag just ended: the click that follows it is not a press. */
+  private toolbarDropped = false
 
   constructor(
     private config: ResolvedConfig,
@@ -305,6 +326,12 @@ export class NuniWidget {
     }
     this.secret = secret
     this.ownerToken = read(KEYS.session(config.project))
+    this.lastViewedId = read(KEYS.lastViewed(config.project))
+    this.position = oneOf(
+      read(KEYS.position(config.project)) ?? undefined,
+      POSITIONS,
+      config.position
+    )
 
     this.host = document.createElement("div")
     this.host.id = "nuni-root"
@@ -344,6 +371,15 @@ export class NuniWidget {
       this.live
     )
     this.uiLayer.addEventListener("keydown", (e) => this.trapFocus(e))
+    this.root.addEventListener(
+      "click",
+      (e) => {
+        if (!this.toolbarDropped) return
+        e.preventDefault()
+        e.stopPropagation()
+      },
+      true
+    )
 
     this.api = new NuniApi(config)
   }
@@ -360,8 +396,8 @@ export class NuniWidget {
 
   /** Position, theme, brand color and stacking order from the options. */
   private applyAppearance() {
-    const { position, theme, accentColor, zIndex } = this.config
-    this.host.dataset.position = position
+    const { theme, accentColor, zIndex } = this.config
+    this.host.dataset.position = this.position
     this.host.dataset.theme = theme
     if (zIndex !== null) this.host.style.zIndex = String(zIndex)
     const rgb = accentColor ? parseColor(accentColor) : null
@@ -422,6 +458,7 @@ export class NuniWidget {
       if (e.composedPath().includes(this.host)) return
       this.pointerDown = true
       this.scheduleSelection()
+      this.closeCardFromOutside(e)
     }
     const onUp = () => {
       this.pointerDown = false
@@ -471,6 +508,7 @@ export class NuniWidget {
 
   destroy() {
     this.setPicking(false)
+    this.endToolbarDrag?.()
     this.pageUnsub?.()
     this.sessionUnsub?.()
     this.ownerDetailUnsub?.()
@@ -1221,7 +1259,10 @@ export class NuniWidget {
       if (this.confirming) this.answer(false)
       else if (this.picking) this.setPicking(false)
       else if (this.card) this.closeCard()
-      else if (this.panelOpen) this.togglePanel(false)
+      else if (this.panelOpen && this.search) {
+        this.search = ""
+        this.render()
+      } else if (this.panelOpen) this.togglePanel(false)
       else return
       e.stopPropagation()
       return
@@ -1788,9 +1829,30 @@ export class NuniWidget {
       this.keepFocus()
       this.focusNext = '.panel [role="tab"][aria-selected="true"]'
       if (window.matchMedia(MOBILE_QUERY).matches) this.card = null
-    }
+    } else this.search = ""
     this.render()
+    if (open)
+      this.uiLayer
+        .querySelector('.panel .item[aria-current="true"]')
+        ?.scrollIntoView({ block: "nearest" })
     if (!open && !this.card) this.restoreFocus()
+  }
+
+  /**
+   * A press on the page closes the open card, like Figma, unless the card
+   * holds words that haven't been sent yet.
+   */
+  private closeCardFromOutside(e: PointerEvent) {
+    if (!this.card || this.picking || this.confirming || !e.isPrimary) return
+    if (onScrollbar(e)) return
+    const card = this.uiLayer.querySelector("[data-card]")
+    const unsent = [...(card?.querySelectorAll("textarea") ?? [])].some((t) =>
+      t.value.trim()
+    )
+    if (unsent) return
+    // Focus goes where they pressed, not back to where it was.
+    if (!this.panelOpen) this.returnFocus = null
+    this.closeCard()
   }
 
   private closeCard() {
@@ -1805,6 +1867,8 @@ export class NuniWidget {
   private openThread(id: string) {
     this.keepFocus()
     this.activeId = id
+    this.lastViewedId = id
+    write(KEYS.lastViewed(this.config.project), id)
     this.card = { kind: "thread", id }
     this.focusNext = '[data-card="thread"] .card-close'
   }
@@ -1921,9 +1985,17 @@ export class NuniWidget {
 
   private renderToolbar() {
     const open = this.comments.filter((c) => c.status === "open").length
+    const drag = this.toolbarDrag?.moving ? this.toolbarDrag : null
     return h(
       "div",
-      { class: "toolbar", role: "toolbar", "aria-label": this.t("toolbar") },
+      {
+        class: "toolbar",
+        role: "toolbar",
+        "aria-label": this.t("toolbar"),
+        "data-dragging": !!drag,
+        style: drag && `transform: translate(${drag.dx}px, ${drag.dy}px)`,
+        onpointerdown: (e: Event) => this.startToolbarDrag(e as PointerEvent),
+      },
       h(
         "button",
         {
@@ -1963,13 +2035,113 @@ export class NuniWidget {
     )
   }
 
+  /**
+   * Drag the toolbar anywhere; on release it glides to the nearest corner or
+   * edge middle, which is remembered for this visitor.
+   */
+  private startToolbarDrag(e: PointerEvent) {
+    if (e.button !== 0 || !e.isPrimary) return
+    this.endToolbarDrag?.()
+    const drag: ToolbarDrag = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      dx: 0,
+      dy: 0,
+      moving: false,
+    }
+    this.toolbarDrag = drag
+    const toolbar = () => this.uiLayer.querySelector<HTMLElement>(".toolbar")
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== drag.id) return
+      drag.dx = ev.clientX - drag.x
+      drag.dy = ev.clientY - drag.y
+      if (!drag.moving && Math.hypot(drag.dx, drag.dy) < 5) return
+      if (!drag.moving) {
+        drag.moving = true
+        // Cover the page (and its iframes) so the drag keeps every move.
+        this.host.dataset.dragging = ""
+        toolbar()?.setAttribute("data-dragging", "")
+      }
+      ev.preventDefault()
+      toolbar()?.style.setProperty(
+        "transform",
+        `translate(${drag.dx}px, ${drag.dy}px)`
+      )
+    }
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== drag.id) return
+      this.endToolbarDrag?.()
+      if (drag.moving) this.dropToolbar(toolbar(), true)
+    }
+    // A cancelled press (or leaving the window mid-drag) goes back where it was.
+    const onCancel = (ev: Event) => {
+      if (ev instanceof PointerEvent && ev.pointerId !== drag.id) return
+      this.endToolbarDrag?.()
+      if (drag.moving) this.dropToolbar(toolbar(), false)
+    }
+    window.addEventListener("pointermove", onMove, true)
+    window.addEventListener("pointerup", onUp, true)
+    window.addEventListener("pointercancel", onCancel, true)
+    window.addEventListener("blur", onCancel)
+    this.endToolbarDrag = () => {
+      window.removeEventListener("pointermove", onMove, true)
+      window.removeEventListener("pointerup", onUp, true)
+      window.removeEventListener("pointercancel", onCancel, true)
+      window.removeEventListener("blur", onCancel)
+      delete this.host.dataset.dragging
+      this.toolbarDrag = null
+      this.endToolbarDrag = null
+    }
+  }
+
+  /** Glide the toolbar to the spot nearest where it was let go, or back. */
+  private dropToolbar(el: HTMLElement | null, snap: boolean) {
+    this.toolbarDropped = true
+    setTimeout(() => (this.toolbarDropped = false))
+    if (!el) return
+    const from = el.getBoundingClientRect()
+    if (snap) {
+      const position = nearestPosition(
+        from.left + from.width / 2,
+        from.top + from.height / 2
+      )
+      this.position = position
+      this.host.dataset.position = position
+      write(
+        KEYS.position(this.config.project),
+        position === this.config.position ? null : position
+      )
+    }
+    el.removeAttribute("data-dragging")
+    el.style.removeProperty("transform")
+    const to = el.getBoundingClientRect()
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    el.animate(
+      [
+        {
+          transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)`,
+        },
+        { transform: "none" },
+      ],
+      { duration: 320, easing: "cubic-bezier(0.2, 0.9, 0.3, 1.15)" }
+    )
+  }
+
   private renderPanel() {
     const open = this.comments.filter((c) => c.status === "open")
     const resolved = this.comments.filter((c) => c.status === "resolved")
-    const list = this.tab === "open" ? open : resolved
+    const query = this.search.trim().toLocaleLowerCase()
+    const matches = (...texts: (string | undefined)[]) =>
+      !query || texts.some((t) => t?.toLocaleLowerCase().includes(query))
+    const list = (this.tab === "open" ? open : resolved).filter((c) =>
+      matches(c.body, c.authorName, c.anchor.quote?.exact)
+    )
     const placed = list.filter((c) => this.placements.get(c._id)?.element)
     const lost = list.filter((c) => !this.placements.get(c._id)?.element)
-    const otherPages = this.pages.filter((p) => p.path !== this.pageKey)
+    const otherPages = this.pages.filter(
+      (p) => p.path !== this.pageKey && matches(p.path)
+    )
 
     const item = (c: WidgetComment) =>
       h(
@@ -1977,6 +2149,7 @@ export class NuniWidget {
         {
           class: "item",
           type: "button",
+          "aria-current": c._id === this.lastViewedId ? "true" : null,
           "data-focus-key": `item-${c._id}`,
           onclick: () => this.focusComment(c._id),
         },
@@ -2014,6 +2187,14 @@ export class NuniWidget {
     const children: Node[] = []
     if (!this.loaded) {
       children.push(h("div", { class: "empty" }, this.t("loading")))
+    } else if (!list.length && query) {
+      children.push(
+        h(
+          "div",
+          { class: "empty" },
+          this.t("noMatches", { query: this.search.trim() })
+        )
+      )
     } else if (!list.length) {
       children.push(
         h(
@@ -2075,6 +2256,26 @@ export class NuniWidget {
           icon(ICONS.close)
         )
       ),
+      this.comments.length
+        ? h(
+            "div",
+            { class: "panel-search" },
+            icon(ICONS.search),
+            h("input", {
+              class: "field",
+              type: "search",
+              value: this.search,
+              placeholder: this.t("searchComments"),
+              "aria-label": this.t("searchComments"),
+              "aria-controls": "nuni-panel-list",
+              "data-focus-key": "panel-search",
+              oninput: (e: Event) => {
+                this.search = (e.target as HTMLInputElement).value
+                this.render()
+              },
+            })
+          )
+        : null,
       h(
         "div",
         {
@@ -2878,8 +3079,12 @@ export class NuniWidget {
       if (left + width > vw - 12) left = point.x - width - 12
     } else {
       // Next to the toolbar, in its corner.
-      const { position } = this.config
-      left = position.endsWith("left") ? 16 : vw - width - 16
+      const { position } = this
+      left = position.endsWith("left")
+        ? 16
+        : position.endsWith("center")
+          ? (vw - width) / 2
+          : vw - width - 16
       top = position.startsWith("top") ? 72 : vh - height - 72
     }
     left = Math.max(12, Math.min(left, vw - width - 12))
@@ -2896,4 +3101,29 @@ export class NuniWidget {
       target?.focus()
     })
   }
+}
+
+/** The toolbar spot nearest a point: thirds across the screen, halves down. */
+function nearestPosition(x: number, y: number): Position {
+  const width = window.innerWidth
+  const across =
+    x < width / 3 ? "left" : x > (width * 2) / 3 ? "right" : "center"
+  return `${y < window.innerHeight / 2 ? "top" : "bottom"}-${across}`
+}
+
+/** A press on a scrollbar, which scrolls rather than points at the page. */
+function onScrollbar(e: PointerEvent): boolean {
+  const el = e.composedPath()[0]
+  if (!(el instanceof Element)) return false
+  const root = document.documentElement
+  if (el === root)
+    return e.clientX >= root.clientWidth || e.clientY >= root.clientHeight
+  const scrolls =
+    el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth
+  if (!scrolls) return false
+  const box = el.getBoundingClientRect()
+  return (
+    e.clientX - box.left - el.clientLeft >= el.clientWidth ||
+    e.clientY - box.top - el.clientTop >= el.clientHeight
+  )
 }

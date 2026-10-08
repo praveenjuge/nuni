@@ -33,8 +33,9 @@ instance.destroy()
       default: '"path"',
     },
     position: {
-      type: '"bottom-right" | "bottom-left" | "top-right" | "top-left"',
-      description: "The toolbar's corner.",
+      type: '"bottom-right" | "bottom-center" | "bottom-left" | "top-right" | "top-center" | "top-left"',
+      description:
+        "Where the toolbar starts. Visitors can drag it to another corner or edge middle, and it stays there for them.",
       default: '"bottom-right"',
     },
     accentColor: {

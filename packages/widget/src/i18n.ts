@@ -30,6 +30,8 @@ export const EN = {
   noOpenKey: "No open comments on this page. Press {key} to add one.",
   noResolved: "Nothing resolved yet.",
   notFoundHere: "Couldn't find on this page",
+  searchComments: "Search comments",
+  noMatches: "No comments match “{query}”.",
   otherPages: "Other pages",
   openOnPage: "{count} open",
   replyCount: { one: "{count} reply", other: "{count} replies" },

@@ -71,7 +71,18 @@ button { cursor: pointer; }
   border: 1px solid var(--n-border);
   box-shadow: var(--n-shadow);
   pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
+.toolbar[data-dragging] {
+  cursor: grabbing;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08), 0 16px 40px rgba(0,0,0,0.2);
+}
+/* While dragging, the host covers the page so no move is lost to it. */
+:host([data-dragging]) { pointer-events: auto; cursor: grabbing; }
+:host([data-dragging]) .tb-btn { pointer-events: none; }
 .tb-btn {
   display: inline-flex;
   align-items: center;
@@ -228,7 +239,6 @@ button { cursor: pointer; }
   gap: 12px;
 }
 .confirm p { margin: 0; }
-.btn-danger-solid { background: var(--n-danger); color: #fff; border-color: transparent; }
 
 /* Pins */
 .pin {
@@ -503,6 +513,10 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
 .btn-ghost { border-color: transparent; background: transparent; }
 .btn-icon { width: 32px; padding: 0; justify-content: center; }
 .btn-danger { color: var(--n-danger); }
+/* After .btn, which would otherwise paint over the red with the card's background. */
+.btn-danger-solid,
+.btn-danger-solid:hover { background: var(--n-danger); border-color: var(--n-danger); color: #fff; }
+.btn-danger-solid:hover { filter: brightness(1.08); }
 .error { color: var(--n-danger); font-size: 12px; }
 .divider { height: 1px; background: var(--n-border); }
 
@@ -608,7 +622,7 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
 }
 .panel-head { display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--n-border); }
 .panel-title { font-weight: 650; flex: 1; }
-.tabs { display: flex; gap: 4px; padding: 8px 12px 0; }
+.tabs { display: flex; gap: 4px; padding: 0 12px; margin-top: 8px; }
 .tab {
   border: 0;
   background: transparent;
@@ -631,6 +645,11 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
   border-radius: 10px;
 }
 .item:hover { background: var(--n-bg-subtle); }
+/* The comment opened last, so it's easy to find your place again. */
+.item[aria-current="true"] { background: var(--n-accent-soft); box-shadow: inset 3px 0 0 var(--n-accent); }
+.panel-search { position: relative; padding: 0 12px; margin-top: 8px; }
+.panel-search .icon { position: absolute; left: 22px; top: 50%; transform: translateY(-50%); color: var(--n-fg-muted); pointer-events: none; }
+.panel-search .field { padding-left: 32px; }
 .item-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
 .section-label { padding: 12px 10px 4px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--n-fg-muted); }
 .empty { padding: 32px 16px; text-align: center; color: var(--n-fg-muted); }
@@ -674,8 +693,10 @@ a.item { color: inherit; text-decoration: none; }
   * { transition: none !important; animation: none !important; }
 }
 
-/* The toolbar's corner (the position option) */
+/* The toolbar's spot (the position option, or where it was dragged) */
 :host([data-position$="left"]) .toolbar { right: auto; left: 16px; }
+:host([data-position$="center"]) .toolbar { left: 0; right: 0; width: max-content; margin-inline: auto; }
+:host([data-position="top-center"]) .pick-hint { top: auto; bottom: 12px; }
 :host([data-position^="top"]) .toolbar { bottom: auto; top: 16px; }
 :host([data-position$="left"]) .panel { right: auto; left: 12px; }
 :host([data-position^="top"]) .panel { top: 72px; bottom: 12px; }

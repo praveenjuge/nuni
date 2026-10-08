@@ -2,7 +2,13 @@ import { normalizePath } from "@nuni/shared"
 
 import type { Messages } from "./i18n"
 
-export type Position = "bottom-right" | "bottom-left" | "top-right" | "top-left"
+export type Position =
+  | "bottom-right"
+  | "bottom-center"
+  | "bottom-left"
+  | "top-right"
+  | "top-center"
+  | "top-left"
 export type Theme = "auto" | "light" | "dark"
 /** Built-in page keys, for when `getPageKey` is not set. */
 export type PageKey = "path" | "path+search" | "path+hash"
@@ -23,7 +29,10 @@ export interface NuniOptions {
    * the path (default), the path and query string, or the path and hash.
    */
   pageKey?: PageKey
-  /** Corner for the toolbar. Default "bottom-right". */
+  /**
+   * Where the toolbar starts. Default "bottom-right". Visitors can drag it to
+   * another corner or edge middle, and their choice is remembered.
+   */
   position?: Position
   /** Brand color for buttons, pins and highlights (any CSS color). */
   accentColor?: string
@@ -110,15 +119,17 @@ export function resolveConfig(options: NuniOptions): ResolvedConfig {
   }
 }
 
-const POSITIONS: readonly Position[] = [
+export const POSITIONS: readonly Position[] = [
   "bottom-right",
+  "bottom-center",
   "bottom-left",
   "top-right",
+  "top-center",
   "top-left",
 ]
 const THEMES: readonly Theme[] = ["auto", "light", "dark"]
 
-function oneOf<T extends string>(
+export function oneOf<T extends string>(
   value: string | undefined,
   allowed: readonly T[],
   fallback: T

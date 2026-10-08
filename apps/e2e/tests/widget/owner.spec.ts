@@ -118,11 +118,13 @@ test("owner resolves and deletes from the widget; visitors see it live", async (
     .locator('#nuni-root [data-card="thread"]')
     .getByRole("button", { name: "Delete" })
     .click()
-  await owner
+  const confirmDelete = owner
     .locator("#nuni-root")
     .getByRole("alertdialog")
     .getByRole("button", { name: "Delete" })
-    .click()
+  // White text on the danger red, not on the dialog's own background.
+  await expect(confirmDelete).toHaveCSS("background-color", "rgb(217, 48, 37)")
+  await confirmDelete.click()
   await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("1")
 
   await expect(owner.locator("#nuni-root .panel-foot")).toHaveCount(0)
