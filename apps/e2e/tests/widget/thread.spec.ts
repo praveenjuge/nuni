@@ -119,3 +119,50 @@ test("replies and reactions sync live, with an Owner badge", async ({
   await otherContext.close()
   await ownerContext.close()
 })
+
+test("pressing the page closes the card unless it has unsent words", async ({
+  page,
+}) => {
+  const project = projectId()
+  const body = `Close me like Figma ${Date.now()}`
+  await page.goto(`/pricing?project=${project}`)
+  const elsewhere = page.locator(".plan").nth(2).locator(".price")
+
+  // An empty composer closes; one with words stays open.
+  await page
+    .locator("#nuni-root .toolbar")
+    .getByRole("button", { name: "Add a comment" })
+    .click()
+  await page.locator(".plan").first().locator(".price").click()
+  const composer = page.locator('#nuni-root [data-card="composer"]')
+  await expect(composer).toBeVisible()
+  await elsewhere.click()
+  await expect(composer).toHaveCount(0)
+
+  await page
+    .locator("#nuni-root .toolbar")
+    .getByRole("button", { name: "Add a comment" })
+    .click()
+  await page.locator(".plan").first().locator(".price").click()
+  await composer.getByPlaceholder("Your name").fill("Sam Visitor")
+  await composer.getByPlaceholder("Leave a comment").fill(body)
+  await elsewhere.click()
+  await expect(composer).toBeVisible()
+  await composer.getByRole("button", { name: "Post" }).click()
+  await expect(page.locator("#nuni-root .toast")).toHaveText("Comment added")
+
+  // The thread closes on a press outside it, but not while a reply is typed.
+  await page.locator("#nuni-root .pin:not(.pin-draft)").click()
+  await expect(thread(page)).toContainText(body)
+  await elsewhere.click()
+  await expect(thread(page)).toHaveCount(0)
+
+  await page.locator("#nuni-root .pin:not(.pin-draft)").click()
+  const reply = thread(page).getByRole("textbox", { name: "Reply" })
+  await reply.fill("Half a thought")
+  await elsewhere.click()
+  await expect(thread(page)).toBeVisible()
+  await reply.fill("")
+  await elsewhere.click()
+  await expect(thread(page)).toHaveCount(0)
+})

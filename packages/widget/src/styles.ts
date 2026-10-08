@@ -622,7 +622,7 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
 }
 .panel-head { display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--n-border); }
 .panel-title { font-weight: 650; flex: 1; }
-.tabs { display: flex; gap: 4px; padding: 8px 12px 0; }
+.tabs { display: flex; gap: 4px; padding: 0 12px; margin-top: 8px; }
 .tab {
   border: 0;
   background: transparent;
@@ -645,6 +645,11 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
   border-radius: 10px;
 }
 .item:hover { background: var(--n-bg-subtle); }
+/* The comment opened last, so it's easy to find your place again. */
+.item[aria-current="true"] { background: var(--n-accent-soft); box-shadow: inset 3px 0 0 var(--n-accent); }
+.panel-search { position: relative; padding: 0 12px; margin-top: 8px; }
+.panel-search .icon { position: absolute; left: 22px; top: 50%; transform: translateY(-50%); color: var(--n-fg-muted); pointer-events: none; }
+.panel-search .field { padding-left: 32px; }
 .item-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
 .section-label { padding: 12px 10px 4px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--n-fg-muted); }
 .empty { padding: 32px 16px; text-align: center; color: var(--n-fg-muted); }

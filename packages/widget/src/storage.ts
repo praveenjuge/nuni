@@ -25,4 +25,6 @@ export const KEYS = {
   session: (project: string) => `nuni:session:${project}`,
   /** Where this visitor dragged the toolbar. */
   position: (project: string) => `nuni:position:${project}`,
+  /** The comment this visitor opened last, marked in the panel. */
+  lastViewed: (project: string) => `nuni:last-viewed:${project}`,
 } as const

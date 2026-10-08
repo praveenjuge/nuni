@@ -18,16 +18,19 @@ async function dragToolbarTo(page: Page, x: number, y: number) {
 /** The toolbar's gap to each edge of the viewport, once it has settled. */
 async function edges(page: Page) {
   await expect
-    .poll(() => toolbar(page).evaluate((el) => el.getAnimations().length === 0))
-    .toBe(true)
-  const box = (await toolbar(page).boundingBox())!
-  const view = page.viewportSize()!
-  return {
-    left: box.x,
-    top: box.y,
-    right: view.width - box.x - box.width,
-    bottom: view.height - box.y - box.height,
-  }
+    .poll(() => toolbar(page).evaluate((el) => el.getAnimations().length))
+    .toBe(0)
+  // Measured in one step: the toolbar is redrawn with the rest of the UI.
+  return toolbar(page).evaluate((el) => {
+    const box = el.getBoundingClientRect()
+    const view = document.documentElement
+    return {
+      left: box.left,
+      top: box.top,
+      right: view.clientWidth - box.right,
+      bottom: view.clientHeight - box.bottom,
+    }
+  })
 }
 
 test("drag the toolbar and it snaps to a corner or edge middle", async ({
