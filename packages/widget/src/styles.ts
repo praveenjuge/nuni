@@ -239,7 +239,6 @@ button { cursor: pointer; }
   gap: 12px;
 }
 .confirm p { margin: 0; }
-.btn-danger-solid { background: var(--n-danger); color: #fff; border-color: transparent; }
 
 /* Pins */
 .pin {
@@ -514,6 +513,10 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
 .btn-ghost { border-color: transparent; background: transparent; }
 .btn-icon { width: 32px; padding: 0; justify-content: center; }
 .btn-danger { color: var(--n-danger); }
+/* After .btn, which would otherwise paint over the red with the card's background. */
+.btn-danger-solid,
+.btn-danger-solid:hover { background: var(--n-danger); border-color: var(--n-danger); color: #fff; }
+.btn-danger-solid:hover { filter: brightness(1.08); }
 .error { color: var(--n-danger); font-size: 12px; }
 .divider { height: 1px; background: var(--n-border); }
 
