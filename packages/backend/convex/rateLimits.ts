@@ -39,6 +39,12 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     period: MINUTE,
     capacity: 10,
   },
+  imagePerIp: {
+    kind: "token bucket",
+    rate: 10,
+    period: MINUTE,
+    capacity: 10,
+  },
   cliLoginPerIp: { kind: "token bucket", rate: 10, period: HOUR },
   /** The CLI polls every 2 seconds while it waits for approval. */
   cliPollPerIp: {
@@ -48,6 +54,13 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     capacity: 60,
   },
   editPerAuthor: { kind: "token bucket", rate: 30, period: MINUTE },
+  /** One report per page view, at most, with every pin found or lost. */
+  pinReportPerIp: {
+    kind: "token bucket",
+    rate: 20,
+    period: MINUTE,
+    capacity: 20,
+  },
   sessionPerUser: { kind: "token bucket", rate: 20, period: HOUR },
 })
 

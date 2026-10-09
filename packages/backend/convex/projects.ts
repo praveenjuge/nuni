@@ -6,6 +6,7 @@ import { internalMutation, mutation, query } from "./_generated/server"
 import {
   assertProjectId,
   claimFor,
+  commentFiles,
   ensureProject,
   fail,
   parseOrigin,
@@ -220,7 +221,7 @@ export const deleteBatch = internalMutation({
       .take(DELETE_BATCH)
     for (const comment of comments) {
       await deleteThread(ctx, comment._id)
-      if (comment.screenshotId) await ctx.storage.delete(comment.screenshotId)
+      for (const file of commentFiles(comment)) await ctx.storage.delete(file)
       await ctx.db.delete(comment._id)
     }
     if (comments.length) {

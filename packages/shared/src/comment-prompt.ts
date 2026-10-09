@@ -49,10 +49,25 @@ export function buildCommentPrompt(
     "",
     "## Comment",
     "",
-    quote(comment.body),
-    "",
+    ...(comment.body ? [quote(comment.body), ""] : []),
+    ...(comment.suggestion
+      ? [
+          "Suggested text change. Replace:",
+          "",
+          quote(comment.suggestion.before),
+          "",
+          "With:",
+          "",
+          quote(comment.suggestion.after),
+          "",
+        ]
+      : []),
     `From ${comment.authorName} on ${new Date(comment.createdAt).toISOString().slice(0, 10)}` +
-      (comment.status === "resolved" ? " (already resolved)" : "")
+      (comment.status === "resolved"
+        ? comment.resolution === "outdated"
+          ? " (closed as outdated)"
+          : " (already resolved)"
+        : "")
   )
 
   if (comment.replies?.length) {
@@ -78,6 +93,11 @@ export function buildCommentPrompt(
   }
 
   out.push("", "## Element", "")
+  if (comment.pinLostAt) {
+    out.push(
+      `- Not found on the page since ${new Date(comment.pinLostAt).toISOString().slice(0, 10)}: it may have changed or been removed. Check whether the feedback still applies.`
+    )
+  }
   out.push(`- Tag: <${anchor.tag}>`)
   if (anchor.text) out.push(`- Text: ${inline(anchor.text)}`)
   if (anchor.quote) {
@@ -137,6 +157,14 @@ export function buildCommentPrompt(
       )
     }
   }
+  if (comment.imageUrls?.length) {
+    out.push(
+      "",
+      `## Images from ${comment.authorName} (${comment.imageUrls.length})`,
+      "",
+      ...comment.imageUrls.map((url) => `- ${url}`)
+    )
+  }
   if (includeContext && comment.screenshotUrl) {
     out.push("", "## Screenshot", "", comment.screenshotUrl)
   }
@@ -146,7 +174,9 @@ export function buildCommentPrompt(
     "## Steps",
     "",
     "1. Find the code that renders this element. Search for the text, the component name, the test ID or the selector.",
-    "2. Make the change the comment asks for, and keep the fix focused on it.",
+    comment.suggestion
+      ? "2. Replace the text exactly as suggested (wherever it comes from: markup, a component, a translation or content file), and keep the fix focused on it."
+      : "2. Make the change the comment asks for, and keep the fix focused on it.",
     "3. Tell me what you changed, so the comment can be resolved in Nuni.",
     `   If the Nuni CLI is signed in to this project (\`npx ${PACKAGES.cli}@latest login\`), resolve it with \`npx ${PACKAGES.cli}@latest resolve ${comment._id}\` or the \`resolve_comment\` MCP tool.`
   )

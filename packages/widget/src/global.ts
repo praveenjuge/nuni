@@ -1,6 +1,6 @@
 import { VERSION, type NuniOptions } from "./config"
 import { mount } from "./mount"
-import type { CaptureScreenshot } from "./screenshot"
+import type { ScreenshotTools } from "./tools"
 
 declare global {
   interface Window {
@@ -13,10 +13,10 @@ const script =
   (document.currentScript as HTMLScriptElement | null) ??
   document.querySelector<HTMLScriptElement>("script[data-project][src*='nuni']")
 
-let screenshot: Promise<CaptureScreenshot | null> | null = null
+let screenshot: Promise<ScreenshotTools | null> | null = null
 
 /** The screenshot code is a second file next to this one, loaded on demand. */
-function loadScreenshot(): Promise<CaptureScreenshot | null> {
+function loadScreenshot(): Promise<ScreenshotTools | null> {
   screenshot ??= new Promise((resolve) => {
     if (window.__nuniScreenshot) return resolve(window.__nuniScreenshot)
     const el = document.createElement("script")
@@ -65,6 +65,7 @@ if (data?.project) {
     // `!== undefined`, so data-z-index="0" works too.
     zIndex: data.zIndex !== undefined ? Number(data.zIndex) : undefined,
     locale: data.locale,
+    images: flag(data.images),
     capture: {
       console: flag(data.captureConsole),
       network: flag(data.captureNetwork),

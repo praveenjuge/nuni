@@ -8,7 +8,7 @@ import { colorFor, h, icon, initials, readableOn } from "../src/dom"
 import { createI18n } from "../src/i18n"
 import { ICONS } from "../src/icons"
 import { init } from "../src/index"
-import { otherPageHref } from "../src/widget"
+import { commentHref, otherPageHref } from "../src/widget"
 import { sha256 } from "../src/sha256"
 import { KEYS, read, write } from "../src/storage"
 
@@ -148,6 +148,19 @@ describe("other page links", () => {
     expect(otherPageHref("/#/settings", loc)).toBe(
       "https://acme.example/#/settings"
     )
+  })
+
+  it("links to one comment on another page", () => {
+    const page = { path: "/pricing" }
+    expect(commentHref({ _id: "c1", page } as never, loc)).toBe(
+      "https://acme.example/pricing?token=secret&nuni=c1"
+    )
+    expect(
+      commentHref({ _id: "c1", page: { path: "/#/settings" } } as never, loc)
+    ).toBe("https://acme.example/?nuni=c1#/settings")
+    expect(
+      commentHref({ _id: "c1", page: { path: "@evil.example/" } } as never, loc)
+    ).toBeNull()
   })
 
   it("drops stored paths that would leave the origin", () => {

@@ -103,12 +103,21 @@ export interface CommentContext {
   dom?: DomContext
 }
 
+/** New words the commenter suggests for the commented text. */
+export interface TextSuggestion {
+  /** The text on the page when the comment was left. */
+  before: string
+  after: string
+}
+
 /** Shape of a comment as the widget receives it. */
 export interface WidgetComment {
   _id: string
   _creationTime: number
   status: CommentStatus
+  /** Can be empty when the comment is only a suggestion. */
   body: string
+  suggestion?: TextSuggestion
   authorName: string
   authorKeyHash: string
   /** Public listings only include origin, path and title. */
@@ -125,6 +134,12 @@ export interface WidgetComment {
   createdAt: number
   editedAt?: number
   resolvedAt?: number
+  /** Resolved by closing it as outdated, rather than by a fix. */
+  resolution?: "outdated"
+  /** Visitors' widgets can't find the element on the page. */
+  pinLost?: boolean
+  /** Images the commenter attached; their links come with the thread. */
+  imageCount?: number
   /** Replies in the thread (not counting the comment itself). */
   replyCount?: number
 }
@@ -154,12 +169,18 @@ export interface ReactionSummary {
 export interface Thread {
   replies: ReplyView[]
   reactions: ReactionSummary[]
+  /** Links to the comment's attached images. */
+  images?: string[]
 }
 
 /** A comment as the owner sees it (dashboard, owner widget, agents). */
 export interface OwnerComment extends WidgetComment {
+  /** Since when the element can't be found on the page. */
+  pinLostAt?: number
   userAgent?: string
   context?: CommentContext
   screenshotUrl?: string | null
+  /** Images the commenter attached, public like the comment. */
+  imageUrls?: string[]
   replies?: ReplyView[]
 }

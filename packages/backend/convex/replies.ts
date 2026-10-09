@@ -14,6 +14,7 @@ import {
   cleanBody,
   cleanName,
   fail,
+  imageUrls,
   projectByPublicId,
   requireOwner,
   sha256Hex,
@@ -169,14 +170,15 @@ export const listForComment = query({
     const id = ctx.db.normalizeId("comments", commentId)
     const comment = id ? await ctx.db.get(id) : null
     if (!project || !comment || comment.projectId !== project._id) {
-      return { replies: [], reactions: [] }
+      return { replies: [], reactions: [], images: [] }
     }
-    const [replies, rows] = await Promise.all([
+    const [replies, rows, images] = await Promise.all([
       repliesFor(ctx, comment._id),
       ctx.db
         .query("reactions")
         .withIndex("by_comment", (q) => q.eq("commentId", comment._id))
         .take(LIMITS.reactionsPerComment),
+      imageUrls(ctx, comment),
     ])
     const groups = new Map<
       string,
@@ -198,6 +200,7 @@ export const listForComment = query({
         ...g,
         count: g.authorKeyHashes.length,
       })),
+      images,
     }
   },
 })

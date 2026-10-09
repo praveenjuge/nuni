@@ -15,6 +15,10 @@ For each comment: the text, the author name (as typed), a hash of the commenter'
 
 For owners: the name, email and avatar from GitHub via WorkOS.
 
+## Images commenters attach
+
+On a claimed site, a commenter can attach up to three images to a comment: their own (picked or pasted), or the screenshot of the element after drawing boxes, arrows or lines on it. These images are **public, like the comment**: everyone who can see the comment sees them, and the comment box says so. Images are scaled down and re-encoded in the browser before they are sent, which also removes their metadata (such as location). They are deleted with the comment. Turn them off with the [`images` option](/reference/options).
+
 ## Page context (owner only)
 
 To help you, or your coding agent, act on a comment, the widget also attaches what it saw when the comment was left:

@@ -35,6 +35,11 @@ export interface CommentPage {
   cursor: string | null
 }
 
+export interface PageCount {
+  path: string
+  openCount: number
+}
+
 /** Everything the CLI and MCP server ask the backend. */
 export interface Remote {
   startLogin(publicId: string, client: string): Promise<LoginStart>
@@ -50,10 +55,13 @@ export interface Remote {
     options?: {
       status?: CommentStatus
       path?: string
+      /** Words in the comment or the author's name; by relevance. */
+      search?: string
       limit?: number
       cursor?: string | null
     }
   ): Promise<CommentPage>
+  listPages(publicId: string, token: string): Promise<PageCount[]>
   getComment(
     publicId: string,
     token: string,
@@ -159,6 +167,14 @@ export function createRemote(): Remote {
         })
         return page as unknown as CommentPage
       }),
+
+    listPages: (publicId, token) =>
+      call(() =>
+        client.query(api.comments.pagesForAgent, {
+          publicId,
+          sessionToken: token,
+        })
+      ),
 
     getComment: (publicId, token, id) =>
       call(async () => {

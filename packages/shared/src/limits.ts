@@ -10,6 +10,10 @@ export const LIMITS = {
   transferTtlMs: 7 * 24 * 60 * 60 * 1000,
   /** Comments changed at once from the dashboard. */
   bulkMax: 100,
+  /** Pins found or lost in one report from a visitor's widget. */
+  pinReportMax: 200,
+  /** The dashboard's "Not found" count stops here ("99+"). */
+  lostCountMax: 99,
   /** How long a `nuni login` code waits for approval in the dashboard. */
   cliLoginTtlMs: 10 * 60 * 1000,
   anchorTextMaxLength: 120,
@@ -19,12 +23,19 @@ export const LIMITS = {
   /** Per page, the widget loads this many newest open and resolved comments. */
   pageOpenLimit: 1000,
   pageResolvedLimit: 200,
+  /** The newest of a commenter's own comments, across pages. */
+  yoursLimit: 100,
   /** Most console or network entries kept with one comment. */
   contextEntryMax: 20,
   contextMessageMaxLength: 500,
   /** Trimmed outerHTML of the commented element. */
   domSnippetMaxLength: 4000,
   screenshotMaxBytes: 600_000,
+  /** Images a commenter attaches to one comment (their own or marked up). */
+  imagesPerComment: 3,
+  imageMaxBytes: 600_000,
+  /** Longest side of an attached image, in pixels. */
+  imageMaxSide: 1600,
   /** Replies kept per comment thread. */
   repliesPerComment: 200,
   /** Reactions kept per thread (the comment and its replies). */

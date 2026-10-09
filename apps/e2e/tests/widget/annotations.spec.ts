@@ -186,3 +186,72 @@ test("an area dragged while picking is shown again on its element", async ({
   await expect(thread(page)).toBeVisible()
   await expectBox(page, ".area", expected, 3)
 })
+
+test("suggest new words for selected text or a button, then edit them", async ({
+  page,
+}) => {
+  const project = projectId()
+  await page.goto(`/?project=${project}`)
+  await expect(root(page).locator(".toolbar")).toBeVisible()
+
+  // Selected words: the new words alone are enough to post.
+  await selectWords(page.locator(".lead"), "ship your product")
+  await root(page).getByRole("button", { name: "Comment", exact: true }).click()
+  await composer(page).getByPlaceholder("Your name").fill("Sam Tester")
+  await composer(page).getByRole("button", { name: "Suggest an edit" }).click()
+  const newText = composer(page).getByRole("textbox", { name: "New text" })
+  await expect(newText).toHaveValue("ship your product")
+  await expect(newText).toBeFocused()
+  const postButton = composer(page).getByRole("button", { name: "Post" })
+  await expect(postButton).toBeDisabled()
+  await newText.fill("launch faster")
+  await postButton.click()
+  await expect(root(page).locator(".toast")).toHaveText("Comment added")
+
+  await root(page).locator(".pin:not(.pin-draft)").click()
+  const edit = thread(page).locator(".suggest")
+  await expect(edit.locator("del")).toHaveText("ship your product")
+  await expect(edit.locator("ins")).toHaveText("launch faster")
+  await expect(thread(page).locator(".comment-body")).toHaveCount(0)
+
+  // The author can change the new words.
+  await thread(page).getByRole("button", { name: "Edit" }).click()
+  await thread(page)
+    .getByRole("textbox", { name: "New text" })
+    .fill("ship it faster")
+  await thread(page).getByRole("button", { name: "Save" }).click()
+  await expect(edit.locator("ins")).toHaveText("ship it faster")
+
+  // A button's whole text, with a note.
+  await page.goto(`/pricing?project=${project}`)
+  await root(page)
+    .locator(".toolbar")
+    .getByRole("button", { name: "Add a comment" })
+    .click()
+  await page
+    .locator(".plan")
+    .first()
+    .getByRole("button", { name: "Choose plan" })
+    .click()
+  await composer(page).getByRole("button", { name: "Suggest an edit" }).click()
+  await expect(
+    composer(page).getByRole("textbox", { name: "New text" })
+  ).toHaveValue("Choose plan")
+  await composer(page)
+    .getByRole("textbox", { name: "New text" })
+    .fill("Pick this plan")
+  await composer(page).getByPlaceholder("Add a note (optional)").fill("Clearer")
+  await composer(page).getByRole("button", { name: "Post" }).click()
+  await expect(root(page).locator(".toast")).toHaveText("Comment added")
+
+  // Both show in the panel as old → new, after a reload.
+  await page.reload()
+  await root(page)
+    .locator(".toolbar")
+    .getByRole("button", { name: /open/ })
+    .click()
+  const item = root(page).locator(".panel .item", { hasText: "Clearer" })
+  await expect(item.locator(".item-suggest")).toHaveText(
+    "Choose plan → Pick this plan"
+  )
+})

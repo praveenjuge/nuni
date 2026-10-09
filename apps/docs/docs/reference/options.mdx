@@ -87,6 +87,12 @@ instance.destroy()
       description:
         "Self-hosting or local development: where the dashboard is served.",
     },
+    images: {
+      type: "boolean",
+      description:
+        "Let commenters attach images and mark up the screenshot. They are public, like the comment. Claimed sites only.",
+      default: "true",
+    },
     capture: {
       type: "{ console?, network?, dom?, screenshot? }",
       description:
@@ -121,7 +127,7 @@ instance.destroy()
 
 The full list of words is exported as `messages` from `@nuniapp/widget`. `{name}` parts are filled in, and a message with `one` and `other` forms (plus `zero`, `two`, `few` or `many` where a language has them) is picked by `{count}`. Shortcuts show <kbd>⌘</kbd> on Apple devices and <kbd>Ctrl</kbd> elsewhere.
 
-With the script tag, use data attributes: `data-position`, `data-accent-color`, `data-theme`, `data-label`, `data-hotkey` (`"false"` turns it off), `data-z-index`, `data-locale` and `data-page-key`.
+With the script tag, use data attributes: `data-position`, `data-accent-color`, `data-theme`, `data-label`, `data-hotkey` (`"false"` turns it off), `data-z-index`, `data-locale`, `data-page-key` and `data-images` (`"false"` turns images off).
 
 ## Page context
 

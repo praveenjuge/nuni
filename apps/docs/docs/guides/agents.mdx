@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-A comment in Nuni carries the context an agent needs: the page, the element (text, selectors, React component), its markup and styles, console errors, failed requests and a screenshot. There are three ways to hand it over.
+A comment in Nuni carries the context an agent needs: the page, the element (text, selectors, React component), its markup and styles, console errors, failed requests and a screenshot. When the commenter suggested an edit, it includes the exact old and new text too. There are three ways to hand it over.
 
 ## Copy for agent
 
@@ -58,13 +58,18 @@ Add Nuni to your agent once. It runs `npx @nuniapp/cli@latest mcp` in your proje
 
 Then ask your agent something like _"fix the open Nuni comments"_. The tools:
 
-| Tool               | What it does                                                         |
-| ------------------ | -------------------------------------------------------------------- |
-| `list_comments`    | Open (or resolved) comments, newest first, optionally for one page   |
-| `get_comment`      | One comment with all of its context, plus the screenshot as an image |
-| `reply_to_comment` | Reply in the thread, as the owner                                    |
-| `resolve_comment`  | Resolve it, optionally with a note saying what changed               |
-| `reopen_comment`   | Reopen it                                                            |
+| Tool               | What it does                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| `list_comments`    | Open (or resolved) comments, newest first, optionally for one page and grouped by page or element |
+| `search_comments`  | Comments with these words in them or from this author, best match first                           |
+| `list_pages`       | The pages with open comments, and how many each has                                               |
+| `get_comment`      | One comment with all of its context, plus the screenshot as an image                              |
+| `reply_to_comment` | Reply in the thread, as the owner                                                                 |
+| `resolve_comment`  | Resolve it, optionally with a note saying what changed                                            |
+| `resolve_comments` | Resolve several at once, for example everything one change fixed                                  |
+| `reopen_comment`   | Reopen it                                                                                         |
+
+Grouping helps with requests like _"fix all the comments on /pricing"_: comments on the same element (the same button, heading or sentence) are listed together, so one change can fix them all.
 
 If the agent isn't signed in, the tools say so and ask you to run `login`.
 
@@ -73,10 +78,14 @@ If the agent isn't signed in, the tools say so and ask you to run `login`.
 ```bash
 npx @nuniapp/cli@latest comments                  # open comments, newest first
 npx @nuniapp/cli@latest comments --page /pricing  # one page
+npx @nuniapp/cli@latest comments --search "typo"  # best match first
+npx @nuniapp/cli@latest comments --group element  # related comments together
+npx @nuniapp/cli@latest pages                     # pages with open comments
 npx @nuniapp/cli@latest comment <id>              # everything about one comment
 npx @nuniapp/cli@latest comment <id> --save-screenshot .
 npx @nuniapp/cli@latest reply <id> "Fixed in the next deploy"
 npx @nuniapp/cli@latest resolve <id> --note "Made the button bigger"
+npx @nuniapp/cli@latest resolve <id> <id> --note "Fixed both typos"
 ```
 
 ![Terminal output of nuni comments: four open comments with author, time, text and the element each one is on](../images/cli-comments.webp)

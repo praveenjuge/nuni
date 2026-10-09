@@ -5,7 +5,9 @@ import {
   anchorValidator,
   contextValidator,
   pageValidator,
+  resolutionValidator,
   statusValidator,
+  suggestionValidator,
   viewportValidator,
 } from "./validators"
 
@@ -38,6 +40,8 @@ export default defineSchema({
     body: v.string(),
     authorName: v.string(),
     authorKeyHash: v.string(),
+    /** New words for the commented text; `before` is the text as it was. */
+    suggestion: v.optional(suggestionValidator),
     page: pageValidator,
     anchor: anchorValidator,
     viewport: viewportValidator,
@@ -46,12 +50,24 @@ export default defineSchema({
     context: v.optional(contextValidator),
     /** Owner-only: an image of the element, uploaded right after posting. */
     screenshotId: v.optional(v.id("_storage")),
+    /**
+     * Images the commenter attached (their own, or the screenshot they
+     * marked up). Public, like the comment. Claimed projects only.
+     */
+    images: v.optional(v.array(v.id("_storage"))),
     /** Body plus author name, for dashboard search. */
     searchText: v.optional(v.string()),
     createdAt: v.number(),
     editedAt: v.optional(v.number()),
     resolvedAt: v.optional(v.number()),
     resolvedBy: v.optional(v.id("users")),
+    /** Resolved by closing it as outdated, rather than by a fix. */
+    resolution: v.optional(resolutionValidator),
+    /**
+     * Since when visitors' widgets can't find the element. Cleared as soon
+     * as one finds it again.
+     */
+    pinLostAt: v.optional(v.number()),
     /** Replies in the thread, kept in sync by replies.ts. */
     replyCount: v.optional(v.number()),
     /** Reactions on the comment and its replies, for the per-thread cap. */
@@ -65,6 +81,8 @@ export default defineSchema({
       "createdAt",
     ])
     .index("by_project_status", ["projectId", "status", "createdAt"])
+    .index("by_project_author", ["projectId", "authorKeyHash", "createdAt"])
+    .index("by_project_status_lost", ["projectId", "status", "pinLostAt"])
     .searchIndex("search_text", {
       searchField: "searchText",
       filterFields: ["projectId", "status"],

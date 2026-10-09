@@ -49,6 +49,11 @@ export interface NuniOptions {
   /** Replace any of the widget's words. See the `EN` messages. */
   messages?: Partial<Messages>
   /**
+   * Let commenters attach images and mark up the screenshot. They are shown
+   * to everyone who can see the comment. Default true; claimed sites only.
+   */
+  images?: boolean
+  /**
    * Extra context attached to each comment for the project owner and their
    * coding agent. Everything is on by default; set a key to `false` to stop
    * capturing it.
@@ -79,6 +84,7 @@ export interface ResolvedConfig {
   zIndex: number | null
   locale: string | undefined
   messages: Partial<Messages>
+  images: boolean
   capture: {
     console: boolean
     network: boolean
@@ -110,6 +116,7 @@ export function resolveConfig(options: NuniOptions): ResolvedConfig {
         : null,
     locale: options.locale?.trim() || undefined,
     messages: options.messages ?? {},
+    images: options.images ?? true,
     capture: {
       console: options.capture?.console ?? true,
       network: options.capture?.network ?? true,

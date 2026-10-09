@@ -285,6 +285,134 @@ describe("widget comments", () => {
         .quote
     ).toBeUndefined()
   })
+
+  it("stores suggested text changes for the commented text only", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const secret = generateSecret()
+    const quote = { exact: "Start free trial", prefix: "", suffix: "" }
+
+    // On selected words, with no comment text: the suggestion says it all.
+    const onText = await t.mutation(internal.comments.createFromWidget, {
+      publicId,
+      ip: "1.1.1.1",
+      body: "  ",
+      authorName: "Sam",
+      authorSecret: secret,
+      suggestion: { before: "Start free trial", after: "Try it free" },
+      page: page(),
+      anchor: { ...anchor, quote },
+      viewport: { w: 1280, h: 800, dpr: 2 },
+      userAgent: "test",
+    })
+    // On a small element's whole text (the anchor text is "Buy now").
+    await addComment(t, publicId, {
+      suggestion: { before: "Buy now", after: "Buy" },
+    })
+    const listed = await t.query(api.comments.listForPage, {
+      publicId,
+      path: "/pricing",
+    })
+    expect(
+      listed
+        .map((c) => c.suggestion)
+        .sort((a, b) => a!.after.localeCompare(b!.after))
+    ).toEqual([
+      { before: "Buy now", after: "Buy" },
+      { before: "Start free trial", after: "Try it free" },
+    ])
+    expect(listed.find((c) => c._id === onText)?.body).toBe("")
+
+    for (const suggestion of [
+      // Not the commented text.
+      { before: "Something else", after: "New" },
+      // Unchanged or empty.
+      { before: "Buy now", after: "Buy now" },
+      { before: "Buy now", after: "  " },
+      // Too long.
+      { before: "Buy now", after: "x".repeat(LIMITS.quoteMaxLength + 1) },
+    ]) {
+      await expect(addComment(t, publicId, { suggestion })).rejects.toThrow(
+        /suggest/i
+      )
+    }
+    // Areas have no text to replace.
+    await expect(
+      addComment(t, publicId, {
+        anchor: { region: { x: 0, y: 0, w: 0.5, h: 0.5 } },
+        suggestion: { before: "Buy now", after: "Buy" },
+      })
+    ).rejects.toThrow(/suggest/i)
+    // The comment text can be emptied when there is a suggestion, not otherwise.
+    await t.mutation(api.comments.editOwn, {
+      id: onText,
+      authorSecret: secret,
+      body: " ",
+    })
+    const plain = await addComment(t, publicId, { secret })
+    await expect(
+      t.mutation(api.comments.editOwn, {
+        id: plain,
+        authorSecret: secret,
+        body: " ",
+      })
+    ).rejects.toThrow(/empty/)
+
+    // The author can change the new words, and they are searchable.
+    await t.mutation(api.comments.editOwn, {
+      id: onText,
+      authorSecret: secret,
+      body: "Shorter reads better",
+      suggestion: "Try free",
+    })
+    await expect(
+      t.mutation(api.comments.editOwn, {
+        id: onText,
+        authorSecret: secret,
+        body: "",
+        suggestion: "Start free trial",
+      })
+    ).rejects.toThrow(/suggest/i)
+    const edited = await t.run((ctx) => ctx.db.get(onText))
+    expect(edited).toMatchObject({
+      body: "Shorter reads better",
+      suggestion: { before: "Start free trial", after: "Try free" },
+    })
+    expect(edited?.searchText).toContain("Try free")
+  })
+
+  it("lists a commenter's own comments on every page, by their key only", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const other = generateProjectId()
+    const secret = generateSecret()
+    const first = await addComment(t, publicId, { secret, body: "One" })
+    await addComment(t, publicId, { secret, path: "/about", body: "Two" })
+    await addComment(t, publicId, { body: "Someone else's" })
+    await addComment(t, other, { secret, body: "Another site" })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    await alice.mutation(api.comments.resolve, { id: first })
+
+    const mine = await t.query(api.comments.listMine, {
+      publicId,
+      authorSecret: secret,
+    })
+    expect(mine.map((c) => [c.body, c.page.path, c.status])).toEqual([
+      ["Two", "/about", "open"],
+      ["One", "/pricing", "resolved"],
+    ])
+    // The public hash is not enough to list someone's comments.
+    expect(
+      await t.query(api.comments.listMine, {
+        publicId,
+        authorSecret: mine[0]!.authorKeyHash,
+      })
+    ).toEqual([])
+    expect(
+      await t.query(api.comments.listMine, { publicId, authorSecret: "short" })
+    ).toEqual([])
+  })
 })
 
 describe("claiming and owner actions", () => {
@@ -809,12 +937,119 @@ const WEBP = new Uint8Array([
   0x88, 0xfe, 0x07, 0,
 ])
 
+describe("attached images", () => {
+  const uploadImage = (
+    t: T,
+    target: { publicId: string; id: string; secret: string },
+    body: Uint8Array<ArrayBuffer> = WEBP
+  ) => uploadScreenshot(t, target, body, "/widget/image")
+
+  it("lets the author attach a few public images on claimed sites", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const secret = generateSecret()
+    const id = await addComment(t, publicId, { secret })
+
+    // Unclaimed sites can't be used to host public images.
+    expect((await uploadImage(t, { publicId, id, secret })).status).toBe(403)
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+
+    expect(
+      (await uploadImage(t, { publicId, id, secret: generateSecret() })).status
+    ).toBe(403)
+    expect(
+      (
+        await uploadImage(
+          t,
+          { publicId, id, secret },
+          new TextEncoder().encode("<svg onload=alert(1)>")
+        )
+      ).status
+    ).toBe(415)
+    expect(
+      (
+        await uploadImage(
+          t,
+          { publicId, id, secret },
+          new Uint8Array(LIMITS.imageMaxBytes + 1)
+        )
+      ).status
+    ).toBe(413)
+
+    for (let i = 0; i < LIMITS.imagesPerComment; i++) {
+      expect((await uploadImage(t, { publicId, id, secret })).status).toBe(201)
+    }
+    expect((await uploadImage(t, { publicId, id, secret })).status).toBe(409)
+    // The owner-only screenshot is separate, and still allowed.
+    expect((await uploadScreenshot(t, { publicId, id, secret })).status).toBe(
+      201
+    )
+
+    // Everyone sees the images with the thread; the list only counts them.
+    const [listed] = await t.query(api.comments.listForPage, {
+      publicId,
+      path: "/pricing",
+    })
+    expect(listed?.imageCount).toBe(LIMITS.imagesPerComment)
+    const thread = await t.query(api.replies.listForComment, {
+      publicId,
+      commentId: id,
+    })
+    expect(thread.images).toHaveLength(LIMITS.imagesPerComment)
+    for (const url of thread.images) expect(url).toMatch(/^https?:\/\//)
+    const owner = await alice.query(api.comments.getForOwner, { publicId, id })
+    expect(owner?.imageUrls).toEqual(thread.images)
+
+    // Deleting the comment deletes every file.
+    const files = () =>
+      t.run((ctx) => ctx.db.system.query("_storage").collect())
+    expect(await files()).toHaveLength(LIMITS.imagesPerComment + 1)
+    await t.mutation(api.comments.deleteOwn, { id, authorSecret: secret })
+    expect(await files()).toHaveLength(0)
+  })
+
+  it("rejects images after the upload window, and deletes them with the project", async () => {
+    vi.useFakeTimers()
+    try {
+      const t = setup()
+      const publicId = generateProjectId()
+      const secret = generateSecret()
+      const alice = await signIn(t, "user_alice", "Alice")
+      await addComment(t, publicId)
+      await alice.mutation(api.projects.claim, { publicId })
+      const late = await addComment(t, publicId, { secret })
+      const fresh = await addComment(t, publicId, { secret })
+      expect(
+        (await uploadImage(t, { publicId, id: fresh, secret })).status
+      ).toBe(201)
+      vi.advanceTimersByTime(LIMITS.screenshotUploadWindowMs + 1)
+      expect(
+        (await uploadImage(t, { publicId, id: late, secret })).status
+      ).toBe(410)
+
+      const project = await alice.query(api.projects.getMine, { publicId })
+      await alice.mutation(api.projects.remove, {
+        projectId: project!._id,
+        confirmName: project!.name,
+      })
+      await t.finishAllScheduledFunctions(vi.runAllTimers)
+      expect(
+        await t.run((ctx) => ctx.db.system.query("_storage").collect())
+      ).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 function uploadScreenshot(
   t: T,
   target: { publicId: string; id: string; secret: string },
-  body: Uint8Array<ArrayBuffer> = WEBP
+  body: Uint8Array<ArrayBuffer> = WEBP,
+  path = "/widget/screenshot"
 ) {
-  return t.fetch("/widget/screenshot", {
+  return t.fetch(path, {
     method: "POST",
     headers: {
       "Content-Type": "image/webp",
@@ -825,6 +1060,137 @@ function uploadScreenshot(
     body,
   })
 }
+
+describe("lost pins", () => {
+  function report(
+    t: T,
+    publicId: string,
+    body: { path?: string; lost?: string[]; found?: string[] },
+    ip = "5.5.5.5"
+  ) {
+    return t.fetch("/widget/pins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Real-IP": ip },
+      body: JSON.stringify({ publicId, path: "/pricing", ...body }),
+    })
+  }
+
+  it("records pins visitors can't find, and clears them when found", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const a = await addComment(t, publicId)
+    const b = await addComment(t, publicId)
+    const elsewhere = await addComment(t, publicId, { path: "/about" })
+    const other = await addComment(t, generateProjectId())
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+
+    // Only open comments of this project, on the reported page, change.
+    let res = await report(t, publicId, { lost: [a, elsewhere, other, "x"] })
+    expect(await res.json()).toEqual({ changed: 1 })
+    // Reporting the same again writes nothing.
+    res = await report(t, publicId, { lost: [a] })
+    expect(await res.json()).toEqual({ changed: 0 })
+
+    expect(
+      (await t.query(api.comments.listForPage, { publicId, path: "/pricing" }))
+        .filter((c) => c.pinLost)
+        .map((c) => c._id)
+    ).toEqual([a])
+
+    const lost = await alice.query(api.comments.listForOwner, {
+      publicId,
+      status: "open",
+      lost: true,
+      paginationOpts: { numItems: 10, cursor: null },
+    })
+    expect(lost.page.map((c) => c._id)).toEqual([a])
+    expect(lost.page[0]?.pinLostAt).toBeTypeOf("number")
+    expect(await alice.query(api.comments.lostCount, { publicId })).toBe(1)
+    expect(await t.query(api.comments.lostCount, { publicId })).toBe(0)
+
+    // Found again by another visitor: cleared.
+    res = await report(t, publicId, { found: [a, b] })
+    expect(await res.json()).toEqual({ changed: 1 })
+    expect(await alice.query(api.comments.lostCount, { publicId })).toBe(0)
+  })
+
+  it("rate limits reports and refuses oversized ones", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId)
+    const statuses: number[] = []
+    for (let i = 0; i < 22; i++) {
+      statuses.push(
+        (await report(t, publicId, { lost: [id] }, "6.6.6.6")).status
+      )
+    }
+    expect(statuses.filter((s) => s === 200)).toHaveLength(20)
+    expect(statuses.at(-1)).toBe(429)
+    const tooMany = Array.from({ length: LIMITS.pinReportMax + 1 }, () => id)
+    expect((await report(t, publicId, { lost: tooMany })).status).toBe(400)
+  })
+
+  it("lets only the owner move a pin or close a comment as outdated", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId)
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    await report(t, publicId, { lost: [id] })
+
+    const moved = { ...anchor, text: "Start free trial", tag: "a" }
+    await expect(
+      t.mutation(api.comments.repin, { id, anchor: moved })
+    ).rejects.toThrow(/owner/)
+    await alice.mutation(api.comments.repin, {
+      id,
+      anchor: { ...moved, text: "x".repeat(500) },
+    })
+    let comment = await t.run((ctx) => ctx.db.get(id))
+    expect(comment?.anchor.tag).toBe("a")
+    expect(comment?.anchor.text).toHaveLength(LIMITS.anchorTextMaxLength)
+    expect(comment?.pinLostAt).toBeUndefined()
+
+    await expect(
+      t.mutation(api.comments.resolve, { id, resolution: "outdated" })
+    ).rejects.toThrow(/owner/)
+    await alice.mutation(api.comments.resolve, { id, resolution: "outdated" })
+    comment = await t.run((ctx) => ctx.db.get(id))
+    expect(comment).toMatchObject({
+      status: "resolved",
+      resolution: "outdated",
+    })
+    expect(await t.query(api.projects.status, { publicId })).toMatchObject({
+      openCount: 0,
+    })
+    // Reopening clears the reason, and counts stay right.
+    await alice.mutation(api.comments.reopen, { id })
+    comment = await t.run((ctx) => ctx.db.get(id))
+    expect(comment?.resolution).toBeUndefined()
+    expect(await t.query(api.projects.status, { publicId })).toMatchObject({
+      openCount: 1,
+    })
+
+    // In bulk, too, including ones already resolved.
+    const second = await addComment(t, publicId)
+    await alice.mutation(api.comments.resolve, { id: second })
+    expect(
+      await alice.mutation(api.comments.bulkSetStatus, {
+        ids: [id, second],
+        status: "resolved",
+        resolution: "outdated",
+      })
+    ).toBe(1)
+    const both = await t.run((ctx) =>
+      Promise.all([ctx.db.get(id), ctx.db.get(second)])
+    )
+    expect(both.map((c) => c?.resolution)).toEqual(["outdated", "outdated"])
+    expect(await t.query(api.projects.status, { publicId })).toMatchObject({
+      openCount: 0,
+    })
+  })
+})
 
 describe("captured context and screenshots", () => {
   const context = {

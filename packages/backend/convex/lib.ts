@@ -259,3 +259,19 @@ export async function revokeSessions(
   for (const session of sessions) await ctx.db.delete(session._id)
   return sessions.length
 }
+
+/** Links to the images attached to a comment, in order. */
+export async function imageUrls(
+  ctx: QueryCtx,
+  c: Doc<"comments">
+): Promise<string[]> {
+  const urls = await Promise.all(
+    (c.images ?? []).map((id) => ctx.storage.getUrl(id))
+  )
+  return urls.filter((url): url is string => url !== null)
+}
+
+/** Every stored file of a comment: the screenshot and attached images. */
+export function commentFiles(c: Doc<"comments">): Id<"_storage">[] {
+  return [...(c.screenshotId ? [c.screenshotId] : []), ...(c.images ?? [])]
+}

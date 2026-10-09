@@ -2,6 +2,7 @@ import { api } from "@nuni/backend/api"
 import type {
   Anchor,
   CommentContext,
+  TextSuggestion,
   OwnerComment,
   Thread,
   WidgetComment,
@@ -24,6 +25,7 @@ export interface PageSummary {
 
 export interface NewComment {
   body: string
+  suggestion?: TextSuggestion
   authorName: string
   authorSecret: string
   page: WidgetComment["page"]
@@ -89,6 +91,16 @@ export class NuniApi {
       { publicId: this.config.project, path },
       (comments) => cb(comments as WidgetComment[]),
       onError
+    )
+  }
+
+  /** The visitor's own comments on every page, live. */
+  onMine(authorSecret: string, cb: (comments: WidgetComment[]) => void) {
+    return this.client.onUpdate(
+      api.comments.listMine,
+      { publicId: this.config.project, authorSecret },
+      (comments) => cb(comments as WidgetComment[]),
+      () => {}
     )
   }
 
@@ -208,10 +220,24 @@ export class NuniApi {
     return data.id
   }
 
-  /** Attach a screenshot to the author's own, just-posted comment. */
-  async uploadScreenshot(id: string, authorSecret: string, image: Blob) {
+  /** Attach the element's screenshot (for the owner) to a just-posted comment. */
+  uploadScreenshot(id: string, authorSecret: string, image: Blob) {
+    return this.upload("screenshot", id, authorSecret, image)
+  }
+
+  /** An image for everyone: picked, pasted or a marked-up screenshot. */
+  uploadImage(id: string, authorSecret: string, image: Blob) {
+    return this.upload("image", id, authorSecret, image)
+  }
+
+  private async upload(
+    kind: "screenshot" | "image",
+    id: string,
+    authorSecret: string,
+    image: Blob
+  ) {
     const response = await fetch(
-      `${this.config.convexSiteUrl}/widget/screenshot`,
+      `${this.config.convexSiteUrl}/widget/${kind}`,
       {
         method: "POST",
         headers: {
@@ -229,7 +255,7 @@ export class NuniApi {
         message?: string
       }
       throw new NuniApiError(
-        data.message ?? "Couldn't attach the screenshot",
+        data.message ?? "Couldn't attach the image",
         data.code ?? "error"
       )
     }
@@ -243,12 +269,13 @@ export class NuniApi {
     }
   }
 
-  editOwn(id: string, authorSecret: string, body: string) {
+  editOwn(id: string, authorSecret: string, body: string, suggestion?: string) {
     return this.run(
       this.client.mutation(api.comments.editOwn, {
         id: id as never,
         authorSecret,
         body,
+        suggestion,
       })
     )
   }
@@ -262,13 +289,47 @@ export class NuniApi {
     )
   }
 
-  resolve(id: string, sessionToken: string) {
+  resolve(id: string, sessionToken: string, resolution?: "outdated") {
     return this.run(
       this.client.mutation(api.comments.resolve, {
         id: id as never,
+        resolution,
         sessionToken,
       })
     )
+  }
+
+  /** The owner points a comment at another element on its page. */
+  repin(id: string, anchor: Anchor, sessionToken: string) {
+    return this.run(
+      this.client.mutation(api.comments.repin, {
+        id: id as never,
+        anchor,
+        sessionToken,
+      })
+    )
+  }
+
+  /**
+   * Tell the backend which pins on this page couldn't be found, or were
+   * found again, so the owner can see them. Best effort.
+   */
+  async reportPins(path: string, lost: string[], found: string[]) {
+    try {
+      await fetch(`${this.config.convexSiteUrl}/widget/pins`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          publicId: this.config.project,
+          path,
+          lost,
+          found,
+        }),
+        keepalive: true,
+      })
+    } catch {
+      // The next page view reports again.
+    }
   }
 
   reopen(id: string, sessionToken: string) {

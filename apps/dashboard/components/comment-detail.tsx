@@ -5,6 +5,7 @@ import { buildCommentPrompt } from "@nuni/shared"
 import { useMutation } from "convex/react"
 import type { FunctionReturnType } from "convex/server"
 import {
+  ArchiveIcon,
   CheckIcon,
   ClipboardCopyIcon,
   ExternalLinkIcon,
@@ -58,6 +59,7 @@ export function CommentDetail({
   onChanged?: () => void
 }) {
   const resolve = useMutation(api.comments.resolve)
+  const [closing, setClosing] = useState(false)
   const reopen = useMutation(api.comments.reopen)
   const remove = useMutation(api.comments.remove)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -77,6 +79,21 @@ export function CommentDetail({
       onChanged?.()
     } catch (err) {
       toast.error(errorMessage(err))
+    }
+  }
+
+  async function closeAsOutdated() {
+    setClosing(true)
+    try {
+      await resolve({ id: c._id, resolution: "outdated" })
+      toast("Closed as outdated", {
+        action: { label: "Undo", onClick: () => void reopen({ id: c._id }) },
+      })
+      onChanged?.()
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setClosing(false)
     }
   }
 
@@ -177,13 +194,56 @@ export function CommentDetail({
         </div>
       </header>
 
+      {open && c.pinLostAt && (
+        <section
+          aria-label="Pin not found"
+          className="grid gap-3 rounded-lg border border-dashed p-3 text-sm"
+        >
+          <p className="text-muted-foreground">
+            Visitors&apos; browsers haven&apos;t found this element on the page
+            since {timeAgo(c.pinLostAt)}. Open the page and choose{" "}
+            <strong className="font-medium text-foreground">Move pin</strong> to
+            point it at the right element, or close it if it no longer applies.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={jumpUrl(c.page, c._id)}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonVariants({ size: "sm", variant: "outline" })}
+            >
+              <ExternalLinkIcon /> Open on page
+            </a>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={closing}
+              onClick={() => void closeAsOutdated()}
+            >
+              <ArchiveIcon /> Close as outdated
+            </Button>
+          </div>
+        </section>
+      )}
+      {c.resolution === "outdated" && (
+        <p className="text-sm text-muted-foreground">
+          Closed as outdated: its element was no longer on the page.
+        </p>
+      )}
+
       <div className="grid gap-3">
-        {c.anchor.quote && (
-          <blockquote className="border-l-2 border-primary/60 pl-3 text-sm text-muted-foreground italic">
-            {c.anchor.quote.exact}
-          </blockquote>
+        {c.suggestion ? (
+          <SuggestedEdit suggestion={c.suggestion} />
+        ) : (
+          c.anchor.quote && (
+            <blockquote className="border-l-2 border-primary/60 pl-3 text-sm text-muted-foreground italic">
+              {c.anchor.quote.exact}
+            </blockquote>
+          )
         )}
-        <p className="text-[15px]/relaxed whitespace-pre-wrap">{c.body}</p>
+        {c.body && (
+          <p className="text-[15px]/relaxed whitespace-pre-wrap">{c.body}</p>
+        )}
       </div>
 
       <dl className="grid grid-cols-[5rem_1fr] gap-x-3 gap-y-1.5 text-sm">
@@ -226,6 +286,35 @@ export function CommentDetail({
         </a>
       )}
 
+      {c.imageUrls.length > 0 && (
+        <section aria-label="Attached images" className="grid gap-2">
+          <h3 className="text-xs font-medium text-muted-foreground">
+            Attached by {c.authorName}
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {c.imageUrls.map((url, i) => (
+              <a
+                key={url}
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="block overflow-hidden rounded-lg bg-muted ring-1 ring-foreground/5 transition-opacity hover:opacity-90"
+                title="Open the image"
+              >
+                <Image
+                  src={url}
+                  alt={`Image ${i + 1}`}
+                  width={160}
+                  height={120}
+                  unoptimized
+                  className="h-24 w-32 object-cover object-top"
+                />
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+
       <CommentContext context={c.context} userAgent={c.userAgent} />
 
       <Separator />
@@ -255,5 +344,45 @@ export function CommentDetail({
         }}
       />
     </article>
+  )
+}
+
+/** The commented words struck through, and the words suggested instead. */
+function SuggestedEdit({
+  suggestion,
+}: {
+  suggestion: { before: string; after: string }
+}) {
+  return (
+    <section
+      aria-label="Suggested edit"
+      className="grid gap-1.5 rounded-lg bg-muted/60 p-3 text-sm whitespace-pre-wrap"
+    >
+      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        Suggested edit
+        <Button
+          size="xs"
+          variant="ghost"
+          className="-my-1 ml-auto"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(suggestion.after)
+              toast("New text copied")
+            } catch {
+              toast.error("Couldn't copy. Allow clipboard access.")
+            }
+          }}
+        >
+          <ClipboardCopyIcon data-icon="inline-start" />
+          Copy new text
+        </Button>
+      </div>
+      <del className="text-muted-foreground decoration-destructive/70">
+        {suggestion.before}
+      </del>
+      <ins className="justify-self-start rounded bg-primary/10 px-1 text-foreground no-underline">
+        {suggestion.after}
+      </ins>
+    </section>
   )
 }

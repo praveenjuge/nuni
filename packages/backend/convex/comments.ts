@@ -1,6 +1,7 @@
 import {
   LIMITS,
   type AnchorQuote,
+  type CommentStatus,
   stripHtmlUrlQueries,
   stripUrlQueries,
   withoutQuery,
@@ -22,9 +23,11 @@ import {
   bumpPageOpen,
   clampString,
   cleanBody,
+  commentFiles,
   cleanName,
   ensureProject,
   fail,
+  imageUrls,
   parseOrigin,
   projectByPublicId,
   requireOwner,
@@ -38,7 +41,9 @@ import {
   anchorValidator,
   contextValidator,
   pageValidator,
+  resolutionValidator,
   statusValidator,
+  suggestionValidator,
   viewportValidator,
 } from "./validators"
 
@@ -48,6 +53,7 @@ function toPublic(c: Doc<"comments">) {
     _creationTime: c._creationTime,
     status: c.status,
     body: c.body,
+    suggestion: c.suggestion,
     authorName: c.authorName,
     authorKeyHash: c.authorKeyHash,
     // Public listings share comments across origins by path, so never expose
@@ -58,6 +64,11 @@ function toPublic(c: Doc<"comments">) {
     createdAt: c.createdAt,
     editedAt: c.editedAt,
     resolvedAt: c.resolvedAt,
+    resolution: c.resolution,
+    /** Attached images; their links come with the thread. */
+    imageCount: c.images?.length ?? 0,
+    /** Visitors' widgets couldn't find the element, last they looked. */
+    pinLost: c.pinLostAt !== undefined,
     replyCount: c.replyCount ?? 0,
   }
 }
@@ -67,11 +78,13 @@ async function toOwner(ctx: QueryCtx, c: Doc<"comments">) {
   return {
     ...toPublic(c),
     page: c.page,
+    pinLostAt: c.pinLostAt,
     userAgent: c.userAgent,
     context: c.context,
     screenshotUrl: c.screenshotId
       ? await ctx.storage.getUrl(c.screenshotId)
       : null,
+    imageUrls: await imageUrls(ctx, c),
     replies: c.replyCount ? await repliesFor(ctx, c._id) : [],
   }
 }
@@ -123,8 +136,46 @@ function cleanContext(context: CommentContext | undefined) {
   return out.console || out.network || out.dom ? out : undefined
 }
 
-function searchTextFor(body: string, authorName: string) {
-  return `${authorName}\n${body}`
+function searchTextFor(
+  c: Pick<Doc<"comments">, "body" | "authorName" | "suggestion">
+) {
+  return [c.authorName, c.body, c.suggestion?.after].filter(Boolean).join("\n")
+}
+
+/**
+ * The words a suggestion replaces must be the commented text itself: the
+ * selected words, or the whole text of a small element like a button.
+ */
+function cleanSuggestion(
+  suggestion: { before: string; after: string } | undefined,
+  anchor: { text: string; quote?: AnchorQuote; region?: unknown }
+) {
+  if (!suggestion) return undefined
+  const before = suggestion.before.trim()
+  const after = suggestion.after.replace(/\r\n/g, "\n").trim()
+  const target = anchor.quote
+    ? anchor.quote.exact
+    : anchor.region
+      ? ""
+      : anchor.text
+  if (!before || before !== target) {
+    fail("invalid_suggestion", "A suggestion has to change the commented text")
+  }
+  if (!after || after === before) {
+    fail("invalid_suggestion", "Change the text to suggest an edit")
+  }
+  if (after.length > LIMITS.quoteMaxLength) {
+    fail(
+      "invalid_suggestion",
+      `Suggestions are limited to ${LIMITS.quoteMaxLength} characters`
+    )
+  }
+  return { before, after }
+}
+
+/** The comment text: may be empty when the suggestion says it all. */
+function cleanCommentBody(body: string, hasSuggestion: boolean) {
+  return hasSuggestion && !body.trim() ? "" : cleanBody(body)
 }
 
 function originOf(url: string): string | null {
@@ -161,6 +212,29 @@ export const listForPage = query({
       byStatus("resolved", LIMITS.pageResolvedLimit),
     ])
     return [...open, ...resolved].map(toPublic)
+  },
+})
+
+/**
+ * The commenter's own comments on every page, newest first. Takes their
+ * browser key, never its hash: hashes are public in every listing.
+ */
+export const listMine = query({
+  args: { publicId: v.string(), authorSecret: v.string() },
+  handler: async (ctx, { publicId, authorSecret }) => {
+    const project = await projectByPublicId(ctx, publicId)
+    if (!project || authorSecret.length < 16 || authorSecret.length > 128) {
+      return []
+    }
+    const authorKeyHash = await sha256Hex(authorSecret)
+    const mine = await ctx.db
+      .query("comments")
+      .withIndex("by_project_author", (q) =>
+        q.eq("projectId", project._id).eq("authorKeyHash", authorKeyHash)
+      )
+      .order("desc")
+      .take(LIMITS.yoursLimit)
+    return mine.map(toPublic)
   },
 })
 
@@ -211,6 +285,21 @@ function cleanAnchor<A extends { text: string; ancestors: unknown[] }>(
   }
 }
 
+type AnchorArg = Doc<"comments">["anchor"]
+
+/** A whole anchor from the widget, with every part within its limits. */
+function cleanCommentAnchor(anchor: AnchorArg): AnchorArg {
+  return {
+    ...cleanAnchor(anchor),
+    scope: anchor.scope?.slice(0, 6).map((step) => ({
+      kind: step.kind,
+      host: cleanAnchor(step.host),
+    })),
+    quote: cleanQuote(anchor.quote),
+    region: anchor.region && cleanRegion(anchor.region),
+  }
+}
+
 /** Called from the HTTP action, which supplies the client IP. */
 export const createFromWidget = internalMutation({
   args: {
@@ -219,6 +308,7 @@ export const createFromWidget = internalMutation({
     body: v.string(),
     authorName: v.string(),
     authorSecret: v.string(),
+    suggestion: v.optional(suggestionValidator),
     page: pageValidator,
     anchor: anchorValidator,
     viewport: viewportValidator,
@@ -248,7 +338,9 @@ export const createFromWidget = internalMutation({
     ) {
       fail("invalid_page", "Page path must not continue the host")
     }
-    const body = cleanBody(args.body)
+    const anchor = cleanCommentAnchor(args.anchor)
+    const suggestion = cleanSuggestion(args.suggestion, anchor)
+    const body = cleanCommentBody(args.body, Boolean(suggestion))
     const authorName = cleanName(args.authorName)
     if (args.authorSecret.length < 16 || args.authorSecret.length > 128) {
       fail("invalid_author", "Invalid author key")
@@ -279,9 +371,10 @@ export const createFromWidget = internalMutation({
       projectId: project._id,
       status: "open",
       body,
+      suggestion,
       authorName,
       authorKeyHash: await sha256Hex(args.authorSecret),
-      searchText: searchTextFor(body, authorName),
+      searchText: searchTextFor({ body, authorName, suggestion }),
       page: {
         ...args.page,
         origin,
@@ -291,15 +384,7 @@ export const createFromWidget = internalMutation({
         hash: clampString(args.page.hash, 1000),
         path: clampString(args.page.path, 1000),
       },
-      anchor: {
-        ...cleanAnchor(args.anchor),
-        scope: args.anchor.scope?.slice(0, 6).map((step) => ({
-          kind: step.kind,
-          host: cleanAnchor(step.host),
-        })),
-        quote: cleanQuote(args.anchor.quote),
-        region: args.anchor.region && cleanRegion(args.anchor.region),
-      },
+      anchor,
       viewport: args.viewport,
       context: cleanContext(args.context),
       userAgent: clampString(args.userAgent, 400),
@@ -333,13 +418,27 @@ async function loadOwnComment(
 }
 
 export const editOwn = mutation({
-  args: { id: v.id("comments"), authorSecret: v.string(), body: v.string() },
-  handler: async (ctx, { id, authorSecret, body }) => {
+  args: {
+    id: v.id("comments"),
+    authorSecret: v.string(),
+    body: v.string(),
+    /** New words for a comment that suggests a text change. */
+    suggestion: v.optional(v.string()),
+  },
+  handler: async (ctx, { id, authorSecret, body, suggestion: after }) => {
     const comment = await loadOwnComment(ctx, id, authorSecret)
-    const clean = cleanBody(body)
+    const suggestion =
+      comment.suggestion && after !== undefined
+        ? cleanSuggestion(
+            { before: comment.suggestion.before, after },
+            comment.anchor
+          )
+        : comment.suggestion
+    const clean = cleanCommentBody(body, Boolean(suggestion))
     await ctx.db.patch(id, {
       body: clean,
-      searchText: searchTextFor(clean, comment.authorName),
+      suggestion,
+      searchText: searchTextFor({ ...comment, body: clean, suggestion }),
       editedAt: Date.now(),
     })
   },
@@ -351,7 +450,7 @@ export async function removeComment(
 ) {
   await deleteThread(ctx, comment._id)
   await ctx.db.delete(comment._id)
-  if (comment.screenshotId) await ctx.storage.delete(comment.screenshotId)
+  for (const file of commentFiles(comment)) await ctx.storage.delete(file)
   if (comment.status === "open") {
     await bumpPageOpen(ctx, comment.projectId, comment.page.path, -1)
   }
@@ -384,12 +483,19 @@ async function setStatus(
   ctx: MutationCtx,
   id: Id<"comments">,
   status: "open" | "resolved",
-  widget: WidgetAuth
+  widget: WidgetAuth,
+  resolution?: "outdated"
 ) {
   const comment = await ctx.db.get(id)
   if (!comment) fail("not_found", "Comment not found")
   const userId = await requireOwner(ctx, comment.projectId, widget)
-  if (comment.status === status) return
+  if (comment.status === status) {
+    // Already resolved: closing it as outdated only changes the reason.
+    if (status === "resolved" && comment.resolution !== resolution) {
+      await ctx.db.patch(id, { resolution })
+    }
+    return
+  }
   await bumpPageOpen(
     ctx,
     comment.projectId,
@@ -400,6 +506,7 @@ async function setStatus(
     status,
     resolvedAt: status === "resolved" ? Date.now() : undefined,
     resolvedBy: status === "resolved" ? userId : undefined,
+    resolution: status === "resolved" ? resolution : undefined,
   })
   const project = await ctx.db.get(comment.projectId)
   if (project) {
@@ -411,8 +518,14 @@ async function setStatus(
 }
 
 export const resolve = mutation({
-  args: { id: v.id("comments"), ...widgetAuthArgs },
-  handler: (ctx, { id, ...widget }) => setStatus(ctx, id, "resolved", widget),
+  args: {
+    id: v.id("comments"),
+    /** "outdated": closed because what it was about is gone. */
+    resolution: v.optional(resolutionValidator),
+    ...widgetAuthArgs,
+  },
+  handler: (ctx, { id, resolution, ...widget }) =>
+    setStatus(ctx, id, "resolved", widget, resolution),
 })
 
 export const reopen = mutation({
@@ -467,15 +580,25 @@ async function applyPageDeltas(
 }
 
 export const bulkSetStatus = mutation({
-  args: { ...bulkArgs, status: statusValidator },
-  handler: async (ctx, { ids, status }) => {
+  args: {
+    ...bulkArgs,
+    status: statusValidator,
+    resolution: v.optional(resolutionValidator),
+  },
+  handler: async (ctx, { ids, status, resolution: reason }) => {
     const { user, project, comments } = await loadBulk(ctx, ids)
     if (!project) return 0
     const now = Date.now()
+    const resolution = status === "resolved" ? reason : undefined
     const deltas = new Map<string, number>()
     let changed = 0
     for (const comment of comments) {
-      if (comment.status === status) continue
+      if (comment.status === status) {
+        if (status === "resolved" && comment.resolution !== resolution) {
+          await ctx.db.patch(comment._id, { resolution })
+        }
+        continue
+      }
       changed++
       const path = comment.page.path
       deltas.set(path, (deltas.get(path) ?? 0) + (status === "open" ? 1 : -1))
@@ -483,6 +606,7 @@ export const bulkSetStatus = mutation({
         status,
         resolvedAt: status === "resolved" ? now : undefined,
         resolvedBy: status === "resolved" ? user._id : undefined,
+        resolution,
       })
     }
     if (!changed) return 0
@@ -525,6 +649,57 @@ export const bulkRemove = mutation({
   },
 })
 
+/**
+ * Comments for the owner's lists (dashboard and agents): newest first, or by
+ * relevance when searching, then narrowed by page and environment.
+ */
+function ownerComments(
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  args: {
+    status: CommentStatus
+    path?: string
+    origin?: string
+    search?: string
+    /** Only comments whose element visitors' widgets can't find. */
+    lost?: boolean
+  }
+) {
+  const search = args.search?.trim()
+  const base = search
+    ? ctx.db
+        .query("comments")
+        .withSearchIndex("search_text", (q) =>
+          q
+            .search("searchText", search)
+            .eq("projectId", projectId)
+            .eq("status", args.status)
+        )
+    : args.lost
+      ? ctx.db
+          .query("comments")
+          .withIndex("by_project_status_lost", (q) =>
+            q
+              .eq("projectId", projectId)
+              .eq("status", args.status)
+              .gt("pinLostAt", 0)
+          )
+          .order("desc")
+      : ctx.db
+          .query("comments")
+          .withIndex("by_project_status", (q) =>
+            q.eq("projectId", projectId).eq("status", args.status)
+          )
+          .order("desc")
+  return base.filter((q) =>
+    q.and(
+      args.path ? q.eq(q.field("page.path"), args.path) : true,
+      args.origin ? q.eq(q.field("page.origin"), args.origin) : true,
+      args.lost && search ? q.gt(q.field("pinLostAt"), 0) : true
+    )
+  )
+}
+
 /** Dashboard list, owner only, newest first, paginated and filtered server-side. */
 export const listForOwner = query({
   args: {
@@ -533,6 +708,8 @@ export const listForOwner = query({
     path: v.optional(v.string()),
     origin: v.optional(v.string()),
     search: v.optional(v.string()),
+    /** Only open comments whose element can't be found on the page. */
+    lost: v.optional(v.boolean()),
     paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, args) => {
@@ -541,34 +718,46 @@ export const listForOwner = query({
     if (!user || !project || project.ownerId !== user._id) {
       return { page: [], isDone: true, continueCursor: "" }
     }
-    const search = args.search?.trim()
-    const base = search
-      ? ctx.db
-          .query("comments")
-          .withSearchIndex("search_text", (q) =>
-            q
-              .search("searchText", search)
-              .eq("projectId", project._id)
-              .eq("status", args.status)
-          )
-      : ctx.db
-          .query("comments")
-          .withIndex("by_project_status", (q) =>
-            q.eq("projectId", project._id).eq("status", args.status)
-          )
-          .order("desc")
-    const filtered = base.filter((q) =>
-      q.and(
-        args.path ? q.eq(q.field("page.path"), args.path) : true,
-        args.origin ? q.eq(q.field("page.origin"), args.origin) : true
-      )
+    const result = await ownerComments(ctx, project._id, args).paginate(
+      args.paginationOpts
     )
-    const result = await filtered.paginate(args.paginationOpts)
     return {
       ...result,
       // The owner sees the full page location and the captured context.
       page: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
     }
+  },
+})
+
+/**
+ * The project for a CLI or MCP request. Throws when the token is not an
+ * owner session for it, so the agent can tell the person to log in.
+ */
+async function agentProject(
+  ctx: QueryCtx,
+  publicId: string,
+  sessionToken: string
+): Promise<Doc<"projects">> {
+  const project = await projectByPublicId(ctx, publicId)
+  if (!project || !(await actingOwner(ctx, project, { sessionToken }))) {
+    fail("unauthenticated", "Not signed in to this project")
+  }
+  return project
+}
+
+/** The CLI and MCP server: pages with open comments, most first. */
+export const pagesForAgent = query({
+  args: { publicId: v.string(), sessionToken: v.string() },
+  handler: async (ctx, { publicId, sessionToken }) => {
+    const project = await agentProject(ctx, publicId, sessionToken)
+    const pages = await ctx.db
+      .query("pageStats")
+      .withIndex("by_project_open", (q) =>
+        q.eq("projectId", project._id).gt("openCount", 0)
+      )
+      .order("desc")
+      .take(200)
+    return pages.map((p) => ({ path: p.path, openCount: p.openCount }))
   },
 })
 
@@ -583,31 +772,107 @@ export const listForAgent = query({
     sessionToken: v.string(),
     status: v.optional(statusValidator),
     path: v.optional(v.string()),
+    /** Words in the comment or its author's name; results by relevance. */
+    search: v.optional(v.string()),
     limit: v.optional(v.number()),
     cursor: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
-    const project = await projectByPublicId(ctx, args.publicId)
-    if (
-      !project ||
-      !(await actingOwner(ctx, project, { sessionToken: args.sessionToken }))
-    ) {
-      fail("unauthenticated", "Not signed in to this project")
-    }
-    const status = args.status ?? "open"
+    const project = await agentProject(ctx, args.publicId, args.sessionToken)
     const numItems = Math.min(50, Math.max(1, Math.trunc(args.limit ?? 20)))
-    const result = await ctx.db
-      .query("comments")
-      .withIndex("by_project_status", (q) =>
-        q.eq("projectId", project._id).eq("status", status)
-      )
-      .order("desc")
-      .filter((q) => (args.path ? q.eq(q.field("page.path"), args.path) : true))
-      .paginate({ numItems, cursor: args.cursor ?? null })
+    const result = await ownerComments(ctx, project._id, {
+      status: args.status ?? "open",
+      path: args.path,
+      search: args.search,
+    }).paginate({ numItems, cursor: args.cursor ?? null })
     return {
       comments: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
       cursor: result.isDone ? null : result.continueCursor,
     }
+  },
+})
+
+/** How many open comments have lost their element, for the dashboard tab. */
+export const lostCount = query({
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const user = await currentUser(ctx)
+    const project = await projectByPublicId(ctx, publicId)
+    if (!user || !project || project.ownerId !== user._id) return 0
+    const lost = await ctx.db
+      .query("comments")
+      .withIndex("by_project_status_lost", (q) =>
+        q.eq("projectId", project._id).eq("status", "open").gt("pinLostAt", 0)
+      )
+      .take(LIMITS.lostCountMax + 1)
+    return lost.length
+  },
+})
+
+/**
+ * What a visitor's widget saw on one page: open comments whose element it
+ * couldn't find, and ones it found again. Called from the HTTP action, which
+ * supplies the IP. Only changes are written, so a page view with nothing new
+ * writes nothing.
+ */
+export const reportPins = internalMutation({
+  args: {
+    publicId: v.string(),
+    ip: v.string(),
+    path: v.string(),
+    lost: v.array(v.string()),
+    found: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (args.lost.length + args.found.length > LIMITS.pinReportMax) {
+      fail("too_many", "Too many pins in one report")
+    }
+    const { ok } = await rateLimiter.limit(ctx, "pinReportPerIp", {
+      key: ipKey(args.ip, args.publicId),
+    })
+    if (!ok) fail("rate_limited", "Slow down a little")
+    const project = await projectByPublicId(ctx, args.publicId)
+    if (!project || project.deletingAt) return 0
+    const now = Date.now()
+    let changed = 0
+    for (const [ids, lost] of [
+      [args.lost, true],
+      [args.found, false],
+    ] as const) {
+      for (const raw of ids) {
+        const id = ctx.db.normalizeId("comments", raw)
+        const comment = id ? await ctx.db.get(id) : null
+        if (
+          !comment ||
+          comment.projectId !== project._id ||
+          comment.page.path !== args.path ||
+          comment.status !== "open" ||
+          (comment.pinLostAt !== undefined) === lost
+        ) {
+          continue
+        }
+        await ctx.db.patch(comment._id, { pinLostAt: lost ? now : undefined })
+        changed++
+      }
+    }
+    return changed
+  },
+})
+
+/**
+ * The owner points a comment at another element on its page, for example
+ * after a redesign moved it. The new anchor replaces the old one.
+ */
+export const repin = mutation({
+  args: { id: v.id("comments"), anchor: anchorValidator, ...widgetAuthArgs },
+  handler: async (ctx, { id, anchor, ...widget }) => {
+    const comment = await ctx.db.get(id)
+    if (!comment) fail("not_found", "Comment not found")
+    await requireOwner(ctx, comment.projectId, widget)
+    await ctx.db.patch(id, {
+      anchor: cleanCommentAnchor(anchor),
+      pinLostAt: undefined,
+    })
   },
 })
 
@@ -665,55 +930,87 @@ export const getForOwner = query({
   },
 })
 
-const SCREENSHOT_TYPES = new Set(["image/webp", "image/jpeg", "image/png"])
+const UPLOAD_TYPES = new Set(["image/webp", "image/jpeg", "image/png"])
 
 /**
- * Screenshot upload, step 1 (from the HTTP action): check the author and
- * rate limit before anything is stored. Returns the comment id.
+ * What the author uploads right after posting: the element's screenshot
+ * (owner-only context) or an image for everyone (their own, or the
+ * screenshot they marked up).
  */
-export const checkScreenshot = internalMutation({
+const uploadKindValidator = v.union(v.literal("screenshot"), v.literal("image"))
+type UploadKind = "screenshot" | "image"
+
+const UPLOAD_RULES = {
+  screenshot: {
+    maxBytes: LIMITS.screenshotMaxBytes,
+    limit: "screenshotPerIp",
+    noun: "Screenshots",
+  },
+  image: {
+    maxBytes: LIMITS.imageMaxBytes,
+    limit: "imagePerIp",
+    noun: "Images",
+  },
+} as const
+
+const uploadArgs = {
+  kind: uploadKindValidator,
+  publicId: v.string(),
+  commentId: v.string(),
+  authorSecret: v.string(),
+}
+
+/**
+ * Upload, step 1, before the file is stored: is the file acceptable, and
+ * may this author still add it to this comment?
+ */
+export const checkUpload = internalMutation({
   args: {
-    publicId: v.string(),
-    commentId: v.string(),
-    authorSecret: v.string(),
+    ...uploadArgs,
     ip: v.string(),
     contentType: v.string(),
     size: v.number(),
   },
   handler: async (ctx, args) => {
-    if (!SCREENSHOT_TYPES.has(args.contentType)) {
-      fail("invalid_type", "Screenshots must be WebP, JPEG or PNG")
+    const rules = UPLOAD_RULES[args.kind]
+    if (!UPLOAD_TYPES.has(args.contentType)) {
+      fail("invalid_type", `${rules.noun} must be WebP, JPEG or PNG`)
     }
-    if (args.size <= 0 || args.size > LIMITS.screenshotMaxBytes) {
-      fail("too_large", "Screenshot is too large")
+    if (args.size <= 0 || args.size > rules.maxBytes) {
+      fail("too_large", "The image is too large")
     }
-    const { ok } = await rateLimiter.limit(ctx, "screenshotPerIp", {
+    const { ok } = await rateLimiter.limit(ctx, rules.limit, {
       key: ipKey(args.ip, args.publicId),
     })
     if (!ok) fail("rate_limited", "Slow down a little")
-    const comment = await screenshotTarget(ctx, args)
+    const comment = await uploadTarget(ctx, args)
     return comment._id
   },
 })
 
-/** Screenshot upload, step 2: attach the stored file, or report why not. */
-export const attachScreenshot = internalMutation({
-  args: {
-    publicId: v.string(),
-    commentId: v.string(),
-    authorSecret: v.string(),
-    storageId: v.id("_storage"),
-  },
+/** Upload, step 2: attach the stored file, or report why not. */
+export const attachUpload = internalMutation({
+  args: { ...uploadArgs, storageId: v.id("_storage") },
   handler: async (ctx, args) => {
-    const comment = await screenshotTarget(ctx, args)
-    await ctx.db.patch(comment._id, { screenshotId: args.storageId })
+    const comment = await uploadTarget(ctx, args)
+    await ctx.db.patch(
+      comment._id,
+      args.kind === "screenshot"
+        ? { screenshotId: args.storageId }
+        : { images: [...(comment.images ?? []), args.storageId] }
+    )
   },
 })
 
-/** The author's own, recent comment that has no screenshot yet. */
-async function screenshotTarget(
+/** The author's own, recent comment that can still take this upload. */
+async function uploadTarget(
   ctx: MutationCtx,
-  args: { publicId: string; commentId: string; authorSecret: string }
+  args: {
+    kind: UploadKind
+    publicId: string
+    commentId: string
+    authorSecret: string
+  }
 ) {
   const project = await projectByPublicId(ctx, args.publicId)
   const id = ctx.db.normalizeId("comments", args.commentId)
@@ -722,11 +1019,25 @@ async function screenshotTarget(
     fail("not_found", "Comment not found")
   }
   if ((await sha256Hex(args.authorSecret)) !== comment.authorKeyHash) {
-    fail("forbidden", "You can only add a screenshot to your own comment")
+    fail("forbidden", "You can only add images to your own comment")
   }
-  if (comment.screenshotId) fail("conflict", "This comment has a screenshot")
+  if (args.kind === "screenshot" && comment.screenshotId) {
+    fail("conflict", "This comment has a screenshot")
+  }
+  if (args.kind === "image") {
+    // Images are public, so an unclaimed project can't be used to host them.
+    if (!project.ownerId) {
+      fail("forbidden", "Images can be added once the site is claimed")
+    }
+    if ((comment.images?.length ?? 0) >= LIMITS.imagesPerComment) {
+      fail(
+        "conflict",
+        `A comment can have up to ${LIMITS.imagesPerComment} images`
+      )
+    }
+  }
   if (Date.now() - comment.createdAt > LIMITS.screenshotUploadWindowMs) {
-    fail("expired", "Too late to add a screenshot")
+    fail("expired", "Too late to add an image")
   }
   return comment
 }
@@ -761,7 +1072,7 @@ export const rebuildSearchText = internalMutation({
     for (const c of batch.page) {
       if (c.searchText === undefined) {
         await ctx.db.patch(c._id, {
-          searchText: searchTextFor(c.body, c.authorName),
+          searchText: searchTextFor(c),
         })
       }
     }

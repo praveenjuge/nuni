@@ -553,7 +553,90 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
   white-space: nowrap;
 }
 .cmp-link:hover { color: var(--n-fg); }
-.composer .quote { margin: 6px 14px 0; }
+.composer .quote, .composer .suggest { margin: 6px 14px 0; }
+.suggest {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--n-bg-subtle);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.suggest-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  color: var(--n-fg-muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+.suggest .cmp-link { margin-left: auto; padding: 0 4px; }
+.suggest del, .item-suggest del { color: var(--n-fg-muted); text-decoration-color: var(--n-danger); }
+.suggest ins, .item-suggest ins {
+  color: var(--n-fg);
+  text-decoration: none;
+  background: var(--n-accent-soft);
+  border-radius: 4px;
+}
+.suggest ins { padding: 1px 3px; justify-self: start; }
+.cmp-suggest {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  padding: 4px 6px;
+  border: 1px solid var(--n-border);
+  border-radius: 6px;
+  background: var(--n-bg);
+  outline: none;
+  resize: none;
+  line-height: 1.4;
+}
+.cmp-suggest:focus { border-color: var(--n-accent); }
+.cmp-suggest-btn { display: inline-flex; align-items: center; gap: 4px; }
+.lost {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--n-border);
+  border-radius: 8px;
+  color: var(--n-fg-muted);
+  font-size: 13px;
+}
+.lost p { margin: 0; }
+.cmp-images { display: grid; gap: 4px; padding: 6px 14px 0; }
+.cmp-thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
+.cmp-thumb { position: relative; }
+.cmp-thumb img, .images img {
+  display: block;
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  border: 1px solid var(--n-border);
+  border-radius: 6px;
+  background: var(--n-bg-subtle);
+}
+.cmp-thumb-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--n-border);
+  border-radius: 999px;
+  background: var(--n-bg);
+  color: var(--n-fg-muted);
+}
+.cmp-thumb-remove .icon { width: 12px; height: 12px; }
+.cmp-images-note { margin: 0; color: var(--n-fg-muted); font-size: 12px; }
+.images { display: flex; flex-wrap: wrap; gap: 6px; }
+.images img { width: 88px; height: 64px; }
+.lost .row { gap: 6px; flex-wrap: wrap; }
+.cmp-suggest-btn .icon { width: 13px; height: 13px; }
 .cmp-text {
   display: block;
   width: 100%;

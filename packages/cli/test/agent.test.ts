@@ -67,6 +67,15 @@ const comment: OwnerComment = {
   userAgent: "Mozilla/5.0",
   context: { console: [{ level: "error", message: "Boom", at: 1 }] },
   screenshotUrl: "https://files.example.com/shot",
+  imageUrls: ["https://files.example.com/drawn"],
+}
+
+/** A second comment on the same button, and so in the same group. */
+const second: OwnerComment = {
+  ...comment,
+  _id: "jd7def456",
+  body: "And make it green",
+  authorName: "Kim",
 }
 
 function fakeRemote(polls: LoginPoll[] = []): Remote & {
@@ -88,8 +97,17 @@ function fakeRemote(polls: LoginPoll[] = []): Remote & {
       calls.push(`logout ${token}`)
     },
     listComments: async (publicId, token, options) => {
-      calls.push(`list ${publicId} ${token} ${options?.status}`)
-      return { comments: [comment], cursor: null }
+      calls.push(
+        `list ${publicId} ${token} ${options?.status}${options?.search ? ` search=${options.search}` : ""}`
+      )
+      return { comments: [comment, second], cursor: null }
+    },
+    listPages: async (publicId, token) => {
+      calls.push(`pages ${publicId} ${token}`)
+      return [
+        { path: "/pricing", openCount: 12 },
+        { path: "/", openCount: 3 },
+      ]
     },
     getComment: async (_p, _t, id) => (id === comment._id ? comment : null),
     setStatus: async (token, id, status) => {
@@ -97,6 +115,7 @@ function fakeRemote(polls: LoginPoll[] = []): Remote & {
       calls.push(`${status} ${id} ${token}`)
     },
     reply: async (_p, token, id, body) => {
+      if (id === "noreply") throw new RemoteError("Replies are off", "error")
       calls.push(`reply ${id} ${token} ${body}`)
     },
   }
@@ -248,7 +267,7 @@ describe("comment commands", () => {
     expect(
       await run(["comments", "--cwd", dir], { remote, ...io.options })
     ).toBe(0)
-    expect(io.out[0]).toContain("1 open comment, newest first")
+    expect(io.out[0]).toContain("2 open comments, newest first")
     expect(io.out[0]).toContain("jd7abc123 · /pricing · Sam · 2 hours ago")
     expect(io.out[0]).toContain('On <button> "Buy now"')
 
@@ -323,6 +342,90 @@ describe("comment commands", () => {
     ).toBe(1)
   })
 
+  it("search, group, list pages and resolve several", async () => {
+    saveCredential(PROJECT, { token: "nuni_s_good" })
+    const remote = fakeRemote()
+    const io = capture()
+    const dir = tempDir({ "index.html": `data-project="${PROJECT}"` })
+
+    expect(
+      await run(["comments", "--cwd", dir, "--search", "bigger"], {
+        remote,
+        ...io.options,
+      })
+    ).toBe(0)
+    expect(remote.calls.at(-1)).toBe(
+      `list ${PROJECT} nuni_s_good open search=bigger`
+    )
+    expect(io.out.at(-1)).toContain("best match first")
+
+    expect(
+      await run(["comments", "--cwd", dir, "--group", "element"], {
+        remote,
+        ...io.options,
+      })
+    ).toBe(0)
+    expect(io.out.at(-1)).toContain(
+      "grouped by element:\n\n## /pricing · button.buy (2)\n1. jd7abc123"
+    )
+    expect(
+      await run(["comments", "--cwd", dir, "--group", "color"], {
+        remote,
+        ...io.options,
+      })
+    ).toBe(1)
+
+    expect(await run(["pages", "--cwd", dir], { remote, ...io.options })).toBe(
+      0
+    )
+    expect(io.out.at(-1)).toBe(
+      "2 pages with open comments:\n\n12 open  /pricing\n 3 open  /"
+    )
+  })
+
+  it("resolve several reports the ones that failed", async () => {
+    saveCredential(PROJECT, { token: "nuni_s_good" })
+    const remote = fakeRemote()
+    const io = capture()
+    const dir = tempDir({ "index.html": `data-project="${PROJECT}"` })
+    expect(
+      await run(
+        [
+          "resolve",
+          "jd7abc123",
+          "gone",
+          "jd7def456",
+          "--note",
+          "Done",
+          "--cwd",
+          dir,
+        ],
+        { remote, ...io.options }
+      )
+    ).toBe(1)
+    expect(remote.calls.slice(-4)).toEqual([
+      "resolved jd7abc123 nuni_s_good",
+      "reply jd7abc123 nuni_s_good Done",
+      "resolved jd7def456 nuni_s_good",
+      "reply jd7def456 nuni_s_good Done",
+    ])
+    expect(io.out.at(-1)).toBe("Resolved jd7abc123, jd7def456.")
+    expect(io.err.at(-1)).toBe("Couldn't resolve gone: Comment not found")
+
+    // Resolved, but the note failed: reported as resolved, with the note error.
+    expect(
+      await run(
+        ["resolve", "jd7abc123", "noreply", "--note", "Done", "--cwd", dir],
+        { remote, ...io.options }
+      )
+    ).toBe(1)
+    expect(remote.calls).toContain("resolved noreply nuni_s_good")
+    expect(io.out.at(-1)).toBe("Resolved jd7abc123, noreply.")
+    expect(io.err.at(-1)).toBe(
+      "Resolved noreply, but couldn't post the note: Replies are off"
+    )
+  })
+
   it("whoami and logout", async () => {
     saveCredential(PROJECT, { token: "nuni_s_good" })
     const remote = fakeRemote()
@@ -370,7 +473,10 @@ describe("MCP server", () => {
         version: "9.9.9",
         project: PROJECT,
         cwd: tempDir(),
-        fetchImage: async () => ({ data: "AAAA", mimeType: "image/webp" }),
+        fetchImage: async (url) => ({
+          data: url.endsWith("drawn") ? "BBBB" : "AAAA",
+          mimeType: "image/webp",
+        }),
       })
     )
     expect(client.getServerVersion()).toMatchObject({
@@ -381,14 +487,40 @@ describe("MCP server", () => {
     const { tools } = await client.listTools()
     expect(tools.map((t) => t.name)).toEqual([
       "list_comments",
+      "search_comments",
+      "list_pages",
       "get_comment",
       "reply_to_comment",
       "resolve_comment",
+      "resolve_comments",
       "reopen_comment",
     ])
 
     const list = await client.callTool({ name: "list_comments", arguments: {} })
     expect(JSON.stringify(list.content)).toContain("jd7abc123")
+
+    const grouped = await client.callTool({
+      name: "list_comments",
+      arguments: { group_by: "page" },
+    })
+    expect(JSON.stringify(grouped.content)).toContain("## /pricing (2)")
+
+    const found = await client.callTool({
+      name: "search_comments",
+      arguments: { query: "green" },
+    })
+    expect(found.isError).toBeFalsy()
+    expect(remote.calls.at(-1)).toBe(
+      `list ${PROJECT} nuni_s_good open search=green`
+    )
+    const noQuery = await client.callTool({
+      name: "search_comments",
+      arguments: {},
+    })
+    expect(noQuery.isError).toBe(true)
+
+    const pages = await client.callTool({ name: "list_pages", arguments: {} })
+    expect(JSON.stringify(pages.content)).toContain("12 open  /pricing")
 
     const one = await client.callTool({
       name: "get_comment",
@@ -396,11 +528,14 @@ describe("MCP server", () => {
     })
     const content = one.content as { type: string; text?: string }[]
     expect(content[0]?.text).toContain("> Make this bigger")
-    expect(content[1]).toEqual({
-      type: "image",
-      data: "AAAA",
-      mimeType: "image/webp",
-    })
+    expect(content[0]?.text).toContain(
+      "## Images from Sam (1)\n\n- https://files.example.com/drawn"
+    )
+    // The commenter's own image first, then the element's screenshot.
+    expect(content.slice(1)).toEqual([
+      { type: "image", data: "BBBB", mimeType: "image/webp" },
+      { type: "image", data: "AAAA", mimeType: "image/webp" },
+    ])
 
     const resolved = await client.callTool({
       name: "resolve_comment",
@@ -411,6 +546,23 @@ describe("MCP server", () => {
       "resolved jd7abc123 nuni_s_good",
       "reply jd7abc123 nuni_s_good Bigger now",
     ])
+    const several = await client.callTool({
+      name: "resolve_comments",
+      arguments: { ids: ["jd7abc123", "gone", "jd7def456"], note: "Fixed" },
+    })
+    expect(several.isError).toBeFalsy()
+    expect(JSON.stringify(several.content)).toContain(
+      "Resolved jd7abc123, jd7def456."
+    )
+    expect(JSON.stringify(several.content)).toContain(
+      "Couldn't resolve gone: Comment not found"
+    )
+    const none = await client.callTool({
+      name: "resolve_comments",
+      arguments: { ids: ["gone"] },
+    })
+    expect(none.isError).toBe(true)
+
     await client.callTool({
       name: "reply_to_comment",
       arguments: { id: "jd7abc123", body: "Thanks!" },
@@ -462,7 +614,7 @@ describe("MCP server", () => {
     await client.connect(transport)
     expect(await client.ping()).toEqual({})
     const { tools } = await client.listTools()
-    expect(tools).toHaveLength(5)
+    expect(tools).toHaveLength(8)
     const result = await client.callTool({
       name: "list_comments",
       arguments: {},

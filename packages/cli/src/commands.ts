@@ -11,10 +11,11 @@ import {
   saveCredential,
 } from "./credentials"
 import { APP_URL } from "./env"
-import { formatCommentList } from "./format"
+import { formatCommentList, formatPageList, type GroupBy } from "./format"
 import { fetchImage } from "./mcp"
 import { resolveProject } from "./project"
 import type { Remote } from "./remote"
+import { resolveComments } from "./resolve"
 
 export interface CommandContext {
   remote: Remote
@@ -162,7 +163,13 @@ export async function whoami(ctx: CommandContext): Promise<number> {
 
 export async function listComments(
   ctx: CommandContext,
-  options: { status?: string; page?: string; limit?: string }
+  options: {
+    status?: string
+    page?: string
+    limit?: string
+    search?: string
+    group?: string
+  }
 ): Promise<number> {
   const { publicId, token } = signedIn(ctx)
   if (
@@ -172,14 +179,23 @@ export async function listComments(
   ) {
     throw new CommandError(`--status must be open or resolved`)
   }
+  if (
+    options.group &&
+    options.group !== "page" &&
+    options.group !== "element"
+  ) {
+    throw new CommandError(`--group must be page or element`)
+  }
   const status = (options.status ?? "open") as CommentStatus
   const limit = options.limit ? Number(options.limit) : 20
   if (!Number.isInteger(limit) || limit < 1) {
     throw new CommandError(`--limit must be a positive number`)
   }
+  const search = options.search?.trim() || undefined
   const page = await ctx.remote.listComments(publicId, token, {
     status,
     path: options.page,
+    search,
     limit,
   })
   if (ctx.json) {
@@ -190,9 +206,18 @@ export async function listComments(
     formatCommentList(page.comments, {
       status,
       more: Boolean(page.cursor),
+      order: search ? "best match first" : undefined,
+      groupBy: options.group as GroupBy | undefined,
       detailHint: `Full context: npx ${PACKAGES.cli}@latest comment <id>`,
     })
   )
+  return 0
+}
+
+export async function listPages(ctx: CommandContext): Promise<number> {
+  const { publicId, token } = signedIn(ctx)
+  const pages = await ctx.remote.listPages(publicId, token)
+  ctx.out(ctx.json ? JSON.stringify(pages, null, 2) : formatPageList(pages))
   return 0
 }
 
@@ -206,22 +231,39 @@ export async function showComment(
   const comment = await ctx.remote.getComment(publicId, token, id)
   if (!comment) throw new CommandError(`No comment ${id} in ${publicId}.`)
   let saved: string | null = null
-  if (options.saveScreenshot && comment.screenshotUrl) {
-    const image = await fetchImage(comment.screenshotUrl)
-    if (image) {
-      const dir = resolve(ctx.cwd, options.saveScreenshot)
+  const imageFiles: string[] = []
+  if (options.saveScreenshot) {
+    const dir = resolve(ctx.cwd, options.saveScreenshot)
+    // The screenshot keeps its old name; attached images are numbered.
+    const files = [
+      ...(comment.screenshotUrl
+        ? [{ url: comment.screenshotUrl, name: `nuni-${comment._id}` }]
+        : []),
+      ...(comment.imageUrls ?? []).map((url, i) => ({
+        url,
+        name: `nuni-${comment._id}-image-${i + 1}`,
+      })),
+    ]
+    for (const file of files) {
+      const image = await fetchImage(file.url)
+      if (!image) continue
       mkdirSync(dir, { recursive: true })
       const ext = image.mimeType.split("/")[1] ?? "webp"
-      saved = join(dir, `nuni-${comment._id}.${ext}`)
-      writeFileSync(saved, Buffer.from(image.data, "base64"))
+      const path = join(dir, `${file.name}.${ext}`)
+      writeFileSync(path, Buffer.from(image.data, "base64"))
+      if (file.url === comment.screenshotUrl) saved = path
+      else imageFiles.push(path)
     }
   }
   if (ctx.json) {
-    ctx.out(JSON.stringify({ ...comment, screenshotFile: saved }, null, 2))
+    ctx.out(
+      JSON.stringify({ ...comment, screenshotFile: saved, imageFiles }, null, 2)
+    )
     return 0
   }
   ctx.out(buildCommentPrompt(comment))
   if (saved) ctx.out(`\nScreenshot saved to ${saved}`)
+  for (const path of imageFiles) ctx.out(`Image saved to ${path}`)
   return 0
 }
 
@@ -243,23 +285,50 @@ export async function reply(
   return 0
 }
 
-export async function setStatus(
+export async function markResolved(
   ctx: CommandContext,
-  id: string | undefined,
-  status: CommentStatus,
+  ids: string[],
   note?: string
 ): Promise<number> {
-  const verb = status === "resolved" ? "resolve" : "reopen"
-  if (!id) throw new CommandError(`Pass a comment id: ${verb} <id>`)
-  const { publicId, token } = signedIn(ctx)
-  // The status first: a note saying what changed is only posted once the
-  // change of status went through.
-  await ctx.remote.setStatus(token, id, status)
-  if (note?.trim()) await ctx.remote.reply(publicId, token, id, note)
-  ctx.out(
-    ctx.json
-      ? JSON.stringify({ id, status })
-      : `${status === "resolved" ? "Resolved" : "Reopened"} ${id}.`
-  )
+  if (!ids.length) throw new CommandError("Pass a comment id: resolve <id...>")
+  const session = signedIn(ctx)
+  if (ids.length === 1) {
+    const id = ids[0]!
+    // The status first: a note saying what changed is only posted once the
+    // change of status went through.
+    await ctx.remote.setStatus(session.token, id, "resolved")
+    if (note?.trim()) {
+      await ctx.remote.reply(session.publicId, session.token, id, note)
+    }
+    ctx.out(
+      ctx.json ? JSON.stringify({ id, status: "resolved" }) : `Resolved ${id}.`
+    )
+    return 0
+  }
+  const result = await resolveComments(ctx.remote, session, ids, note)
+  if (ctx.json) {
+    ctx.out(JSON.stringify(result, null, 2))
+  } else {
+    if (result.resolved.length) {
+      ctx.out(`Resolved ${result.resolved.join(", ")}.`)
+    }
+    for (const f of result.failed) {
+      ctx.err(`Couldn't resolve ${f.id}: ${f.error}`)
+    }
+    for (const f of result.noteFailed) {
+      ctx.err(`Resolved ${f.id}, but couldn't post the note: ${f.error}`)
+    }
+  }
+  return result.failed.length || result.noteFailed.length ? 1 : 0
+}
+
+export async function reopen(
+  ctx: CommandContext,
+  id: string | undefined
+): Promise<number> {
+  if (!id) throw new CommandError(`Pass a comment id: reopen <id>`)
+  const { token } = signedIn(ctx)
+  await ctx.remote.setStatus(token, id, "open")
+  ctx.out(ctx.json ? JSON.stringify({ id, status: "open" }) : `Reopened ${id}.`)
   return 0
 }
