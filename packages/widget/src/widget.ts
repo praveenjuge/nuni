@@ -52,7 +52,7 @@ import {
 import { createI18n, type I18n, type MessageKey } from "./i18n"
 import { ICONS } from "./icons"
 import { onLocationChange } from "./navigation"
-import type { ScreenshotTools } from "./tools"
+import type { ScreenshotTools } from "./screenshot-tools"
 import { sha256Hex } from "./sha256"
 import { scrollToPin } from "./scroll-to-pin"
 import { KEYS, read, write } from "./storage"

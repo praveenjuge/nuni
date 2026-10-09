@@ -1,6 +1,6 @@
 import { VERSION, type NuniOptions } from "./config"
 import { mount } from "./mount"
-import type { ScreenshotTools } from "./tools"
+import type { ScreenshotTools } from "./screenshot-tools"
 
 declare global {
   interface Window {

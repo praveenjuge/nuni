@@ -2,7 +2,7 @@ import { isProjectId } from "@nuni/shared"
 
 import { resolveConfig, type NuniOptions, type ResolvedConfig } from "./config"
 import { startCollectors, type Collectors } from "./context"
-import type { ScreenshotTools } from "./tools"
+import type { ScreenshotTools } from "./screenshot-tools"
 import { NuniWidget } from "./widget"
 
 export interface NuniInstance {
