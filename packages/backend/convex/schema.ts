@@ -68,6 +68,7 @@ export default defineSchema({
       "createdAt",
     ])
     .index("by_project_status", ["projectId", "status", "createdAt"])
+    .index("by_project_author", ["projectId", "authorKeyHash", "createdAt"])
     .searchIndex("search_text", {
       searchField: "searchText",
       filterFields: ["projectId", "status"],

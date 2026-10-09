@@ -205,6 +205,29 @@ export const listForPage = query({
   },
 })
 
+/**
+ * The commenter's own comments on every page, newest first. Takes their
+ * browser key, never its hash: hashes are public in every listing.
+ */
+export const listMine = query({
+  args: { publicId: v.string(), authorSecret: v.string() },
+  handler: async (ctx, { publicId, authorSecret }) => {
+    const project = await projectByPublicId(ctx, publicId)
+    if (!project || authorSecret.length < 16 || authorSecret.length > 128) {
+      return []
+    }
+    const authorKeyHash = await sha256Hex(authorSecret)
+    const mine = await ctx.db
+      .query("comments")
+      .withIndex("by_project_author", (q) =>
+        q.eq("projectId", project._id).eq("authorKeyHash", authorKeyHash)
+      )
+      .order("desc")
+      .take(LIMITS.yoursLimit)
+    return mine.map(toPublic)
+  },
+})
+
 /** Pages with open comments, for the widget list. Reads maintained counts. */
 export const pagesWithComments = query({
   args: { publicId: v.string() },

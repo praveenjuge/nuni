@@ -69,6 +69,9 @@ interface Placement {
   range?: Range
 }
 
+const PANEL_TABS = ["open", "resolved", "mine"] as const
+type PanelTab = (typeof PANEL_TABS)[number]
+
 interface Draft {
   anchor: Anchor
   element: Element
@@ -196,6 +199,21 @@ function describeElement(el: Element): string {
 }
 
 /**
+ * A link to one comment on another page of this site: the page, opened
+ * with that comment focused. Null when the page can't be linked to.
+ */
+export function commentHref(
+  c: Pick<WidgetComment, "_id" | "page">,
+  loc: { origin: string; search: string }
+): string | null {
+  const page = otherPageHref(c.page.path, loc)
+  if (page === null) return null
+  const url = new URL(page)
+  url.searchParams.set("nuni", c._id)
+  return url.toString()
+}
+
+/**
  * Build an "Other pages" link target, or null when it would leave the
  * current origin. The stored path comes from anonymous comment submissions;
  * one that does not start with "/" (".evil.com/x", "@evil.com/") would
@@ -249,7 +267,10 @@ export class NuniWidget {
 
   private picking = false
   private panelOpen = false
-  private tab: "open" | "resolved" = "open"
+  private tab: PanelTab = "open"
+  /** The visitor's own comments on every page; loaded once the panel opens. */
+  private mine: WidgetComment[] | null = null
+  private mineUnsub: (() => void) | null = null
   /** What the panel's search box filters by. */
   private search = ""
   /** The comment opened last, marked in the panel to find your place again. */
@@ -523,6 +544,7 @@ export class NuniWidget {
     this.sessionUnsub?.()
     this.ownerDetailUnsub?.()
     this.threadUnsub?.()
+    this.mineUnsub?.()
     this.resolveRun++
     for (const stop of this.scopeWatchers.values()) stop()
     this.scopeWatchers.clear()
@@ -1867,6 +1889,12 @@ export class NuniWidget {
   private togglePanel(open = !this.panelOpen) {
     if (open === this.panelOpen) return
     this.panelOpen = open
+    if (open && !this.mineUnsub) {
+      this.mineUnsub = this.api.onMine(this.secret, (mine) => {
+        this.mine = mine
+        this.render()
+      })
+    }
     if (open) {
       this.keepFocus()
       this.focusNext = '.panel [role="tab"][aria-selected="true"]'
@@ -2176,14 +2204,71 @@ export class NuniWidget {
     const query = this.search.trim().toLocaleLowerCase()
     const matches = (...texts: (string | undefined)[]) =>
       !query || texts.some((t) => t?.toLocaleLowerCase().includes(query))
-    const list = (this.tab === "open" ? open : resolved).filter((c) =>
-      matches(c.body, c.authorName, c.anchor.quote?.exact, c.suggestion?.after)
+    const mine = this.mine ?? []
+    const list = (
+      this.tab === "open" ? open : this.tab === "resolved" ? resolved : mine
+    ).filter((c) =>
+      matches(
+        c.body,
+        c.authorName,
+        c.anchor.quote?.exact,
+        c.suggestion?.after,
+        this.tab === "mine" ? c.page.path : undefined
+      )
     )
     const placed = list.filter((c) => this.placements.get(c._id)?.element)
     const lost = list.filter((c) => !this.placements.get(c._id)?.element)
     const otherPages = this.pages.filter(
       (p) => p.path !== this.pageKey && matches(p.path)
     )
+
+    const content = (c: WidgetComment) => [
+      c.suggestion
+        ? renderSuggestionLine(c.suggestion)
+        : c.anchor.quote
+          ? h("div", { class: "item-quote" }, c.anchor.quote.exact)
+          : null,
+      c.body ? h("div", { class: "item-text" }, c.body) : null,
+    ]
+
+    // Your own comments: where each one is and whether it was resolved.
+    const mineItem = (c: WidgetComment) => {
+      const here = c.page.path === this.pageKey
+      const href = here ? null : commentHref(c, location)
+      const resolvedBadge = c.status === "resolved"
+      return h(
+        here ? "button" : href === null ? "div" : "a",
+        here
+          ? {
+              class: "item",
+              type: "button",
+              "data-focus-key": `item-${c._id}`,
+              onclick: () => {
+                this.deepLinkId = c._id
+                this.openDeepLink()
+              },
+            }
+          : { class: "item", href },
+        h(
+          "div",
+          { class: "row" },
+          h(
+            "span",
+            { class: "author" },
+            here ? this.t("thisPage") : c.page.path
+          ),
+          h("span", { class: "meta" }, this.i18n.timeAgo(c.createdAt)),
+          h("span", { class: "spacer" }),
+          h(
+            "span",
+            { class: resolvedBadge ? "badge badge-ok" : "badge" },
+            resolvedBadge ? icon(ICONS.check) : null,
+            this.t(resolvedBadge ? "resolved" : "statusOpen")
+          )
+        ),
+        ...content(c)
+      )
+    }
 
     const item = (c: WidgetComment) =>
       h(
@@ -2220,16 +2305,27 @@ export class NuniWidget {
               )
             : null
         ),
-        c.suggestion
-          ? renderSuggestionLine(c.suggestion)
-          : c.anchor.quote
-            ? h("div", { class: "item-quote" }, c.anchor.quote.exact)
-            : null,
-        c.body ? h("div", { class: "item-text" }, c.body) : null
+        ...content(c)
       )
 
     const children: Node[] = []
-    if (!this.loaded) {
+    if (this.tab === "mine") {
+      if (!this.mine) {
+        children.push(h("div", { class: "empty" }, this.t("loading")))
+      } else if (!list.length) {
+        children.push(
+          h(
+            "div",
+            { class: "empty" },
+            query
+              ? this.t("noMatches", { query: this.search.trim() })
+              : this.t("noYours")
+          )
+        )
+      } else {
+        children.push(...list.map(mineItem))
+      }
+    } else if (!this.loaded) {
       children.push(h("div", { class: "empty" }, this.t("loading")))
     } else if (!list.length && query) {
       children.push(
@@ -2258,7 +2354,7 @@ export class NuniWidget {
         children.push(...lost.map(item))
       }
     }
-    if (otherPages.length) {
+    if (otherPages.length && this.tab !== "mine") {
       children.push(h("div", { class: "section-label" }, this.t("otherPages")))
       for (const p of otherPages.slice(0, 20)) {
         const href = otherPageHref(p.path, location)
@@ -2300,7 +2396,7 @@ export class NuniWidget {
           icon(ICONS.close)
         )
       ),
-      this.comments.length
+      this.comments.length || this.mine?.length
         ? h(
             "div",
             { class: "panel-search" },
@@ -2333,19 +2429,23 @@ export class NuniWidget {
               return
             }
             e.preventDefault()
+            const at = PANEL_TABS.indexOf(this.tab)
+            const last = PANEL_TABS.length - 1
             this.tab =
-              key === "Home"
-                ? "open"
-                : key === "End"
-                  ? "resolved"
-                  : this.tab === "open"
-                    ? "resolved"
-                    : "open"
+              PANEL_TABS[
+                key === "Home"
+                  ? 0
+                  : key === "End"
+                    ? last
+                    : key === "ArrowRight"
+                      ? (at + 1) % PANEL_TABS.length
+                      : (at + last) % PANEL_TABS.length
+              ]!
             this.focusNext = `[data-focus-key="tab-${this.tab}"]`
             this.render()
           },
         },
-        (["open", "resolved"] as const).map((tab) =>
+        PANEL_TABS.map((tab) =>
           h(
             "button",
             {
@@ -2364,7 +2464,11 @@ export class NuniWidget {
             },
             tab === "open"
               ? this.t("tabOpen", { count: open.length })
-              : this.t("tabResolved", { count: resolved.length })
+              : tab === "resolved"
+                ? this.t("tabResolved", { count: resolved.length })
+                : this.mine
+                  ? this.t("tabYours", { count: this.mine.length })
+                  : this.t("yours")
           )
         )
       ),

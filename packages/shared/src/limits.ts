@@ -19,6 +19,8 @@ export const LIMITS = {
   /** Per page, the widget loads this many newest open and resolved comments. */
   pageOpenLimit: 1000,
   pageResolvedLimit: 200,
+  /** The newest of a commenter's own comments, across pages. */
+  yoursLimit: 100,
   /** Most console or network entries kept with one comment. */
   contextEntryMax: 20,
   contextMessageMaxLength: 500,

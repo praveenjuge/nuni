@@ -380,6 +380,39 @@ describe("widget comments", () => {
     })
     expect(edited?.searchText).toContain("Try free")
   })
+
+  it("lists a commenter's own comments on every page, by their key only", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const other = generateProjectId()
+    const secret = generateSecret()
+    const first = await addComment(t, publicId, { secret, body: "One" })
+    await addComment(t, publicId, { secret, path: "/about", body: "Two" })
+    await addComment(t, publicId, { body: "Someone else's" })
+    await addComment(t, other, { secret, body: "Another site" })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    await alice.mutation(api.comments.resolve, { id: first })
+
+    const mine = await t.query(api.comments.listMine, {
+      publicId,
+      authorSecret: secret,
+    })
+    expect(mine.map((c) => [c.body, c.page.path, c.status])).toEqual([
+      ["Two", "/about", "open"],
+      ["One", "/pricing", "resolved"],
+    ])
+    // The public hash is not enough to list someone's comments.
+    expect(
+      await t.query(api.comments.listMine, {
+        publicId,
+        authorSecret: mine[0]!.authorKeyHash,
+      })
+    ).toEqual([])
+    expect(
+      await t.query(api.comments.listMine, { publicId, authorSecret: "short" })
+    ).toEqual([])
+  })
 })
 
 describe("claiming and owner actions", () => {

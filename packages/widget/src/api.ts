@@ -94,6 +94,16 @@ export class NuniApi {
     )
   }
 
+  /** The visitor's own comments on every page, live. */
+  onMine(authorSecret: string, cb: (comments: WidgetComment[]) => void) {
+    return this.client.onUpdate(
+      api.comments.listMine,
+      { publicId: this.config.project, authorSecret },
+      (comments) => cb(comments as WidgetComment[]),
+      () => {}
+    )
+  }
+
   onPages(cb: (pages: PageSummary[]) => void) {
     return this.client.onUpdate(
       api.comments.pagesWithComments,
