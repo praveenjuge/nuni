@@ -365,8 +365,12 @@ function SuggestedEdit({
           variant="ghost"
           className="-my-1 ml-auto"
           onClick={async () => {
-            await navigator.clipboard.writeText(suggestion.after)
-            toast("New text copied")
+            try {
+              await navigator.clipboard.writeText(suggestion.after)
+              toast("New text copied")
+            } catch {
+              toast.error("Couldn't copy. Allow clipboard access.")
+            }
           }}
         >
           <ClipboardCopyIcon data-icon="inline-start" />

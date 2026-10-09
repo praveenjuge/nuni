@@ -1371,6 +1371,7 @@ export class NuniWidget {
           undo: this.t("markUpUndo"),
           cancel: this.t("cancel"),
           done: this.t("markUpDone"),
+          failed: this.t("markUpFailed"),
         },
       })
       if (marked) {

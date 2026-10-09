@@ -16,6 +16,8 @@ export interface MarkUpLabels {
   undo: string
   cancel: string
   done: string
+  /** Shown when the drawing can't be saved as an image. */
+  failed: string
 }
 
 export interface MarkUpOptions {
@@ -58,6 +60,8 @@ const STYLES = `
 }
 .mk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .mk-bar .spacer { flex: 1; }
+.mk-error { margin: 0; color: var(--n-danger); font-size: 13px; }
+.mk-error:empty { display: none; }
 .mk-bar [aria-pressed="true"] { background: var(--n-accent-soft); border-color: var(--n-accent); }
 .mk-canvas {
   display: block;
@@ -213,15 +217,26 @@ export const markUp: MarkUp = async (image, { container, labels, color }) => {
   const previous = (root as ShadowRoot | Document)
     .activeElement as HTMLElement | null
   return new Promise<Blob | null>((resolve) => {
+    // Attach pressed twice, or Escape while saving: close only once.
+    let closing = false
     const close = async (save: boolean) => {
+      if (closing) return
+      closing = true
       const result = save
         ? await encodeCanvas(canvas, LIMITS.imageMaxBytes)
         : null
+      if (save && !result) {
+        // Keep the drawing; say why nothing was attached.
+        closing = false
+        error.textContent = labels.failed
+        return
+      }
       overlay.remove()
       bitmap.close()
       previous?.focus()
       resolve(result)
     }
+    const error = h("p", { class: "mk-error", role: "alert" })
     const done = h(
       "button",
       {
@@ -268,6 +283,7 @@ export const markUp: MarkUp = async (image, { container, labels, color }) => {
           ),
           done
         ),
+        error,
         canvas
       )
     )

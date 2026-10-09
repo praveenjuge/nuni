@@ -315,8 +315,11 @@ export async function markResolved(
     for (const f of result.failed) {
       ctx.err(`Couldn't resolve ${f.id}: ${f.error}`)
     }
+    for (const f of result.noteFailed) {
+      ctx.err(`Resolved ${f.id}, but couldn't post the note: ${f.error}`)
+    }
   }
-  return result.failed.length ? 1 : 0
+  return result.failed.length || result.noteFailed.length ? 1 : 0
 }
 
 export async function reopen(

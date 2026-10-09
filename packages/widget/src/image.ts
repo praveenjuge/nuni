@@ -49,12 +49,15 @@ export async function imageFromFile(file: Blob): Promise<Blob | null> {
   const canvas = document.createElement("canvas")
   canvas.width = Math.max(1, Math.round(bitmap.width * scale))
   canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-  const ctx = canvas.getContext("2d")
-  if (!ctx) return null
-  // Transparent PNGs become white, like the page behind most screenshots.
-  ctx.fillStyle = "#fff"
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-  bitmap.close()
+  try {
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return null
+    // Transparent PNGs become white, like the page behind most screenshots.
+    ctx.fillStyle = "#fff"
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  } finally {
+    bitmap.close()
+  }
   return encodeCanvas(canvas, LIMITS.imageMaxBytes)
 }

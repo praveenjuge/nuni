@@ -70,6 +70,7 @@ export const EN = {
   markUpPen: "Pen",
   markUpUndo: "Undo",
   markUpDone: "Attach",
+  markUpFailed: "Couldn't save the drawing as an image. Try again.",
   imagesPublic: "Images are shown to everyone who can see this comment.",
   imageN: "Image {n}",
   removeImage: "Remove image {n}",

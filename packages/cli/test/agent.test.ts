@@ -115,6 +115,7 @@ function fakeRemote(polls: LoginPoll[] = []): Remote & {
       calls.push(`${status} ${id} ${token}`)
     },
     reply: async (_p, token, id, body) => {
+      if (id === "noreply") throw new RemoteError("Replies are off", "error")
       calls.push(`reply ${id} ${token} ${body}`)
     },
   }
@@ -410,6 +411,19 @@ describe("comment commands", () => {
     ])
     expect(io.out.at(-1)).toBe("Resolved jd7abc123, jd7def456.")
     expect(io.err.at(-1)).toBe("Couldn't resolve gone: Comment not found")
+
+    // Resolved, but the note failed: reported as resolved, with the note error.
+    expect(
+      await run(
+        ["resolve", "jd7abc123", "noreply", "--note", "Done", "--cwd", dir],
+        { remote, ...io.options }
+      )
+    ).toBe(1)
+    expect(remote.calls).toContain("resolved noreply nuni_s_good")
+    expect(io.out.at(-1)).toBe("Resolved jd7abc123, noreply.")
+    expect(io.err.at(-1)).toBe(
+      "Resolved noreply, but couldn't post the note: Replies are off"
+    )
   })
 
   it("whoami and logout", async () => {
