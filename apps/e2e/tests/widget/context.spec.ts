@@ -110,3 +110,106 @@ test("comments carry page context, screenshot and a prompt for the owner's agent
   await visitorContext.close()
   await ownerContext.close()
 })
+
+test("commenters attach an image and a marked-up screenshot that everyone sees", async ({
+  browser,
+}) => {
+  const project = projectId()
+  seedOwner(project)
+  const body = `See the arrow ${Date.now()}`
+
+  const visitor = await (await browser.newContext()).newPage()
+  await visitor.goto(`/pricing?project=${project}`)
+  await expect(visitor.locator("#nuni-root .toolbar")).toBeVisible()
+  // A small PNG, made by the browser.
+  const png = Buffer.from(
+    (
+      await visitor.evaluate(() => {
+        const canvas = document.createElement("canvas")
+        canvas.width = 40
+        canvas.height = 30
+        const ctx = canvas.getContext("2d")!
+        ctx.fillStyle = "#2563eb"
+        ctx.fillRect(0, 0, 40, 30)
+        return canvas.toDataURL("image/png")
+      })
+    ).split(",")[1]!,
+    "base64"
+  )
+
+  await visitor
+    .locator("#nuni-root .toolbar")
+    .getByRole("button", { name: "Add a comment" })
+    .click()
+  await visitor.locator(".plan").nth(1).locator(".price").click()
+  const composer = visitor.locator('#nuni-root [data-card="composer"]')
+  await composer.getByPlaceholder("Your name").fill("Val Visitor")
+  await composer.getByPlaceholder("Leave a comment").fill(body)
+
+  // An image from disk.
+  await composer
+    .locator('input[type="file"]')
+    .setInputFiles({ name: "mock.png", mimeType: "image/png", buffer: png })
+  await expect(composer.getByRole("img", { name: "Image 1" })).toBeVisible()
+  await expect(composer).toContainText(
+    "Images are shown to everyone who can see this comment."
+  )
+
+  // The screenshot, with an arrow drawn on it.
+  await composer.getByRole("button", { name: "Mark up a screenshot" }).click()
+  const editor = visitor.getByRole("dialog", { name: "Mark up the screenshot" })
+  await expect(editor).toBeVisible({ timeout: 20_000 })
+  await editor.getByRole("button", { name: "Arrow" }).click()
+  const canvas = editor.locator("canvas")
+  const box = (await canvas.boundingBox())!
+  await visitor.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.8)
+  await visitor.mouse.down()
+  await visitor.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5, {
+    steps: 5,
+  })
+  await visitor.mouse.up()
+  await editor.getByRole("button", { name: "Attach" }).click()
+  await expect(editor).toHaveCount(0)
+  await expect(composer.getByRole("img", { name: "Image 2" })).toBeVisible()
+  // Escape closes the editor without attaching, and keeps the comment.
+  await composer.getByRole("button", { name: "Mark up a screenshot" }).click()
+  await expect(editor).toBeVisible()
+  await visitor.keyboard.press("Escape")
+  await expect(editor).toHaveCount(0)
+  await expect(composer.getByPlaceholder("Leave a comment")).toHaveValue(body)
+  await expect(composer.locator(".cmp-thumb")).toHaveCount(2)
+
+  const images: number[] = []
+  visitor.on("response", (r) => {
+    if (r.url().includes("/widget/image")) images.push(r.status())
+  })
+  await composer.getByRole("button", { name: "Post" }).click()
+  await expect(visitor.locator("#nuni-root .toast")).toHaveText("Comment added")
+  await expect.poll(() => images).toEqual([201, 201])
+
+  // Someone else sees both images in the thread.
+  const other = await (await browser.newContext()).newPage()
+  await other.goto(`/pricing?project=${project}`)
+  await openThread(other, body)
+  const shown = thread(other).locator(".images img")
+  await expect(shown).toHaveCount(2)
+  for (const img of await shown.all()) {
+    await expect
+      .poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth))
+      .toBeGreaterThan(0)
+  }
+})
+
+test("unclaimed sites don't offer images", async ({ page }) => {
+  await page.goto(`/pricing?project=${projectId()}`)
+  await page
+    .locator("#nuni-root .toolbar")
+    .getByRole("button", { name: "Add a comment" })
+    .click()
+  await page.locator(".plan").first().locator(".price").click()
+  const composer = page.locator('#nuni-root [data-card="composer"]')
+  await expect(composer.getByPlaceholder("Leave a comment")).toBeVisible()
+  await expect(
+    composer.getByRole("button", { name: "Add an image" })
+  ).toHaveCount(0)
+})

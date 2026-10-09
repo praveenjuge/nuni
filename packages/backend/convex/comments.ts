@@ -23,9 +23,11 @@ import {
   bumpPageOpen,
   clampString,
   cleanBody,
+  commentFiles,
   cleanName,
   ensureProject,
   fail,
+  imageUrls,
   parseOrigin,
   projectByPublicId,
   requireOwner,
@@ -63,6 +65,8 @@ function toPublic(c: Doc<"comments">) {
     editedAt: c.editedAt,
     resolvedAt: c.resolvedAt,
     resolution: c.resolution,
+    /** Attached images; their links come with the thread. */
+    imageCount: c.images?.length ?? 0,
     /** Visitors' widgets couldn't find the element, last they looked. */
     pinLost: c.pinLostAt !== undefined,
     replyCount: c.replyCount ?? 0,
@@ -80,6 +84,7 @@ async function toOwner(ctx: QueryCtx, c: Doc<"comments">) {
     screenshotUrl: c.screenshotId
       ? await ctx.storage.getUrl(c.screenshotId)
       : null,
+    imageUrls: await imageUrls(ctx, c),
     replies: c.replyCount ? await repliesFor(ctx, c._id) : [],
   }
 }
@@ -445,7 +450,7 @@ export async function removeComment(
 ) {
   await deleteThread(ctx, comment._id)
   await ctx.db.delete(comment._id)
-  if (comment.screenshotId) await ctx.storage.delete(comment.screenshotId)
+  for (const file of commentFiles(comment)) await ctx.storage.delete(file)
   if (comment.status === "open") {
     await bumpPageOpen(ctx, comment.projectId, comment.page.path, -1)
   }
@@ -925,55 +930,87 @@ export const getForOwner = query({
   },
 })
 
-const SCREENSHOT_TYPES = new Set(["image/webp", "image/jpeg", "image/png"])
+const UPLOAD_TYPES = new Set(["image/webp", "image/jpeg", "image/png"])
 
 /**
- * Screenshot upload, step 1 (from the HTTP action): check the author and
- * rate limit before anything is stored. Returns the comment id.
+ * What the author uploads right after posting: the element's screenshot
+ * (owner-only context) or an image for everyone (their own, or the
+ * screenshot they marked up).
  */
-export const checkScreenshot = internalMutation({
+const uploadKindValidator = v.union(v.literal("screenshot"), v.literal("image"))
+type UploadKind = "screenshot" | "image"
+
+const UPLOAD_RULES = {
+  screenshot: {
+    maxBytes: LIMITS.screenshotMaxBytes,
+    limit: "screenshotPerIp",
+    noun: "Screenshots",
+  },
+  image: {
+    maxBytes: LIMITS.imageMaxBytes,
+    limit: "imagePerIp",
+    noun: "Images",
+  },
+} as const
+
+const uploadArgs = {
+  kind: uploadKindValidator,
+  publicId: v.string(),
+  commentId: v.string(),
+  authorSecret: v.string(),
+}
+
+/**
+ * Upload, step 1, before the file is stored: is the file acceptable, and
+ * may this author still add it to this comment?
+ */
+export const checkUpload = internalMutation({
   args: {
-    publicId: v.string(),
-    commentId: v.string(),
-    authorSecret: v.string(),
+    ...uploadArgs,
     ip: v.string(),
     contentType: v.string(),
     size: v.number(),
   },
   handler: async (ctx, args) => {
-    if (!SCREENSHOT_TYPES.has(args.contentType)) {
-      fail("invalid_type", "Screenshots must be WebP, JPEG or PNG")
+    const rules = UPLOAD_RULES[args.kind]
+    if (!UPLOAD_TYPES.has(args.contentType)) {
+      fail("invalid_type", `${rules.noun} must be WebP, JPEG or PNG`)
     }
-    if (args.size <= 0 || args.size > LIMITS.screenshotMaxBytes) {
-      fail("too_large", "Screenshot is too large")
+    if (args.size <= 0 || args.size > rules.maxBytes) {
+      fail("too_large", "The image is too large")
     }
-    const { ok } = await rateLimiter.limit(ctx, "screenshotPerIp", {
+    const { ok } = await rateLimiter.limit(ctx, rules.limit, {
       key: ipKey(args.ip, args.publicId),
     })
     if (!ok) fail("rate_limited", "Slow down a little")
-    const comment = await screenshotTarget(ctx, args)
+    const comment = await uploadTarget(ctx, args)
     return comment._id
   },
 })
 
-/** Screenshot upload, step 2: attach the stored file, or report why not. */
-export const attachScreenshot = internalMutation({
-  args: {
-    publicId: v.string(),
-    commentId: v.string(),
-    authorSecret: v.string(),
-    storageId: v.id("_storage"),
-  },
+/** Upload, step 2: attach the stored file, or report why not. */
+export const attachUpload = internalMutation({
+  args: { ...uploadArgs, storageId: v.id("_storage") },
   handler: async (ctx, args) => {
-    const comment = await screenshotTarget(ctx, args)
-    await ctx.db.patch(comment._id, { screenshotId: args.storageId })
+    const comment = await uploadTarget(ctx, args)
+    await ctx.db.patch(
+      comment._id,
+      args.kind === "screenshot"
+        ? { screenshotId: args.storageId }
+        : { images: [...(comment.images ?? []), args.storageId] }
+    )
   },
 })
 
-/** The author's own, recent comment that has no screenshot yet. */
-async function screenshotTarget(
+/** The author's own, recent comment that can still take this upload. */
+async function uploadTarget(
   ctx: MutationCtx,
-  args: { publicId: string; commentId: string; authorSecret: string }
+  args: {
+    kind: UploadKind
+    publicId: string
+    commentId: string
+    authorSecret: string
+  }
 ) {
   const project = await projectByPublicId(ctx, args.publicId)
   const id = ctx.db.normalizeId("comments", args.commentId)
@@ -982,11 +1019,25 @@ async function screenshotTarget(
     fail("not_found", "Comment not found")
   }
   if ((await sha256Hex(args.authorSecret)) !== comment.authorKeyHash) {
-    fail("forbidden", "You can only add a screenshot to your own comment")
+    fail("forbidden", "You can only add images to your own comment")
   }
-  if (comment.screenshotId) fail("conflict", "This comment has a screenshot")
+  if (args.kind === "screenshot" && comment.screenshotId) {
+    fail("conflict", "This comment has a screenshot")
+  }
+  if (args.kind === "image") {
+    // Images are public, so an unclaimed project can't be used to host them.
+    if (!project.ownerId) {
+      fail("forbidden", "Images can be added once the site is claimed")
+    }
+    if ((comment.images?.length ?? 0) >= LIMITS.imagesPerComment) {
+      fail(
+        "conflict",
+        `A comment can have up to ${LIMITS.imagesPerComment} images`
+      )
+    }
+  }
   if (Date.now() - comment.createdAt > LIMITS.screenshotUploadWindowMs) {
-    fail("expired", "Too late to add a screenshot")
+    fail("expired", "Too late to add an image")
   }
   return comment
 }

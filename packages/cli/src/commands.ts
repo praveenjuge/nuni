@@ -231,22 +231,39 @@ export async function showComment(
   const comment = await ctx.remote.getComment(publicId, token, id)
   if (!comment) throw new CommandError(`No comment ${id} in ${publicId}.`)
   let saved: string | null = null
-  if (options.saveScreenshot && comment.screenshotUrl) {
-    const image = await fetchImage(comment.screenshotUrl)
-    if (image) {
-      const dir = resolve(ctx.cwd, options.saveScreenshot)
+  const imageFiles: string[] = []
+  if (options.saveScreenshot) {
+    const dir = resolve(ctx.cwd, options.saveScreenshot)
+    // The screenshot keeps its old name; attached images are numbered.
+    const files = [
+      ...(comment.screenshotUrl
+        ? [{ url: comment.screenshotUrl, name: `nuni-${comment._id}` }]
+        : []),
+      ...(comment.imageUrls ?? []).map((url, i) => ({
+        url,
+        name: `nuni-${comment._id}-image-${i + 1}`,
+      })),
+    ]
+    for (const file of files) {
+      const image = await fetchImage(file.url)
+      if (!image) continue
       mkdirSync(dir, { recursive: true })
       const ext = image.mimeType.split("/")[1] ?? "webp"
-      saved = join(dir, `nuni-${comment._id}.${ext}`)
-      writeFileSync(saved, Buffer.from(image.data, "base64"))
+      const path = join(dir, `${file.name}.${ext}`)
+      writeFileSync(path, Buffer.from(image.data, "base64"))
+      if (file.url === comment.screenshotUrl) saved = path
+      else imageFiles.push(path)
     }
   }
   if (ctx.json) {
-    ctx.out(JSON.stringify({ ...comment, screenshotFile: saved }, null, 2))
+    ctx.out(
+      JSON.stringify({ ...comment, screenshotFile: saved, imageFiles }, null, 2)
+    )
     return 0
   }
   ctx.out(buildCommentPrompt(comment))
   if (saved) ctx.out(`\nScreenshot saved to ${saved}`)
+  for (const path of imageFiles) ctx.out(`Image saved to ${path}`)
   return 0
 }
 

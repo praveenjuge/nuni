@@ -67,6 +67,7 @@ const comment: OwnerComment = {
   userAgent: "Mozilla/5.0",
   context: { console: [{ level: "error", message: "Boom", at: 1 }] },
   screenshotUrl: "https://files.example.com/shot",
+  imageUrls: ["https://files.example.com/drawn"],
 }
 
 /** A second comment on the same button, and so in the same group. */
@@ -458,7 +459,10 @@ describe("MCP server", () => {
         version: "9.9.9",
         project: PROJECT,
         cwd: tempDir(),
-        fetchImage: async () => ({ data: "AAAA", mimeType: "image/webp" }),
+        fetchImage: async (url) => ({
+          data: url.endsWith("drawn") ? "BBBB" : "AAAA",
+          mimeType: "image/webp",
+        }),
       })
     )
     expect(client.getServerVersion()).toMatchObject({
@@ -510,11 +514,14 @@ describe("MCP server", () => {
     })
     const content = one.content as { type: string; text?: string }[]
     expect(content[0]?.text).toContain("> Make this bigger")
-    expect(content[1]).toEqual({
-      type: "image",
-      data: "AAAA",
-      mimeType: "image/webp",
-    })
+    expect(content[0]?.text).toContain(
+      "## Images from Sam (1)\n\n- https://files.example.com/drawn"
+    )
+    // The commenter's own image first, then the element's screenshot.
+    expect(content.slice(1)).toEqual([
+      { type: "image", data: "BBBB", mimeType: "image/webp" },
+      { type: "image", data: "AAAA", mimeType: "image/webp" },
+    ])
 
     const resolved = await client.callTool({
       name: "resolve_comment",

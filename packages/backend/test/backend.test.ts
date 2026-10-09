@@ -937,12 +937,119 @@ const WEBP = new Uint8Array([
   0x88, 0xfe, 0x07, 0,
 ])
 
+describe("attached images", () => {
+  const uploadImage = (
+    t: T,
+    target: { publicId: string; id: string; secret: string },
+    body: Uint8Array<ArrayBuffer> = WEBP
+  ) => uploadScreenshot(t, target, body, "/widget/image")
+
+  it("lets the author attach a few public images on claimed sites", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const secret = generateSecret()
+    const id = await addComment(t, publicId, { secret })
+
+    // Unclaimed sites can't be used to host public images.
+    expect((await uploadImage(t, { publicId, id, secret })).status).toBe(403)
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+
+    expect(
+      (await uploadImage(t, { publicId, id, secret: generateSecret() })).status
+    ).toBe(403)
+    expect(
+      (
+        await uploadImage(
+          t,
+          { publicId, id, secret },
+          new TextEncoder().encode("<svg onload=alert(1)>")
+        )
+      ).status
+    ).toBe(415)
+    expect(
+      (
+        await uploadImage(
+          t,
+          { publicId, id, secret },
+          new Uint8Array(LIMITS.imageMaxBytes + 1)
+        )
+      ).status
+    ).toBe(413)
+
+    for (let i = 0; i < LIMITS.imagesPerComment; i++) {
+      expect((await uploadImage(t, { publicId, id, secret })).status).toBe(201)
+    }
+    expect((await uploadImage(t, { publicId, id, secret })).status).toBe(409)
+    // The owner-only screenshot is separate, and still allowed.
+    expect((await uploadScreenshot(t, { publicId, id, secret })).status).toBe(
+      201
+    )
+
+    // Everyone sees the images with the thread; the list only counts them.
+    const [listed] = await t.query(api.comments.listForPage, {
+      publicId,
+      path: "/pricing",
+    })
+    expect(listed?.imageCount).toBe(LIMITS.imagesPerComment)
+    const thread = await t.query(api.replies.listForComment, {
+      publicId,
+      commentId: id,
+    })
+    expect(thread.images).toHaveLength(LIMITS.imagesPerComment)
+    for (const url of thread.images) expect(url).toMatch(/^https?:\/\//)
+    const owner = await alice.query(api.comments.getForOwner, { publicId, id })
+    expect(owner?.imageUrls).toEqual(thread.images)
+
+    // Deleting the comment deletes every file.
+    const files = () =>
+      t.run((ctx) => ctx.db.system.query("_storage").collect())
+    expect(await files()).toHaveLength(LIMITS.imagesPerComment + 1)
+    await t.mutation(api.comments.deleteOwn, { id, authorSecret: secret })
+    expect(await files()).toHaveLength(0)
+  })
+
+  it("rejects images after the upload window, and deletes them with the project", async () => {
+    vi.useFakeTimers()
+    try {
+      const t = setup()
+      const publicId = generateProjectId()
+      const secret = generateSecret()
+      const alice = await signIn(t, "user_alice", "Alice")
+      await addComment(t, publicId)
+      await alice.mutation(api.projects.claim, { publicId })
+      const late = await addComment(t, publicId, { secret })
+      const fresh = await addComment(t, publicId, { secret })
+      expect(
+        (await uploadImage(t, { publicId, id: fresh, secret })).status
+      ).toBe(201)
+      vi.advanceTimersByTime(LIMITS.screenshotUploadWindowMs + 1)
+      expect(
+        (await uploadImage(t, { publicId, id: late, secret })).status
+      ).toBe(410)
+
+      const project = await alice.query(api.projects.getMine, { publicId })
+      await alice.mutation(api.projects.remove, {
+        projectId: project!._id,
+        confirmName: project!.name,
+      })
+      await t.finishAllScheduledFunctions(vi.runAllTimers)
+      expect(
+        await t.run((ctx) => ctx.db.system.query("_storage").collect())
+      ).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 function uploadScreenshot(
   t: T,
   target: { publicId: string; id: string; secret: string },
-  body: Uint8Array<ArrayBuffer> = WEBP
+  body: Uint8Array<ArrayBuffer> = WEBP,
+  path = "/widget/screenshot"
 ) {
-  return t.fetch("/widget/screenshot", {
+  return t.fetch(path, {
     method: "POST",
     headers: {
       "Content-Type": "image/webp",

@@ -50,6 +50,11 @@ export default defineSchema({
     context: v.optional(contextValidator),
     /** Owner-only: an image of the element, uploaded right after posting. */
     screenshotId: v.optional(v.id("_storage")),
+    /**
+     * Images the commenter attached (their own, or the screenshot they
+     * marked up). Public, like the comment. Claimed projects only.
+     */
+    images: v.optional(v.array(v.id("_storage"))),
     /** Body plus author name, for dashboard search. */
     searchText: v.optional(v.string()),
     createdAt: v.number(),

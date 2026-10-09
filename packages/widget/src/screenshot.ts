@@ -1,6 +1,7 @@
 import { LIMITS, MASK_ATTRIBUTE } from "@nuni/shared"
 import { domToCanvas } from "modern-screenshot"
 
+import { encodeCanvas } from "./image"
 import { CAPTURE_MARK } from "./mark"
 
 /**
@@ -25,13 +26,6 @@ export type CaptureScreenshot = (
   el: Element,
   options: ScreenshotOptions
 ) => Promise<Blob | null>
-
-declare global {
-  interface Window {
-    /** Set by nuni-screenshot.global.js (the CDN build). */
-    __nuniScreenshot?: CaptureScreenshot
-  }
-}
 
 const MAX_WIDTH = 1280
 const MAX_HEIGHT = 1600
@@ -174,12 +168,6 @@ export function maskedBoxes(frame: Element): Box[] {
   return out
 }
 
-function toBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
-  return new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, type, quality)
-  )
-}
-
 export const captureScreenshot: CaptureScreenshot = async (el, options) => {
   const frame = frameFor(el)
   const { box, target, masks, crop } = isolatedLayout(frame, el, options.focus)
@@ -256,15 +244,5 @@ export const captureScreenshot: CaptureScreenshot = async (el, options) => {
   ctx.lineWidth = line
   if (x1 > x0 && y1 > y0) ctx.strokeRect(x0, y0, x1 - x0, y1 - y0)
 
-  for (const [type, quality] of [
-    ["image/webp", 0.82],
-    ["image/jpeg", 0.8],
-    ["image/jpeg", 0.55],
-  ] as const) {
-    const blob = await toBlob(canvas, type, quality)
-    // Browsers without WebP encoding fall back to PNG; try JPEG instead.
-    if (blob && blob.type === type && blob.size <= LIMITS.screenshotMaxBytes)
-      return blob
-  }
-  return null
+  return encodeCanvas(canvas, LIMITS.screenshotMaxBytes)
 }

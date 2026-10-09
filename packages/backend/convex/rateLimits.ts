@@ -39,6 +39,12 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     period: MINUTE,
     capacity: 10,
   },
+  imagePerIp: {
+    kind: "token bucket",
+    rate: 10,
+    period: MINUTE,
+    capacity: 10,
+  },
   cliLoginPerIp: { kind: "token bucket", rate: 10, period: HOUR },
   /** The CLI polls every 2 seconds while it waits for approval. */
   cliPollPerIp: {

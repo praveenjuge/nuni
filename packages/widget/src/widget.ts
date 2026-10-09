@@ -39,6 +39,7 @@ import {
 } from "./api"
 import { oneOf, POSITIONS, type Position, type ResolvedConfig } from "./config"
 import { domContext, type Collectors } from "./context"
+import { IMAGE_TYPES, imageFromFile } from "./image"
 import {
   colorFor,
   copyText,
@@ -51,7 +52,7 @@ import {
 import { createI18n, type I18n, type MessageKey } from "./i18n"
 import { ICONS } from "./icons"
 import { onLocationChange } from "./navigation"
-import type { CaptureScreenshot } from "./screenshot"
+import type { ScreenshotTools } from "./tools"
 import { sha256Hex } from "./sha256"
 import { scrollToPin } from "./scroll-to-pin"
 import { KEYS, read, write } from "./storage"
@@ -85,13 +86,17 @@ interface Draft {
   suggesting?: boolean
   /** The suggested words, as typed. */
   suggestion?: string
+  /** Images to attach once posted: picked, pasted or a marked-up screenshot. */
+  images?: { blob: Blob; url: string }[]
+  /** Waiting for the screenshot before the editor opens. */
+  preparingMarkup?: boolean
   error?: string
   sending?: boolean
 }
 
 export interface WidgetRuntime {
   collectors: Collectors
-  loadScreenshot: (() => Promise<CaptureScreenshot | null>) | null
+  loadScreenshot: (() => Promise<ScreenshotTools | null>) | null
 }
 
 type Card =
@@ -168,6 +173,13 @@ function frameDocuments(doc: Document, depth = 0): Document[] {
 const MOBILE_QUERY = "(max-width: 640px)"
 /** How long pins have to stay settled before lost ones are reported. */
 const PIN_REPORT_DELAY_MS = 3000
+/** Drawn on screenshots: stands out on most pages, whatever the accent. */
+const MARKUP_COLOR = "#e5484d"
+
+/** The previews of a comment box's images are no longer shown. */
+function revokeImages(draft: Draft) {
+  for (const image of draft.images ?? []) URL.revokeObjectURL(image.url)
+}
 
 function isTypingTarget(target: EventTarget | null | undefined) {
   // nodeType, not instanceof: iframe elements come from another realm.
@@ -254,6 +266,10 @@ export class NuniWidget {
   private overlayLayer: HTMLDivElement
   private selectButton: HTMLButtonElement
   private uiLayer: HTMLDivElement
+  /** Full-screen editors (marking up a screenshot), kept out of render(). */
+  private modalLayer: HTMLDivElement
+  /** While the screenshot editor is open, it handles keys and presses. */
+  private markingUp = false
   private api: NuniApi
   private cleanups: (() => void)[] = []
   private pageUnsub: (() => void) | null = null
@@ -382,6 +398,7 @@ export class NuniWidget {
     this.pinLayer = h("div", { class: "pins" })
     this.overlayLayer = h("div", { class: "overlay" })
     this.uiLayer = h("div", { class: "ui" })
+    this.modalLayer = h("div", { class: "modal" })
     this.selectButton = h(
       "button",
       {
@@ -405,6 +422,7 @@ export class NuniWidget {
       this.pinLayer,
       this.overlayLayer,
       this.uiLayer,
+      this.modalLayer,
       this.selectButton,
       this.live
     )
@@ -1219,18 +1237,25 @@ export class NuniWidget {
     draft.screenshot = this.takeScreenshot(draft)
   }
 
+  /** An iframe's document can't be rendered from the page. */
+  private canScreenshot(draft: Draft) {
+    return (
+      Boolean(this.runtime.loadScreenshot) &&
+      draft.element.ownerDocument === document
+    )
+  }
+
   /** Capture while the person types, so posting stays instant. */
   private async takeScreenshot(draft: Draft): Promise<Blob | null> {
     const load = this.runtime.loadScreenshot
-    // An iframe's document can't be rendered from the page.
-    if (!load || draft.element.ownerDocument !== document) return null
+    if (!load || !this.canScreenshot(draft)) return null
     const accent =
       getComputedStyle(this.host).getPropertyValue("--n-accent").trim() ||
       "#d6246e"
     try {
       // Let the composer paint first; the capture clones part of the page.
       await new Promise((resolve) => setTimeout(resolve, 60))
-      const capture = await load()
+      const tools = await load()
       const { range, anchor, element } = draft
       // Selected text or an area: the image centers on that part.
       const focus = range
@@ -1246,8 +1271,8 @@ export class NuniWidget {
               }
             }
           : undefined
-      return capture
-        ? await capture(element, { exclude: this.host, accent, focus })
+      return tools
+        ? await tools.capture(element, { exclude: this.host, accent, focus })
         : null
     } catch {
       // No screenshot then; the comment still works.
@@ -1274,6 +1299,91 @@ export class NuniWidget {
     } catch {
       // The comment is posted; the screenshot is optional.
     }
+  }
+
+  /** One after another, so they keep their order. */
+  private async attachImages(id: string, draft: Draft) {
+    const images = draft.images ?? []
+    revokeImages(draft)
+    try {
+      for (const image of images) {
+        await this.api.uploadImage(id, this.secret, image.blob)
+      }
+    } catch (error) {
+      this.showToast(
+        error instanceof NuniApiError ? error.message : this.t("imageFailed")
+      )
+    }
+  }
+
+  /** Whether this comment box can take images (claimed sites only). */
+  private canAttach(draft: Draft) {
+    return (
+      this.config.images &&
+      Boolean(this.status?.claimed) &&
+      (draft.images?.length ?? 0) < LIMITS.imagesPerComment
+    )
+  }
+
+  private async addImages(draft: Draft, files: Iterable<File>) {
+    draft.error = undefined
+    for (const file of files) {
+      if ((draft.images?.length ?? 0) >= LIMITS.imagesPerComment) {
+        draft.error = this.t("tooManyImages", {
+          count: LIMITS.imagesPerComment,
+        })
+        break
+      }
+      const blob = await imageFromFile(file)
+      if (!blob) {
+        draft.error = this.t("imageUnreadable")
+        continue
+      }
+      ;(draft.images ??= []).push({ blob, url: URL.createObjectURL(blob) })
+    }
+    this.render()
+    this.positionCard()
+  }
+
+  /** Draw on the screenshot, then attach the result for everyone to see. */
+  private async markUpScreenshot(draft: Draft) {
+    const load = this.runtime.loadScreenshot
+    if (!load || !draft.screenshot || draft.preparingMarkup) return
+    draft.preparingMarkup = true
+    draft.error = undefined
+    this.render()
+    const [tools, shot] = await Promise.all([load(), draft.screenshot])
+    draft.preparingMarkup = false
+    if (!tools || !shot) {
+      this.setDraftError(draft, this.t("noScreenshot"))
+      return
+    }
+    this.markingUp = true
+    try {
+      const marked = await tools.markUp(shot, {
+        container: this.modalLayer,
+        color: MARKUP_COLOR,
+        labels: {
+          title: this.t("markUpTitle"),
+          box: this.t("markUpBox"),
+          arrow: this.t("markUpArrow"),
+          pen: this.t("markUpPen"),
+          undo: this.t("markUpUndo"),
+          cancel: this.t("cancel"),
+          done: this.t("markUpDone"),
+        },
+      })
+      if (marked) {
+        ;(draft.images ??= []).push({
+          blob: marked,
+          url: URL.createObjectURL(marked),
+        })
+      }
+    } finally {
+      this.markingUp = false
+    }
+    this.render()
+    this.positionCard()
   }
 
   private copyForAgent(comment: WidgetComment) {
@@ -1338,6 +1448,7 @@ export class NuniWidget {
   // ------------------------------------------------------------ keyboard
 
   private onKeyDown(e: KeyboardEvent) {
+    if (this.markingUp) return
     const inWidget = e.composedPath().includes(this.host)
     if (e.key === "Escape") {
       if (this.confirming) this.answer(false)
@@ -1700,6 +1811,7 @@ export class NuniWidget {
         context: this.collectContext(draft),
       })
       if (shot) void this.attachScreenshot(id, shot)
+      if (draft.images?.length) void this.attachImages(id, draft)
       // Show the new pin exactly where it was dropped until it syncs.
       this.placements.set(id, {
         element: draft.element,
@@ -2011,11 +2123,14 @@ export class NuniWidget {
    */
   private closeCardFromOutside(e: PointerEvent) {
     if (!this.card || this.picking || this.confirming || !e.isPrimary) return
+    if (this.markingUp) return
     if (onScrollbar(e)) return
     const card = this.uiLayer.querySelector("[data-card]")
-    const unsent = [...(card?.querySelectorAll("textarea") ?? [])].some((t) =>
-      t.value.trim()
-    )
+    const unsent =
+      [...(card?.querySelectorAll("textarea") ?? [])].some((t) =>
+        t.value.trim()
+      ) ||
+      (this.card.kind === "composer" && Boolean(this.card.draft.images?.length))
     if (unsent) return
     // Focus goes where they pressed, not back to where it was.
     if (!this.panelOpen) this.returnFocus = null
@@ -2023,6 +2138,7 @@ export class NuniWidget {
   }
 
   private closeCard() {
+    if (this.card?.kind === "composer") revokeImages(this.card.draft)
     const had = this.card !== null
     this.card = null
     this.activeId = null
@@ -2733,6 +2849,33 @@ export class NuniWidget {
         }
       })
     }
+    const attach = this.canAttach(draft)
+    const fileInput = attach
+      ? h("input", {
+          type: "file",
+          accept: IMAGE_TYPES.join(","),
+          multiple: true,
+          hidden: true,
+          tabindex: -1,
+          "aria-hidden": "true",
+          onchange: (e: Event) => {
+            const input = e.target as HTMLInputElement
+            const files = [...(input.files ?? [])]
+            input.value = ""
+            void this.addImages(draft, files)
+          },
+        })
+      : null
+    if (attach) {
+      textarea.addEventListener("paste", (e) => {
+        const files = [...(e.clipboardData?.files ?? [])].filter((f) =>
+          IMAGE_TYPES.includes(f.type)
+        )
+        if (!files.length) return
+        e.preventDefault()
+        void this.addImages(draft, files)
+      })
+    }
     const setSuggesting = (on: boolean) => {
       draft.suggesting = on
       draft.error = undefined
@@ -2801,6 +2944,43 @@ export class NuniWidget {
           ? h("blockquote", { class: "quote" }, draft.anchor.quote.exact)
           : null,
       textarea,
+      draft.images?.length
+        ? h(
+            "div",
+            { class: "cmp-images" },
+            h(
+              "div",
+              { class: "cmp-thumbs" },
+              ...draft.images.map((image, i) =>
+                h(
+                  "div",
+                  { class: "cmp-thumb" },
+                  h("img", {
+                    src: image.url,
+                    alt: this.t("imageN", { n: i + 1 }),
+                  }),
+                  h(
+                    "button",
+                    {
+                      class: "cmp-thumb-remove",
+                      type: "button",
+                      "aria-label": this.t("removeImage", { n: i + 1 }),
+                      title: this.t("removeImage", { n: i + 1 }),
+                      onclick: () => {
+                        URL.revokeObjectURL(image.url)
+                        draft.images?.splice(i, 1)
+                        this.render()
+                        this.positionCard()
+                      },
+                    },
+                    icon(ICONS.close)
+                  )
+                )
+              )
+            ),
+            h("p", { class: "cmp-images-note" }, this.t("imagesPublic"))
+          )
+        : null,
       draft.error
         ? h("div", { class: "error cmp-error", role: "alert" }, draft.error)
         : null,
@@ -2825,6 +3005,38 @@ export class NuniWidget {
               this.t("suggestEdit")
             )
           : null,
+        attach
+          ? h(
+              "button",
+              {
+                class: "icon-btn",
+                type: "button",
+                "aria-label": this.t("addImage"),
+                title: this.t("addImage"),
+                onclick: () => fileInput?.click(),
+              },
+              icon(ICONS.image)
+            )
+          : null,
+        attach && this.canScreenshot(draft)
+          ? h(
+              "button",
+              {
+                class: "icon-btn",
+                type: "button",
+                "aria-label": this.t("markUpScreenshot"),
+                title: this.t(
+                  draft.preparingMarkup
+                    ? "preparingScreenshot"
+                    : "markUpScreenshot"
+                ),
+                disabled: Boolean(draft.preparingMarkup),
+                onclick: () => void this.markUpScreenshot(draft),
+              },
+              icon(ICONS.pen)
+            )
+          : null,
+        fileInput,
         counter,
         h("span", { class: "spacer" }),
         post
@@ -3034,6 +3246,28 @@ export class NuniWidget {
               : null,
           comment.body
             ? h("div", { class: "comment-body" }, comment.body)
+            : null,
+          this.threadId === comment._id && this.thread?.images?.length
+            ? h(
+                "div",
+                { class: "images" },
+                ...this.thread.images.map((url, i) =>
+                  h(
+                    "a",
+                    {
+                      href: url,
+                      target: "_blank",
+                      rel: "noreferrer",
+                      title: this.t("openImage"),
+                    },
+                    h("img", {
+                      src: url,
+                      alt: this.t("imageN", { n: i + 1 }),
+                      loading: "lazy",
+                    })
+                  )
+                )
+              )
             : null,
           this.ownerDetail?._id === comment._id &&
             this.ownerDetail.screenshotUrl

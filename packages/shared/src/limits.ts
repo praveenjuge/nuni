@@ -31,6 +31,11 @@ export const LIMITS = {
   /** Trimmed outerHTML of the commented element. */
   domSnippetMaxLength: 4000,
   screenshotMaxBytes: 600_000,
+  /** Images a commenter attaches to one comment (their own or marked up). */
+  imagesPerComment: 3,
+  imageMaxBytes: 600_000,
+  /** Longest side of an attached image, in pixels. */
+  imageMaxSide: 1600,
   /** Replies kept per comment thread. */
   repliesPerComment: 200,
   /** Reactions kept per thread (the comment and its replies). */

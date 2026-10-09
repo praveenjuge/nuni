@@ -157,6 +157,14 @@ export function buildCommentPrompt(
       )
     }
   }
+  if (comment.imageUrls?.length) {
+    out.push(
+      "",
+      `## Images from ${comment.authorName} (${comment.imageUrls.length})`,
+      "",
+      ...comment.imageUrls.map((url) => `- ${url}`)
+    )
+  }
   if (includeContext && comment.screenshotUrl) {
     out.push("", "## Screenshot", "", comment.screenshotUrl)
   }

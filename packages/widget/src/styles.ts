@@ -605,6 +605,36 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
   font-size: 13px;
 }
 .lost p { margin: 0; }
+.cmp-images { display: grid; gap: 4px; padding: 6px 14px 0; }
+.cmp-thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
+.cmp-thumb { position: relative; }
+.cmp-thumb img, .images img {
+  display: block;
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  border: 1px solid var(--n-border);
+  border-radius: 6px;
+  background: var(--n-bg-subtle);
+}
+.cmp-thumb-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--n-border);
+  border-radius: 999px;
+  background: var(--n-bg);
+  color: var(--n-fg-muted);
+}
+.cmp-thumb-remove .icon { width: 12px; height: 12px; }
+.cmp-images-note { margin: 0; color: var(--n-fg-muted); font-size: 12px; }
+.images { display: flex; flex-wrap: wrap; gap: 6px; }
+.images img { width: 88px; height: 64px; }
 .lost .row { gap: 6px; flex-wrap: wrap; }
 .cmp-suggest-btn .icon { width: 13px; height: 13px; }
 .cmp-text {

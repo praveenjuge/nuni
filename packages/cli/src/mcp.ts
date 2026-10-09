@@ -212,7 +212,7 @@ export function createMcpServer(options: McpOptions) {
       name: "get_comment",
       title: "Get a Nuni comment",
       description:
-        "One comment with everything needed to fix it: the comment, the page link, the element (text, selectors, React component), its HTML and styles, console errors, failed requests and a screenshot.",
+        "One comment with everything needed to fix it: the comment, the page link, the element (text, selectors, React component), its HTML and styles, console errors, failed requests, the images the commenter attached and a screenshot.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "string", description: "The comment id." } },
@@ -232,10 +232,12 @@ export function createMcpServer(options: McpOptions) {
         const content: Content[] = [
           { type: "text", text: buildCommentPrompt(comment) },
         ]
-        if (comment.screenshotUrl) {
-          const image = await (options.fetchImage ?? fetchImage)(
-            comment.screenshotUrl
-          )
+        // The commenter's own images first, then the element's screenshot.
+        for (const url of [
+          ...(comment.imageUrls ?? []),
+          ...(comment.screenshotUrl ? [comment.screenshotUrl] : []),
+        ]) {
+          const image = await (options.fetchImage ?? fetchImage)(url)
           if (image) content.push({ type: "image", ...image })
         }
         return { content }

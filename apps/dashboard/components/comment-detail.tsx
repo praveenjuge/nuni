@@ -286,6 +286,35 @@ export function CommentDetail({
         </a>
       )}
 
+      {c.imageUrls.length > 0 && (
+        <section aria-label="Attached images" className="grid gap-2">
+          <h3 className="text-xs font-medium text-muted-foreground">
+            Attached by {c.authorName}
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {c.imageUrls.map((url, i) => (
+              <a
+                key={url}
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="block overflow-hidden rounded-lg bg-muted ring-1 ring-foreground/5 transition-opacity hover:opacity-90"
+                title="Open the image"
+              >
+                <Image
+                  src={url}
+                  alt={`Image ${i + 1}`}
+                  width={160}
+                  height={120}
+                  unoptimized
+                  className="h-24 w-32 object-cover object-top"
+                />
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+
       <CommentContext context={c.context} userAgent={c.userAgent} />
 
       <Separator />

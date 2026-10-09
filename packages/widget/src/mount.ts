@@ -2,7 +2,7 @@ import { isProjectId } from "@nuni/shared"
 
 import { resolveConfig, type NuniOptions, type ResolvedConfig } from "./config"
 import { startCollectors, type Collectors } from "./context"
-import type { CaptureScreenshot } from "./screenshot"
+import type { ScreenshotTools } from "./tools"
 import { NuniWidget } from "./widget"
 
 export interface NuniInstance {
@@ -11,7 +11,7 @@ export interface NuniInstance {
 
 /** What differs between the npm (ESM) build and the CDN script. */
 export interface Runtime {
-  loadScreenshot: (() => Promise<CaptureScreenshot | null>) | null
+  loadScreenshot: (() => Promise<ScreenshotTools | null>) | null
 }
 
 interface Mounted {

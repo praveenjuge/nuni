@@ -233,27 +233,18 @@ http.route({
   }),
 })
 
-http.route({
-  path: "/widget/screenshot",
-  method: "OPTIONS",
-  handler: httpAction(async (_ctx, request) => {
-    return new Response(null, { status: 204, headers: corsHeaders(request) })
-  }),
-})
-
 /**
- * The author attaches an image of the element right after posting. The
- * comment id and the author's secret travel in headers; the body is the image.
+ * The author attaches a file right after posting: the element's screenshot
+ * (owner-only) or an image for everyone. The comment id and the author's
+ * secret travel in headers; the body is the image.
  */
-http.route({
-  path: "/widget/screenshot",
-  method: "POST",
-  handler: httpAction(async (ctx, request) => {
+function uploadRoute(kind: "screenshot" | "image", maxBytes: number) {
+  return httpAction(async (ctx, request) => {
     const declared = Number(request.headers.get("Content-Length") ?? "0")
-    if (declared > LIMITS.screenshotMaxBytes) {
+    if (declared > maxBytes) {
       return json(request, 413, { code: "too_large", message: "Too large" })
     }
-    const bytes = await readLimited(request, LIMITS.screenshotMaxBytes)
+    const bytes = await readLimited(request, maxBytes)
     if (!bytes) {
       return json(request, 413, { code: "too_large", message: "Too large" })
     }
@@ -261,16 +252,17 @@ http.route({
     if (!type) {
       return json(request, 415, {
         code: "invalid_type",
-        message: "Screenshots must be WebP, JPEG or PNG",
+        message: "Images must be WebP, JPEG or PNG",
       })
     }
     const target = {
+      kind,
       publicId: request.headers.get("X-Nuni-Project") ?? "",
       commentId: request.headers.get("X-Nuni-Comment") ?? "",
       authorSecret: request.headers.get("X-Nuni-Author") ?? "",
     }
     try {
-      await ctx.runMutation(internal.comments.checkScreenshot, {
+      await ctx.runMutation(internal.comments.checkUpload, {
         ...target,
         ip: clientIp(request),
         contentType: type,
@@ -278,7 +270,7 @@ http.route({
       })
       const storageId = await ctx.storage.store(new Blob([bytes], { type }))
       try {
-        await ctx.runMutation(internal.comments.attachScreenshot, {
+        await ctx.runMutation(internal.comments.attachUpload, {
           ...target,
           storageId,
         })
@@ -288,10 +280,24 @@ http.route({
       }
       return json(request, 201, { ok: true })
     } catch (error) {
-      return errorResponse(request, error, "Invalid screenshot")
+      return errorResponse(request, error, "Invalid image")
     }
-  }),
-})
+  })
+}
+
+for (const [path, kind, maxBytes] of [
+  ["/widget/screenshot", "screenshot", LIMITS.screenshotMaxBytes],
+  ["/widget/image", "image", LIMITS.imageMaxBytes],
+] as const) {
+  http.route({
+    path,
+    method: "OPTIONS",
+    handler: httpAction(async (_ctx, request) => {
+      return new Response(null, { status: 204, headers: corsHeaders(request) })
+    }),
+  })
+  http.route({ path, method: "POST", handler: uploadRoute(kind, maxBytes) })
+}
 
 /** `nuni login`, step 1: see cliAuth.ts. */
 http.route({

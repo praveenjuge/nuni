@@ -138,6 +138,8 @@ export interface WidgetComment {
   resolution?: "outdated"
   /** Visitors' widgets can't find the element on the page. */
   pinLost?: boolean
+  /** Images the commenter attached; their links come with the thread. */
+  imageCount?: number
   /** Replies in the thread (not counting the comment itself). */
   replyCount?: number
 }
@@ -167,6 +169,8 @@ export interface ReactionSummary {
 export interface Thread {
   replies: ReplyView[]
   reactions: ReactionSummary[]
+  /** Links to the comment's attached images. */
+  images?: string[]
 }
 
 /** A comment as the owner sees it (dashboard, owner widget, agents). */
@@ -176,5 +180,7 @@ export interface OwnerComment extends WidgetComment {
   userAgent?: string
   context?: CommentContext
   screenshotUrl?: string | null
+  /** Images the commenter attached, public like the comment. */
+  imageUrls?: string[]
   replies?: ReplyView[]
 }
