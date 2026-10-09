@@ -9,6 +9,8 @@ Use the **same project ID everywhere**. Comments are matched by **page path**, n
 
 Each comment remembers where it was left. When you view it on a different environment, it shows a small badge with the original host, and the dashboard can filter by environment.
 
+![A comment on the pricing page with a localhost:3000 badge, because it was left on localhost](../images/environments.webp)
+
 ## Which URLs share comments
 
 By default the path is normalized: the query string and `#section` hashes are ignored, trailing slashes and `index.html` are dropped, and hash-router paths (`/#/settings`) are kept. To change this, pass `getPageKey`:

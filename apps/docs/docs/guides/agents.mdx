@@ -21,6 +21,8 @@ npx @nuniapp/cli@latest login
 
 It prints a link and a short code. Open the link (on any device), check that the code matches, and choose **Allow**. If nobody owns the project yet, you claim it at the same time. This works over SSH and in cloud sandboxes, since nothing has to call back to your machine.
 
+![The dashboard asking to allow a terminal sign-in, with the code to check and Allow and Deny buttons](../images/cli-approve.webp)
+
 The session is saved in `~/.config/nuni/credentials.json` (readable only by you) for 90 days. The project is the `nuni_` ID in your code; pass `--project nuni_...` if there is more than one. In CI, set `NUNI_TOKEN` instead. Sign out with `npx @nuniapp/cli@latest logout`, or revoke the session in the project settings in the dashboard.
 
 ## MCP server
@@ -76,5 +78,7 @@ npx @nuniapp/cli@latest comment <id> --save-screenshot .
 npx @nuniapp/cli@latest reply <id> "Fixed in the next deploy"
 npx @nuniapp/cli@latest resolve <id> --note "Made the button bigger"
 ```
+
+![Terminal output of nuni comments: four open comments with author, time, text and the element each one is on](../images/cli-comments.webp)
 
 Add `--json` to any command for machine-readable output.
