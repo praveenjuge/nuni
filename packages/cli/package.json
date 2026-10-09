@@ -1,6 +1,6 @@
 {
   "name": "@nuniapp/cli",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Set up Nuni in any project, and give coding agents its comments: login, list, read and resolve from the terminal or over MCP.",
   "license": "MIT",
   "type": "module",
