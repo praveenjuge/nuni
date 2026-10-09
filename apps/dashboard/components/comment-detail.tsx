@@ -5,6 +5,7 @@ import { buildCommentPrompt } from "@nuni/shared"
 import { useMutation } from "convex/react"
 import type { FunctionReturnType } from "convex/server"
 import {
+  ArchiveIcon,
   CheckIcon,
   ClipboardCopyIcon,
   ExternalLinkIcon,
@@ -58,6 +59,7 @@ export function CommentDetail({
   onChanged?: () => void
 }) {
   const resolve = useMutation(api.comments.resolve)
+  const [closing, setClosing] = useState(false)
   const reopen = useMutation(api.comments.reopen)
   const remove = useMutation(api.comments.remove)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -77,6 +79,21 @@ export function CommentDetail({
       onChanged?.()
     } catch (err) {
       toast.error(errorMessage(err))
+    }
+  }
+
+  async function closeAsOutdated() {
+    setClosing(true)
+    try {
+      await resolve({ id: c._id, resolution: "outdated" })
+      toast("Closed as outdated", {
+        action: { label: "Undo", onClick: () => void reopen({ id: c._id }) },
+      })
+      onChanged?.()
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setClosing(false)
     }
   }
 
@@ -176,6 +193,43 @@ export function CommentDetail({
           </Button>
         </div>
       </header>
+
+      {open && c.pinLostAt && (
+        <section
+          aria-label="Pin not found"
+          className="grid gap-3 rounded-lg border border-dashed p-3 text-sm"
+        >
+          <p className="text-muted-foreground">
+            Visitors&apos; browsers haven&apos;t found this element on the page
+            since {timeAgo(c.pinLostAt)}. Open the page and choose{" "}
+            <strong className="font-medium text-foreground">Move pin</strong> to
+            point it at the right element, or close it if it no longer applies.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={jumpUrl(c.page, c._id)}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonVariants({ size: "sm", variant: "outline" })}
+            >
+              <ExternalLinkIcon /> Open on page
+            </a>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={closing}
+              onClick={() => void closeAsOutdated()}
+            >
+              <ArchiveIcon /> Close as outdated
+            </Button>
+          </div>
+        </section>
+      )}
+      {c.resolution === "outdated" && (
+        <p className="text-sm text-muted-foreground">
+          Closed as outdated: its element was no longer on the page.
+        </p>
+      )}
 
       <div className="grid gap-3">
         {c.suggestion ? (

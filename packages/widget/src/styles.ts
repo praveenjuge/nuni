@@ -595,6 +595,17 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
 }
 .cmp-suggest:focus { border-color: var(--n-accent); }
 .cmp-suggest-btn { display: inline-flex; align-items: center; gap: 4px; }
+.lost {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--n-border);
+  border-radius: 8px;
+  color: var(--n-fg-muted);
+  font-size: 13px;
+}
+.lost p { margin: 0; }
+.lost .row { gap: 6px; flex-wrap: wrap; }
 .cmp-suggest-btn .icon { width: 13px; height: 13px; }
 .cmp-text {
   display: block;

@@ -954,6 +954,137 @@ function uploadScreenshot(
   })
 }
 
+describe("lost pins", () => {
+  function report(
+    t: T,
+    publicId: string,
+    body: { path?: string; lost?: string[]; found?: string[] },
+    ip = "5.5.5.5"
+  ) {
+    return t.fetch("/widget/pins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Real-IP": ip },
+      body: JSON.stringify({ publicId, path: "/pricing", ...body }),
+    })
+  }
+
+  it("records pins visitors can't find, and clears them when found", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const a = await addComment(t, publicId)
+    const b = await addComment(t, publicId)
+    const elsewhere = await addComment(t, publicId, { path: "/about" })
+    const other = await addComment(t, generateProjectId())
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+
+    // Only open comments of this project, on the reported page, change.
+    let res = await report(t, publicId, { lost: [a, elsewhere, other, "x"] })
+    expect(await res.json()).toEqual({ changed: 1 })
+    // Reporting the same again writes nothing.
+    res = await report(t, publicId, { lost: [a] })
+    expect(await res.json()).toEqual({ changed: 0 })
+
+    expect(
+      (await t.query(api.comments.listForPage, { publicId, path: "/pricing" }))
+        .filter((c) => c.pinLost)
+        .map((c) => c._id)
+    ).toEqual([a])
+
+    const lost = await alice.query(api.comments.listForOwner, {
+      publicId,
+      status: "open",
+      lost: true,
+      paginationOpts: { numItems: 10, cursor: null },
+    })
+    expect(lost.page.map((c) => c._id)).toEqual([a])
+    expect(lost.page[0]?.pinLostAt).toBeTypeOf("number")
+    expect(await alice.query(api.comments.lostCount, { publicId })).toBe(1)
+    expect(await t.query(api.comments.lostCount, { publicId })).toBe(0)
+
+    // Found again by another visitor: cleared.
+    res = await report(t, publicId, { found: [a, b] })
+    expect(await res.json()).toEqual({ changed: 1 })
+    expect(await alice.query(api.comments.lostCount, { publicId })).toBe(0)
+  })
+
+  it("rate limits reports and refuses oversized ones", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId)
+    const statuses: number[] = []
+    for (let i = 0; i < 22; i++) {
+      statuses.push(
+        (await report(t, publicId, { lost: [id] }, "6.6.6.6")).status
+      )
+    }
+    expect(statuses.filter((s) => s === 200)).toHaveLength(20)
+    expect(statuses.at(-1)).toBe(429)
+    const tooMany = Array.from({ length: LIMITS.pinReportMax + 1 }, () => id)
+    expect((await report(t, publicId, { lost: tooMany })).status).toBe(400)
+  })
+
+  it("lets only the owner move a pin or close a comment as outdated", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId)
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    await report(t, publicId, { lost: [id] })
+
+    const moved = { ...anchor, text: "Start free trial", tag: "a" }
+    await expect(
+      t.mutation(api.comments.repin, { id, anchor: moved })
+    ).rejects.toThrow(/owner/)
+    await alice.mutation(api.comments.repin, {
+      id,
+      anchor: { ...moved, text: "x".repeat(500) },
+    })
+    let comment = await t.run((ctx) => ctx.db.get(id))
+    expect(comment?.anchor.tag).toBe("a")
+    expect(comment?.anchor.text).toHaveLength(LIMITS.anchorTextMaxLength)
+    expect(comment?.pinLostAt).toBeUndefined()
+
+    await expect(
+      t.mutation(api.comments.resolve, { id, resolution: "outdated" })
+    ).rejects.toThrow(/owner/)
+    await alice.mutation(api.comments.resolve, { id, resolution: "outdated" })
+    comment = await t.run((ctx) => ctx.db.get(id))
+    expect(comment).toMatchObject({
+      status: "resolved",
+      resolution: "outdated",
+    })
+    expect(await t.query(api.projects.status, { publicId })).toMatchObject({
+      openCount: 0,
+    })
+    // Reopening clears the reason, and counts stay right.
+    await alice.mutation(api.comments.reopen, { id })
+    comment = await t.run((ctx) => ctx.db.get(id))
+    expect(comment?.resolution).toBeUndefined()
+    expect(await t.query(api.projects.status, { publicId })).toMatchObject({
+      openCount: 1,
+    })
+
+    // In bulk, too, including ones already resolved.
+    const second = await addComment(t, publicId)
+    await alice.mutation(api.comments.resolve, { id: second })
+    expect(
+      await alice.mutation(api.comments.bulkSetStatus, {
+        ids: [id, second],
+        status: "resolved",
+        resolution: "outdated",
+      })
+    ).toBe(1)
+    const both = await t.run((ctx) =>
+      Promise.all([ctx.db.get(id), ctx.db.get(second)])
+    )
+    expect(both.map((c) => c?.resolution)).toEqual(["outdated", "outdated"])
+    expect(await t.query(api.projects.status, { publicId })).toMatchObject({
+      openCount: 0,
+    })
+  })
+})
+
 describe("captured context and screenshots", () => {
   const context = {
     console: [

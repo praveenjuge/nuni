@@ -10,6 +10,10 @@ export const LIMITS = {
   transferTtlMs: 7 * 24 * 60 * 60 * 1000,
   /** Comments changed at once from the dashboard. */
   bulkMax: 100,
+  /** Pins found or lost in one report from a visitor's widget. */
+  pinReportMax: 200,
+  /** The dashboard's "Not found" count stops here ("99+"). */
+  lostCountMax: 99,
   /** How long a `nuni login` code waits for approval in the dashboard. */
   cliLoginTtlMs: 10 * 60 * 1000,
   anchorTextMaxLength: 120,

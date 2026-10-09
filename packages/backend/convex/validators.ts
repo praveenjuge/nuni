@@ -102,6 +102,9 @@ export const contextValidator = v.object({
 
 export const statusValidator = v.union(v.literal("open"), v.literal("resolved"))
 
+/** Why a comment was resolved without a change: its element is gone. */
+export const resolutionValidator = v.literal("outdated")
+
 /** A text change the commenter suggests: the words on the page, and theirs. */
 export const suggestionValidator = v.object({
   before: v.string(),

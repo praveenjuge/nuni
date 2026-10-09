@@ -39,6 +39,7 @@ import {
   anchorValidator,
   contextValidator,
   pageValidator,
+  resolutionValidator,
   statusValidator,
   suggestionValidator,
   viewportValidator,
@@ -61,6 +62,9 @@ function toPublic(c: Doc<"comments">) {
     createdAt: c.createdAt,
     editedAt: c.editedAt,
     resolvedAt: c.resolvedAt,
+    resolution: c.resolution,
+    /** Visitors' widgets couldn't find the element, last they looked. */
+    pinLost: c.pinLostAt !== undefined,
     replyCount: c.replyCount ?? 0,
   }
 }
@@ -70,6 +74,7 @@ async function toOwner(ctx: QueryCtx, c: Doc<"comments">) {
   return {
     ...toPublic(c),
     page: c.page,
+    pinLostAt: c.pinLostAt,
     userAgent: c.userAgent,
     context: c.context,
     screenshotUrl: c.screenshotId
@@ -275,6 +280,21 @@ function cleanAnchor<A extends { text: string; ancestors: unknown[] }>(
   }
 }
 
+type AnchorArg = Doc<"comments">["anchor"]
+
+/** A whole anchor from the widget, with every part within its limits. */
+function cleanCommentAnchor(anchor: AnchorArg): AnchorArg {
+  return {
+    ...cleanAnchor(anchor),
+    scope: anchor.scope?.slice(0, 6).map((step) => ({
+      kind: step.kind,
+      host: cleanAnchor(step.host),
+    })),
+    quote: cleanQuote(anchor.quote),
+    region: anchor.region && cleanRegion(anchor.region),
+  }
+}
+
 /** Called from the HTTP action, which supplies the client IP. */
 export const createFromWidget = internalMutation({
   args: {
@@ -313,15 +333,7 @@ export const createFromWidget = internalMutation({
     ) {
       fail("invalid_page", "Page path must not continue the host")
     }
-    const anchor = {
-      ...cleanAnchor(args.anchor),
-      scope: args.anchor.scope?.slice(0, 6).map((step) => ({
-        kind: step.kind,
-        host: cleanAnchor(step.host),
-      })),
-      quote: cleanQuote(args.anchor.quote),
-      region: args.anchor.region && cleanRegion(args.anchor.region),
-    }
+    const anchor = cleanCommentAnchor(args.anchor)
     const suggestion = cleanSuggestion(args.suggestion, anchor)
     const body = cleanCommentBody(args.body, Boolean(suggestion))
     const authorName = cleanName(args.authorName)
@@ -466,12 +478,19 @@ async function setStatus(
   ctx: MutationCtx,
   id: Id<"comments">,
   status: "open" | "resolved",
-  widget: WidgetAuth
+  widget: WidgetAuth,
+  resolution?: "outdated"
 ) {
   const comment = await ctx.db.get(id)
   if (!comment) fail("not_found", "Comment not found")
   const userId = await requireOwner(ctx, comment.projectId, widget)
-  if (comment.status === status) return
+  if (comment.status === status) {
+    // Already resolved: closing it as outdated only changes the reason.
+    if (status === "resolved" && comment.resolution !== resolution) {
+      await ctx.db.patch(id, { resolution })
+    }
+    return
+  }
   await bumpPageOpen(
     ctx,
     comment.projectId,
@@ -482,6 +501,7 @@ async function setStatus(
     status,
     resolvedAt: status === "resolved" ? Date.now() : undefined,
     resolvedBy: status === "resolved" ? userId : undefined,
+    resolution: status === "resolved" ? resolution : undefined,
   })
   const project = await ctx.db.get(comment.projectId)
   if (project) {
@@ -493,8 +513,14 @@ async function setStatus(
 }
 
 export const resolve = mutation({
-  args: { id: v.id("comments"), ...widgetAuthArgs },
-  handler: (ctx, { id, ...widget }) => setStatus(ctx, id, "resolved", widget),
+  args: {
+    id: v.id("comments"),
+    /** "outdated": closed because what it was about is gone. */
+    resolution: v.optional(resolutionValidator),
+    ...widgetAuthArgs,
+  },
+  handler: (ctx, { id, resolution, ...widget }) =>
+    setStatus(ctx, id, "resolved", widget, resolution),
 })
 
 export const reopen = mutation({
@@ -549,15 +575,25 @@ async function applyPageDeltas(
 }
 
 export const bulkSetStatus = mutation({
-  args: { ...bulkArgs, status: statusValidator },
-  handler: async (ctx, { ids, status }) => {
+  args: {
+    ...bulkArgs,
+    status: statusValidator,
+    resolution: v.optional(resolutionValidator),
+  },
+  handler: async (ctx, { ids, status, resolution: reason }) => {
     const { user, project, comments } = await loadBulk(ctx, ids)
     if (!project) return 0
     const now = Date.now()
+    const resolution = status === "resolved" ? reason : undefined
     const deltas = new Map<string, number>()
     let changed = 0
     for (const comment of comments) {
-      if (comment.status === status) continue
+      if (comment.status === status) {
+        if (status === "resolved" && comment.resolution !== resolution) {
+          await ctx.db.patch(comment._id, { resolution })
+        }
+        continue
+      }
       changed++
       const path = comment.page.path
       deltas.set(path, (deltas.get(path) ?? 0) + (status === "open" ? 1 : -1))
@@ -565,6 +601,7 @@ export const bulkSetStatus = mutation({
         status,
         resolvedAt: status === "resolved" ? now : undefined,
         resolvedBy: status === "resolved" ? user._id : undefined,
+        resolution,
       })
     }
     if (!changed) return 0
@@ -619,6 +656,8 @@ function ownerComments(
     path?: string
     origin?: string
     search?: string
+    /** Only comments whose element visitors' widgets can't find. */
+    lost?: boolean
   }
 ) {
   const search = args.search?.trim()
@@ -631,16 +670,27 @@ function ownerComments(
             .eq("projectId", projectId)
             .eq("status", args.status)
         )
-    : ctx.db
-        .query("comments")
-        .withIndex("by_project_status", (q) =>
-          q.eq("projectId", projectId).eq("status", args.status)
-        )
-        .order("desc")
+    : args.lost
+      ? ctx.db
+          .query("comments")
+          .withIndex("by_project_status_lost", (q) =>
+            q
+              .eq("projectId", projectId)
+              .eq("status", args.status)
+              .gt("pinLostAt", 0)
+          )
+          .order("desc")
+      : ctx.db
+          .query("comments")
+          .withIndex("by_project_status", (q) =>
+            q.eq("projectId", projectId).eq("status", args.status)
+          )
+          .order("desc")
   return base.filter((q) =>
     q.and(
       args.path ? q.eq(q.field("page.path"), args.path) : true,
-      args.origin ? q.eq(q.field("page.origin"), args.origin) : true
+      args.origin ? q.eq(q.field("page.origin"), args.origin) : true,
+      args.lost && search ? q.gt(q.field("pinLostAt"), 0) : true
     )
   )
 }
@@ -653,6 +703,8 @@ export const listForOwner = query({
     path: v.optional(v.string()),
     origin: v.optional(v.string()),
     search: v.optional(v.string()),
+    /** Only open comments whose element can't be found on the page. */
+    lost: v.optional(v.boolean()),
     paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, args) => {
@@ -732,6 +784,90 @@ export const listForAgent = query({
       comments: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
       cursor: result.isDone ? null : result.continueCursor,
     }
+  },
+})
+
+/** How many open comments have lost their element, for the dashboard tab. */
+export const lostCount = query({
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const user = await currentUser(ctx)
+    const project = await projectByPublicId(ctx, publicId)
+    if (!user || !project || project.ownerId !== user._id) return 0
+    const lost = await ctx.db
+      .query("comments")
+      .withIndex("by_project_status_lost", (q) =>
+        q.eq("projectId", project._id).eq("status", "open").gt("pinLostAt", 0)
+      )
+      .take(LIMITS.lostCountMax + 1)
+    return lost.length
+  },
+})
+
+/**
+ * What a visitor's widget saw on one page: open comments whose element it
+ * couldn't find, and ones it found again. Called from the HTTP action, which
+ * supplies the IP. Only changes are written, so a page view with nothing new
+ * writes nothing.
+ */
+export const reportPins = internalMutation({
+  args: {
+    publicId: v.string(),
+    ip: v.string(),
+    path: v.string(),
+    lost: v.array(v.string()),
+    found: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (args.lost.length + args.found.length > LIMITS.pinReportMax) {
+      fail("too_many", "Too many pins in one report")
+    }
+    const { ok } = await rateLimiter.limit(ctx, "pinReportPerIp", {
+      key: ipKey(args.ip, args.publicId),
+    })
+    if (!ok) fail("rate_limited", "Slow down a little")
+    const project = await projectByPublicId(ctx, args.publicId)
+    if (!project || project.deletingAt) return 0
+    const now = Date.now()
+    let changed = 0
+    for (const [ids, lost] of [
+      [args.lost, true],
+      [args.found, false],
+    ] as const) {
+      for (const raw of ids) {
+        const id = ctx.db.normalizeId("comments", raw)
+        const comment = id ? await ctx.db.get(id) : null
+        if (
+          !comment ||
+          comment.projectId !== project._id ||
+          comment.page.path !== args.path ||
+          comment.status !== "open" ||
+          (comment.pinLostAt !== undefined) === lost
+        ) {
+          continue
+        }
+        await ctx.db.patch(comment._id, { pinLostAt: lost ? now : undefined })
+        changed++
+      }
+    }
+    return changed
+  },
+})
+
+/**
+ * The owner points a comment at another element on its page, for example
+ * after a redesign moved it. The new anchor replaces the old one.
+ */
+export const repin = mutation({
+  args: { id: v.id("comments"), anchor: anchorValidator, ...widgetAuthArgs },
+  handler: async (ctx, { id, anchor, ...widget }) => {
+    const comment = await ctx.db.get(id)
+    if (!comment) fail("not_found", "Comment not found")
+    await requireOwner(ctx, comment.projectId, widget)
+    await ctx.db.patch(id, {
+      anchor: cleanCommentAnchor(anchor),
+      pinLostAt: undefined,
+    })
   },
 })
 

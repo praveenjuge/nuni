@@ -5,6 +5,7 @@ import {
   anchorValidator,
   contextValidator,
   pageValidator,
+  resolutionValidator,
   statusValidator,
   suggestionValidator,
   viewportValidator,
@@ -55,6 +56,13 @@ export default defineSchema({
     editedAt: v.optional(v.number()),
     resolvedAt: v.optional(v.number()),
     resolvedBy: v.optional(v.id("users")),
+    /** Resolved by closing it as outdated, rather than by a fix. */
+    resolution: v.optional(resolutionValidator),
+    /**
+     * Since when visitors' widgets can't find the element. Cleared as soon
+     * as one finds it again.
+     */
+    pinLostAt: v.optional(v.number()),
     /** Replies in the thread, kept in sync by replies.ts. */
     replyCount: v.optional(v.number()),
     /** Reactions on the comment and its replies, for the per-thread cap. */
@@ -69,6 +77,7 @@ export default defineSchema({
     ])
     .index("by_project_status", ["projectId", "status", "createdAt"])
     .index("by_project_author", ["projectId", "authorKeyHash", "createdAt"])
+    .index("by_project_status_lost", ["projectId", "status", "pinLostAt"])
     .searchIndex("search_text", {
       searchField: "searchText",
       filterFields: ["projectId", "status"],

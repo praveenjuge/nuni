@@ -166,6 +166,8 @@ function frameDocuments(doc: Document, depth = 0): Document[] {
   return out
 }
 const MOBILE_QUERY = "(max-width: 640px)"
+/** How long pins have to stay settled before lost ones are reported. */
+const PIN_REPORT_DELAY_MS = 3000
 
 function isTypingTarget(target: EventTarget | null | undefined) {
   // nodeType, not instanceof: iframe elements come from another realm.
@@ -271,6 +273,11 @@ export class NuniWidget {
   /** The visitor's own comments on every page; loaded once the panel opens. */
   private mine: WidgetComment[] | null = null
   private mineUnsub: (() => void) | null = null
+  /** The comment whose pin the owner is moving, while picking. */
+  private repinId: string | null = null
+  /** Lost (true) or found (false), as last reported in this page view. */
+  private pinReported = new Map<string, boolean>()
+  private pinReportTimer = 0
   /** What the panel's search box filters by. */
   private search = ""
   /** The comment opened last, marked in the panel to find your place again. */
@@ -545,6 +552,7 @@ export class NuniWidget {
     this.ownerDetailUnsub?.()
     this.threadUnsub?.()
     this.mineUnsub?.()
+    clearTimeout(this.pinReportTimer)
     this.resolveRun++
     for (const stop of this.scopeWatchers.values()) stop()
     this.scopeWatchers.clear()
@@ -572,6 +580,8 @@ export class NuniWidget {
     this.extraComment = null
     this.loaded = false
     this.placements.clear()
+    this.pinReported.clear()
+    clearTimeout(this.pinReportTimer)
     this.card = null
     this.activeId = null
     this.pageUnsub = this.api.onPage(
@@ -737,10 +747,14 @@ export class NuniWidget {
       this.watchScopes()
       this.renderPins()
       this.layout()
-      if (queue.length) whenIdle(slice)
+      if (queue.length) {
+        whenIdle(slice)
+        return
+      }
+      this.schedulePinReport()
       // Rebuilding the panel on every page change would swallow clicks on
       // pages that keep re-rendering, so only redraw when it would change.
-      else if (
+      if (
         (onlyStale || run > 1) &&
         this.panelOpen &&
         this.placementSummary() !== this.shownPlacements
@@ -748,6 +762,35 @@ export class NuniWidget {
         this.render()
     }
     slice()
+  }
+
+  /**
+   * Once the pins have settled for a few seconds, report the ones that
+   * couldn't be found (or were found again), so the owner sees them in the
+   * dashboard. Only changes are sent.
+   */
+  private schedulePinReport() {
+    clearTimeout(this.pinReportTimer)
+    this.pinReportTimer = window.setTimeout(() => {
+      if (!this.loaded || document.visibilityState !== "visible") return
+      const lost: string[] = []
+      const found: string[] = []
+      for (const c of this.comments) {
+        if (c.status !== "open" || c.page.path !== this.pageKey) continue
+        const placement = this.placements.get(c._id)
+        if (!placement) continue
+        const isLost = !placement.element
+        if (isLost === (this.pinReported.get(c._id) ?? Boolean(c.pinLost))) {
+          continue
+        }
+        if (lost.length + found.length >= LIMITS.pinReportMax) break
+        this.pinReported.set(c._id, isLost)
+        ;(isLost ? lost : found).push(c._id)
+      }
+      if (lost.length || found.length) {
+        void this.api.reportPins(this.pageKey, lost, found)
+      }
+    }, PIN_REPORT_DELAY_MS)
   }
 
   /** What the panel and cards show from the placements: found, approximate or lost. */
@@ -938,6 +981,7 @@ export class NuniWidget {
   // --------------------------------------------------------------- picking
 
   private setPicking(on: boolean) {
+    if (!on) this.repinId = null
     if (this.picking === on) return
     this.picking = on
     const html = document.documentElement
@@ -1154,7 +1198,12 @@ export class NuniWidget {
 
   private openComposer(draft: Draft) {
     const { element } = draft
+    const repinId = this.repinId
     this.setPicking(false)
+    if (repinId) {
+      void this.movePin(repinId, draft)
+      return
+    }
     if (this.config.capture.dom) {
       try {
         draft.dom = domContext(element)
@@ -1248,12 +1297,14 @@ export class NuniWidget {
       h(
         "div",
         { class: "pick-hint" },
-        mobile
-          ? this.t("pickHintMobile")
-          : [
-              h("span", {}, this.t("pickHint")),
-              h("span", { class: "pick-keys" }, this.t("pickHintKeys")),
-            ]
+        this.repinId
+          ? this.t("movePinHint")
+          : mobile
+            ? this.t("pickHintMobile")
+            : [
+                h("span", {}, this.t("pickHint")),
+                h("span", { class: "pick-keys" }, this.t("pickHintKeys")),
+              ]
       )
     )
     if (this.dragBox) {
@@ -1729,6 +1780,52 @@ export class NuniWidget {
       () => this.api.reopen(c._id, token),
       this.t("reopened")
     )
+  }
+
+  /** Closed because what it was about is gone, not because it was fixed. */
+  private closeAsOutdated(c: WidgetComment) {
+    const token = this.ownerToken
+    if (!token) return
+    void this.act(
+      c._id,
+      () => this.api.resolve(c._id, token, "outdated"),
+      this.t("closedOutdated")
+    ).then((ok) => {
+      if (ok && this.card?.kind === "thread" && this.card.id === c._id) {
+        this.closeCard()
+      }
+    })
+  }
+
+  /** Pick the element the comment is about now; the pin moves there. */
+  private startMovePin(c: WidgetComment) {
+    if (!this.ownerToken) return
+    this.setPicking(true)
+    this.repinId = c._id
+    this.render()
+  }
+
+  private async movePin(id: string, draft: Draft) {
+    const token = this.ownerToken
+    if (!token) return
+    const previous = this.placements.get(id)
+    this.placements.set(id, {
+      element: draft.element,
+      confidence: "exact",
+      range: draft.range,
+    })
+    this.pinReported.set(id, false)
+    try {
+      await this.api.repin(id, draft.anchor, token)
+      this.showToast(this.t("pinMoved"))
+    } catch (error) {
+      if (previous) this.placements.set(id, previous)
+      else this.placements.delete(id)
+      this.showToast(
+        error instanceof NuniApiError ? error.message : this.t("failed")
+      )
+    }
+    this.focusComment(id)
   }
 
   private async deleteComment(c: WidgetComment) {
@@ -2263,7 +2360,13 @@ export class NuniWidget {
             "span",
             { class: resolvedBadge ? "badge badge-ok" : "badge" },
             resolvedBadge ? icon(ICONS.check) : null,
-            this.t(resolvedBadge ? "resolved" : "statusOpen")
+            this.t(
+              !resolvedBadge
+                ? "statusOpen"
+                : c.resolution === "outdated"
+                  ? "outdated"
+                  : "resolved"
+            )
           )
         ),
         ...content(c)
@@ -2303,6 +2406,9 @@ export class NuniWidget {
                 { class: "badge", title: c.page.origin },
                 new URL(c.page.origin).host
               )
+            : null,
+          c.resolution === "outdated"
+            ? h("span", { class: "badge" }, this.t("outdated"))
             : null
         ),
         ...content(c)
@@ -2831,7 +2937,9 @@ export class NuniWidget {
               "span",
               { class: "badge badge-ok" },
               icon(ICONS.check),
-              this.t("resolved")
+              this.t(
+                comment.resolution === "outdated" ? "outdated" : "resolved"
+              )
             )
           : null,
         comment.page.origin !== location.origin
@@ -2945,6 +3053,37 @@ export class NuniWidget {
               )
             : null,
           badges.length ? h("div", { class: "badges" }, ...badges) : null,
+          owner && !resolved && !placement?.element
+            ? h(
+                "div",
+                { class: "lost" },
+                h("p", {}, this.t("lostHint")),
+                h(
+                  "div",
+                  { class: "row" },
+                  h(
+                    "button",
+                    {
+                      class: "btn",
+                      type: "button",
+                      onclick: () => this.startMovePin(comment),
+                    },
+                    icon(ICONS.target),
+                    this.t("movePin")
+                  ),
+                  h(
+                    "button",
+                    {
+                      class: "btn btn-ghost",
+                      type: "button",
+                      disabled: Boolean(card.busy),
+                      onclick: () => this.closeAsOutdated(comment),
+                    },
+                    this.t("closeOutdated")
+                  )
+                )
+              )
+            : null,
           h(
             "div",
             { class: "msg-foot" },
@@ -2964,6 +3103,19 @@ export class NuniWidget {
               },
               icon(ICONS.bot)
             ),
+            owner && placement?.element
+              ? h(
+                  "button",
+                  {
+                    class: "icon-btn",
+                    type: "button",
+                    "aria-label": this.t("movePin"),
+                    title: this.t("movePin"),
+                    onclick: () => this.startMovePin(comment),
+                  },
+                  icon(ICONS.target)
+                )
+              : null,
             mine
               ? h(
                   "button",

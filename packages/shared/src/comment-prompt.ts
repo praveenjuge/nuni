@@ -63,7 +63,11 @@ export function buildCommentPrompt(
         ]
       : []),
     `From ${comment.authorName} on ${new Date(comment.createdAt).toISOString().slice(0, 10)}` +
-      (comment.status === "resolved" ? " (already resolved)" : "")
+      (comment.status === "resolved"
+        ? comment.resolution === "outdated"
+          ? " (closed as outdated)"
+          : " (already resolved)"
+        : "")
   )
 
   if (comment.replies?.length) {
@@ -89,6 +93,11 @@ export function buildCommentPrompt(
   }
 
   out.push("", "## Element", "")
+  if (comment.pinLostAt) {
+    out.push(
+      `- Not found on the page since ${new Date(comment.pinLostAt).toISOString().slice(0, 10)}: it may have changed or been removed. Check whether the feedback still applies.`
+    )
+  }
   out.push(`- Tag: <${anchor.tag}>`)
   if (anchor.text) out.push(`- Text: ${inline(anchor.text)}`)
   if (anchor.quote) {

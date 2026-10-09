@@ -213,3 +213,68 @@ test("deep link opens the comment", async ({ page, browser }) => {
   )
   await expect(page).not.toHaveURL(/nuni=/)
 })
+
+test("owner moves a lost pin, then closes it as outdated", async ({
+  browser,
+}) => {
+  const project = projectId()
+  const token = seedOwner(project)
+  const visitor = await (await browser.newContext()).newPage()
+  await visitor.goto(`/pricing?project=${project}`)
+  await visitor
+    .locator("#nuni-root .toolbar")
+    .getByRole("button", { name: "Add a comment" })
+    .click()
+  await visitor.locator(".pricing h1").click()
+  const composer = visitor.locator('#nuni-root [data-card="composer"]')
+  await composer.getByPlaceholder("Your name").fill("Val Visitor")
+  await composer.getByPlaceholder("Leave a comment").fill("Rename this heading")
+  await composer.getByRole("button", { name: "Post" }).click()
+  await expect(visitor.locator("#nuni-root .toast")).toHaveText("Comment added")
+
+  const ownerContext = await browser.newContext()
+  await ownerContext.addInitScript(
+    ([key, value]) => localStorage.setItem(key!, value!),
+    [`nuni:session:${project}`, token]
+  )
+  const owner = await ownerContext.newPage()
+  await owner.goto(`/pricing?project=${project}`)
+  await expect(owner.locator("#nuni-root .pin:not(.pin-draft)")).toHaveCount(1)
+
+  // A redesign removed the heading: the owner points the pin elsewhere.
+  await owner.locator(".pricing h1").evaluate((el) => el.remove())
+  await openPanel(owner)
+  await owner
+    .locator("#nuni-root .panel")
+    .getByText("Rename this heading")
+    .click()
+  const thread = owner.locator('#nuni-root [data-card="thread"]')
+  await expect(thread.locator(".lost")).toBeVisible()
+  await thread.getByRole("button", { name: "Move pin" }).click()
+  await expect(owner.locator("#nuni-root .pick-hint")).toHaveText(
+    "Click the element this comment is about"
+  )
+  await owner.locator(".plan").nth(1).locator(".plan-name").click()
+  await expect(owner.locator("#nuni-root .toast")).toHaveText("Pin moved")
+  await expect(thread).toBeVisible()
+  await expect(thread.locator(".lost")).toHaveCount(0)
+
+  // Visitors now see it on the new element.
+  await visitor.reload()
+  const pin = visitor.locator("#nuni-root .pin:not(.pin-draft)")
+  await expect(pin).toHaveAttribute("data-confidence", /exact|high/)
+
+  // Gone again, and no longer relevant: closed as outdated.
+  await owner
+    .locator(".plan")
+    .nth(1)
+    .locator(".plan-name")
+    .evaluate((el) => el.remove())
+  await expect(thread.locator(".lost")).toBeVisible()
+  await thread.getByRole("button", { name: "Close as outdated" }).click()
+  await expect(owner.locator("#nuni-root .toast")).toHaveText(
+    "Closed as outdated"
+  )
+  await expect(visitor.locator("#nuni-root .tb-count")).toHaveText("0")
+  await ownerContext.close()
+})

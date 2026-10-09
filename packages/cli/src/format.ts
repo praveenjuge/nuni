@@ -48,7 +48,7 @@ function describe(c: OwnerComment, n: number): string[] {
     ? `<${c.anchor.tag}> "${oneLine(c.anchor.text, 60)}"`
     : `<${c.anchor.tag}>`
   return [
-    `${n}. ${c._id} · ${c.page.path} · ${c.authorName} · ${timeAgo(c.createdAt)}`,
+    `${n}. ${c._id} · ${c.page.path} · ${c.authorName} · ${timeAgo(c.createdAt)}${c.pinLost ? " · element not found" : ""}`,
     ...(c.body ? [`   "${oneLine(c.body)}"`] : []),
     ...(c.suggestion
       ? [

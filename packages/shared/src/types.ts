@@ -134,6 +134,10 @@ export interface WidgetComment {
   createdAt: number
   editedAt?: number
   resolvedAt?: number
+  /** Resolved by closing it as outdated, rather than by a fix. */
+  resolution?: "outdated"
+  /** Visitors' widgets can't find the element on the page. */
+  pinLost?: boolean
   /** Replies in the thread (not counting the comment itself). */
   replyCount?: number
 }
@@ -167,6 +171,8 @@ export interface Thread {
 
 /** A comment as the owner sees it (dashboard, owner widget, agents). */
 export interface OwnerComment extends WidgetComment {
+  /** Since when the element can't be found on the page. */
+  pinLostAt?: number
   userAgent?: string
   context?: CommentContext
   screenshotUrl?: string | null

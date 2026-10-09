@@ -167,6 +167,38 @@ http.route({
 })
 
 http.route({
+  path: "/widget/pins",
+  method: "OPTIONS",
+  handler: httpAction(async (_ctx, request) => {
+    return new Response(null, { status: 204, headers: corsHeaders(request) })
+  }),
+})
+
+/** A visitor's widget reporting which pins on a page it found or lost. */
+http.route({
+  path: "/widget/pins",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const payload = await readJson(request, 16_000)
+    if (payload instanceof Response) return payload
+    const ids = (value: unknown) =>
+      Array.isArray(value) ? value.filter((id) => typeof id === "string") : []
+    try {
+      const changed = await ctx.runMutation(internal.comments.reportPins, {
+        publicId: String(payload.publicId ?? ""),
+        ip: clientIp(request),
+        path: String(payload.path ?? ""),
+        lost: ids(payload.lost),
+        found: ids(payload.found),
+      })
+      return json(request, 200, { changed })
+    } catch (error) {
+      return errorResponse(request, error, "Invalid report")
+    }
+  }),
+})
+
+http.route({
   path: "/widget/replies",
   method: "OPTIONS",
   handler: httpAction(async (_ctx, request) => {

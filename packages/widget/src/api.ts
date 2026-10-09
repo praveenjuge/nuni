@@ -275,13 +275,47 @@ export class NuniApi {
     )
   }
 
-  resolve(id: string, sessionToken: string) {
+  resolve(id: string, sessionToken: string, resolution?: "outdated") {
     return this.run(
       this.client.mutation(api.comments.resolve, {
         id: id as never,
+        resolution,
         sessionToken,
       })
     )
+  }
+
+  /** The owner points a comment at another element on its page. */
+  repin(id: string, anchor: Anchor, sessionToken: string) {
+    return this.run(
+      this.client.mutation(api.comments.repin, {
+        id: id as never,
+        anchor,
+        sessionToken,
+      })
+    )
+  }
+
+  /**
+   * Tell the backend which pins on this page couldn't be found, or were
+   * found again, so the owner can see them. Best effort.
+   */
+  async reportPins(path: string, lost: string[], found: string[]) {
+    try {
+      await fetch(`${this.config.convexSiteUrl}/widget/pins`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          publicId: this.config.project,
+          path,
+          lost,
+          found,
+        }),
+        keepalive: true,
+      })
+    } catch {
+      // The next page view reports again.
+    }
   }
 
   reopen(id: string, sessionToken: string) {

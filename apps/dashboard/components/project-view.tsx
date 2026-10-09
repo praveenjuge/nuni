@@ -4,6 +4,7 @@ import { api } from "@nuni/backend/api"
 import { LIMITS } from "@nuni/shared"
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react"
 import {
+  ArchiveIcon,
   CheckIcon,
   FileIcon,
   InboxIcon,
@@ -56,12 +57,17 @@ import { useStoreUser } from "@/components/use-store-user"
 import { errorMessage, hostOf, initials, plural, timeAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-type Status = "open" | "resolved"
+/** Open comments, the open ones whose element is gone, or resolved ones. */
+type View = "open" | "lost" | "resolved"
 
 export function ProjectView({ publicId }: { publicId: string }) {
   const { ready } = useStoreUser()
   const project = useQuery(api.projects.getMine, ready ? { publicId } : "skip")
-  const [status, setStatus] = useState<Status>("open")
+  const lostCount = useQuery(
+    api.comments.lostCount,
+    ready ? { publicId } : "skip"
+  )
+  const [view, setView] = useState<View>("open")
 
   if (!ready || project === undefined) return <ProjectSkeleton />
   if (project === null) return <ProjectNotFound />
@@ -72,13 +78,19 @@ export function ProjectView({ publicId }: { publicId: string }) {
       <ProjectHeader project={project} current="comments" />
       <CommentList
         publicId={publicId}
-        status={status}
+        view={view}
         tabs={
-          <Tabs value={status} onValueChange={(v) => setStatus(v as Status)}>
+          <Tabs value={view} onValueChange={(v) => setView(v as View)}>
             <TabsList>
               <TabsTrigger value="open" className="px-3">
                 Open <Count n={project.openCount} />
               </TabsTrigger>
+              {(lostCount || view === "lost") && (
+                <TabsTrigger value="lost" className="px-3">
+                  Not found{" "}
+                  <Count n={lostCount ?? 0} max={LIMITS.lostCountMax} />
+                </TabsTrigger>
+              )}
               <TabsTrigger value="resolved" className="px-3">
                 Resolved <Count n={resolvedCount} />
               </TabsTrigger>
@@ -90,21 +102,47 @@ export function ProjectView({ publicId }: { publicId: string }) {
   )
 }
 
-function Count({ n }: { n: number }) {
+function Count({ n, max }: { n: number; max?: number }) {
   return (
-    <span className="text-xs text-muted-foreground tabular-nums"> {n}</span>
+    <span className="text-xs text-muted-foreground tabular-nums">
+      {" "}
+      {max !== undefined && n > max ? `${max}+` : n}
+    </span>
   )
+}
+
+const EMPTY: Record<View, { title: string; description: string }> = {
+  open: {
+    title: "All caught up",
+    description: "New comments from your site show up here as they come in.",
+  },
+  lost: {
+    title: "Every pin was found",
+    description:
+      "Open comments whose element is no longer on the page show up here.",
+  },
+  resolved: {
+    title: "Nothing resolved yet",
+    description: "Comments you resolve are kept here.",
+  },
+}
+
+const LIST_LABEL: Record<View, string> = {
+  open: "Open comments",
+  lost: "Comments not found on their page",
+  resolved: "Resolved comments",
 }
 
 function CommentList({
   publicId,
-  status,
+  view,
   tabs,
 }: {
   publicId: string
-  status: Status
+  view: View
   tabs: React.ReactNode
 }) {
+  const status = view === "resolved" ? "resolved" : "open"
   const [pageInput, setPageInput] = useState("")
   const page = useDebounced(pageInput.trim(), 250)
   const [origin, setOrigin] = useState("")
@@ -120,6 +158,7 @@ function CommentList({
     {
       publicId,
       status,
+      ...(view === "lost" ? { lost: true } : {}),
       ...(page ? { path: page } : {}),
       ...(origin ? { origin } : {}),
       ...(search ? { search } : {}),
@@ -140,7 +179,7 @@ function CommentList({
   const [active, setActive] = useState({ id: "", index: 0 })
   const [sheetOpen, setSheetOpen] = useState(false)
   // A different list (tab or filters): start over.
-  const listKey = `${status}|${page}|${origin}|${search}`
+  const listKey = `${view}|${page}|${origin}|${search}`
   const [listFor, setListFor] = useState(listKey)
   if (listFor !== listKey) {
     setListFor(listKey)
@@ -179,7 +218,7 @@ function CommentList({
     })
   }
 
-  async function runBulk(action: "resolve" | "reopen" | "delete") {
+  async function runBulk(action: "resolve" | "outdated" | "reopen" | "delete") {
     const ids = picked.slice(0, LIMITS.bulkMax).map((c) => c._id)
     if (!ids.length) return
     setBulkBusy(true)
@@ -188,12 +227,17 @@ function CommentList({
       else
         await bulkSetStatus({
           ids,
-          status: action === "resolve" ? "resolved" : "open",
+          status: action === "reopen" ? "open" : "resolved",
+          ...(action === "outdated" ? { resolution: "outdated" as const } : {}),
         })
       setSelected(new Set())
-      toast(
-        `${plural(ids.length, "comment")} ${action === "delete" ? "deleted" : action === "resolve" ? "resolved" : "reopened"}`
-      )
+      const done = {
+        delete: "deleted",
+        resolve: "resolved",
+        outdated: "closed as outdated",
+        reopen: "reopened",
+      }[action]
+      toast(`${plural(ids.length, "comment")} ${done}`)
     } catch (err) {
       toast.error(errorMessage(err))
     } finally {
@@ -295,18 +339,12 @@ function CommentList({
                 {hasFilters ? <SearchIcon /> : <InboxIcon />}
               </EmptyMedia>
               <EmptyTitle className="text-base">
-                {hasFilters
-                  ? "No comments match"
-                  : status === "open"
-                    ? "All caught up"
-                    : "Nothing resolved yet"}
+                {hasFilters ? "No comments match" : EMPTY[view].title}
               </EmptyTitle>
               <EmptyDescription>
                 {hasFilters
                   ? "Try another search, page or site."
-                  : status === "open"
-                    ? "New comments from your site show up here as they come in."
-                    : "Comments you resolve are kept here."}
+                  : EMPTY[view].description}
               </EmptyDescription>
             </EmptyHeader>
             {hasFilters && (
@@ -359,7 +397,16 @@ function CommentList({
                   {picked.length} selected
                 </span>
                 <div className="ml-auto flex items-center gap-1">
-                  {status === "open" ? (
+                  {view === "lost" ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={bulkBusy}
+                      onClick={() => void runBulk("outdated")}
+                    >
+                      <ArchiveIcon /> Close as outdated
+                    </Button>
+                  ) : status === "open" ? (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -402,9 +449,7 @@ function CommentList({
           </div>
           <ul
             className="divide-y"
-            aria-label={
-              status === "open" ? "Open comments" : "Resolved comments"
-            }
+            aria-label={LIST_LABEL[view]}
             onKeyDown={onListKey}
           >
             {list.map((c, index) => (
@@ -559,6 +604,15 @@ function CommentRow({
         <span className="truncate font-mono text-xs text-muted-foreground">
           {showSite ? hostOf(c.page.origin) : ""}
           {c.page.path}
+          {c.status === "open" && c.pinLostAt && (
+            <span className="font-sans">
+              {" "}
+              · not found {timeAgo(c.pinLostAt)}
+            </span>
+          )}
+          {c.resolution === "outdated" && (
+            <span className="font-sans"> · outdated</span>
+          )}
         </span>
       </button>
     </li>

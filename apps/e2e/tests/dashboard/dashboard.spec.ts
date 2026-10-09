@@ -248,3 +248,56 @@ test("suggested text changes show the old and new words", async ({
       .getByText("Choose plan")
   ).toBeVisible()
 })
+
+test("pins visitors can't find show under Not found and close as outdated", async ({
+  page,
+  ownerPage,
+  projectId,
+}) => {
+  await page.goto(`/pricing?project=${projectId}`)
+  await page
+    .locator("#nuni-root .toolbar")
+    .getByRole("button", { name: "Add a comment" })
+    .click()
+  await page.locator(".pricing h1").click()
+  const composer = page.locator('#nuni-root [data-card="composer"]')
+  await composer.getByPlaceholder("Your name").fill("Val Visitor")
+  await composer.getByPlaceholder("Leave a comment").fill("Heading copy")
+  await composer.getByRole("button", { name: "Post" }).click()
+  await expect(page.locator("#nuni-root .toast")).toHaveText("Comment added")
+
+  await claimProject(ownerPage, projectId)
+  await ownerPage.goto(`${dashboardURL}/p/${projectId}`)
+  await expect(ownerPage.getByRole("tab", { name: /Not found/ })).toHaveCount(0)
+
+  // The heading is gone for a visitor; their widget reports it.
+  await page.locator(".pricing h1").evaluate((el) => el.remove())
+  const lostTab = ownerPage.getByRole("tab", { name: /Not found\s+1/ })
+  await expect(lostTab).toBeVisible({ timeout: 15_000 })
+  await lostTab.click()
+  const list = ownerPage.getByRole("list", {
+    name: "Comments not found on their page",
+  })
+  await expect(list).toContainText("not found")
+  const detail = ownerPage.getByRole("article", { name: "Selected comment" })
+  await expect(
+    detail.getByRole("region", { name: "Pin not found" })
+  ).toBeVisible()
+
+  await ownerPage
+    .getByRole("checkbox", { name: "Select all comments shown" })
+    .click()
+  await ownerPage
+    .getByRole("toolbar", { name: "Bulk actions" })
+    .getByRole("button", { name: "Close as outdated" })
+    .click()
+  await expect(
+    ownerPage.getByText("1 comment closed as outdated")
+  ).toBeVisible()
+  await expect(page.locator("#nuni-root .tb-count")).toHaveText("0")
+  await ownerPage.getByRole("tab", { name: /Resolved\s+1/ }).click()
+  await expect(
+    ownerPage.getByRole("list", { name: "Resolved comments" })
+  ).toContainText("outdated")
+  await expect(detail).toContainText("Closed as outdated")
+})

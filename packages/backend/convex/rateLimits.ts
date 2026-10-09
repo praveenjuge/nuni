@@ -48,6 +48,13 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     capacity: 60,
   },
   editPerAuthor: { kind: "token bucket", rate: 30, period: MINUTE },
+  /** One report per page view, at most, with every pin found or lost. */
+  pinReportPerIp: {
+    kind: "token bucket",
+    rate: 20,
+    period: MINUTE,
+    capacity: 20,
+  },
   sessionPerUser: { kind: "token bucket", rate: 20, period: HOUR },
 })
 
