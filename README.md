@@ -64,7 +64,7 @@ Playwright uses its own Chromium. To use a preinstalled one: `CHROMIUM_PATH=/pat
 
 ## Deploy and release
 
-To release the public packages, increase the root `package.json` version and merge to `master`. [The release workflow](./.github/workflows/release.yml) builds and publishes them.
+To release the public packages, increase the root `package.json` version and merge to `main`. [The release workflow](./.github/workflows/release.yml) builds and publishes them.
 
 ### Checking a release
 

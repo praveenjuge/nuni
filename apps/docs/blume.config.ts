@@ -20,7 +20,7 @@ export default defineConfig({
   github: {
     owner: "praveenjuge",
     repo: "nuni",
-    branch: "master",
+    branch: "main",
     dir: "apps/docs",
   },
   lastModified: "git",
