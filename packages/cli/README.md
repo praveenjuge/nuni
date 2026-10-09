@@ -14,9 +14,11 @@ Read, reply to and resolve comments from the terminal, or let your coding agent 
 ```sh
 npx @nuniapp/cli@latest login              # approve this terminal in the Nuni dashboard
 npx @nuniapp/cli@latest comments           # open comments, newest first
+npx @nuniapp/cli@latest comments --search "typo" --group element
+npx @nuniapp/cli@latest pages              # pages with open comments
 npx @nuniapp/cli@latest comment <id>       # one comment with the element, DOM, console and screenshot
 npx @nuniapp/cli@latest reply <id> "message"
-npx @nuniapp/cli@latest resolve <id> --note "what changed"
+npx @nuniapp/cli@latest resolve <id...> --note "what changed"
 claude mcp add nuni -- npx -y @nuniapp/cli@latest mcp
 ```
 

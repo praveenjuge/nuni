@@ -1,6 +1,7 @@
 import {
   LIMITS,
   type AnchorQuote,
+  type CommentStatus,
   stripHtmlUrlQueries,
   stripUrlQueries,
   withoutQuery,
@@ -525,6 +526,44 @@ export const bulkRemove = mutation({
   },
 })
 
+/**
+ * Comments for the owner's lists (dashboard and agents): newest first, or by
+ * relevance when searching, then narrowed by page and environment.
+ */
+function ownerComments(
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  args: {
+    status: CommentStatus
+    path?: string
+    origin?: string
+    search?: string
+  }
+) {
+  const search = args.search?.trim()
+  const base = search
+    ? ctx.db
+        .query("comments")
+        .withSearchIndex("search_text", (q) =>
+          q
+            .search("searchText", search)
+            .eq("projectId", projectId)
+            .eq("status", args.status)
+        )
+    : ctx.db
+        .query("comments")
+        .withIndex("by_project_status", (q) =>
+          q.eq("projectId", projectId).eq("status", args.status)
+        )
+        .order("desc")
+  return base.filter((q) =>
+    q.and(
+      args.path ? q.eq(q.field("page.path"), args.path) : true,
+      args.origin ? q.eq(q.field("page.origin"), args.origin) : true
+    )
+  )
+}
+
 /** Dashboard list, owner only, newest first, paginated and filtered server-side. */
 export const listForOwner = query({
   args: {
@@ -541,34 +580,46 @@ export const listForOwner = query({
     if (!user || !project || project.ownerId !== user._id) {
       return { page: [], isDone: true, continueCursor: "" }
     }
-    const search = args.search?.trim()
-    const base = search
-      ? ctx.db
-          .query("comments")
-          .withSearchIndex("search_text", (q) =>
-            q
-              .search("searchText", search)
-              .eq("projectId", project._id)
-              .eq("status", args.status)
-          )
-      : ctx.db
-          .query("comments")
-          .withIndex("by_project_status", (q) =>
-            q.eq("projectId", project._id).eq("status", args.status)
-          )
-          .order("desc")
-    const filtered = base.filter((q) =>
-      q.and(
-        args.path ? q.eq(q.field("page.path"), args.path) : true,
-        args.origin ? q.eq(q.field("page.origin"), args.origin) : true
-      )
+    const result = await ownerComments(ctx, project._id, args).paginate(
+      args.paginationOpts
     )
-    const result = await filtered.paginate(args.paginationOpts)
     return {
       ...result,
       // The owner sees the full page location and the captured context.
       page: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
     }
+  },
+})
+
+/**
+ * The project for a CLI or MCP request. Throws when the token is not an
+ * owner session for it, so the agent can tell the person to log in.
+ */
+async function agentProject(
+  ctx: QueryCtx,
+  publicId: string,
+  sessionToken: string
+): Promise<Doc<"projects">> {
+  const project = await projectByPublicId(ctx, publicId)
+  if (!project || !(await actingOwner(ctx, project, { sessionToken }))) {
+    fail("unauthenticated", "Not signed in to this project")
+  }
+  return project
+}
+
+/** The CLI and MCP server: pages with open comments, most first. */
+export const pagesForAgent = query({
+  args: { publicId: v.string(), sessionToken: v.string() },
+  handler: async (ctx, { publicId, sessionToken }) => {
+    const project = await agentProject(ctx, publicId, sessionToken)
+    const pages = await ctx.db
+      .query("pageStats")
+      .withIndex("by_project_open", (q) =>
+        q.eq("projectId", project._id).gt("openCount", 0)
+      )
+      .order("desc")
+      .take(200)
+    return pages.map((p) => ({ path: p.path, openCount: p.openCount }))
   },
 })
 
@@ -583,27 +634,19 @@ export const listForAgent = query({
     sessionToken: v.string(),
     status: v.optional(statusValidator),
     path: v.optional(v.string()),
+    /** Words in the comment or its author's name; results by relevance. */
+    search: v.optional(v.string()),
     limit: v.optional(v.number()),
     cursor: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
-    const project = await projectByPublicId(ctx, args.publicId)
-    if (
-      !project ||
-      !(await actingOwner(ctx, project, { sessionToken: args.sessionToken }))
-    ) {
-      fail("unauthenticated", "Not signed in to this project")
-    }
-    const status = args.status ?? "open"
+    const project = await agentProject(ctx, args.publicId, args.sessionToken)
     const numItems = Math.min(50, Math.max(1, Math.trunc(args.limit ?? 20)))
-    const result = await ctx.db
-      .query("comments")
-      .withIndex("by_project_status", (q) =>
-        q.eq("projectId", project._id).eq("status", status)
-      )
-      .order("desc")
-      .filter((q) => (args.path ? q.eq(q.field("page.path"), args.path) : true))
-      .paginate({ numItems, cursor: args.cursor ?? null })
+    const result = await ownerComments(ctx, project._id, {
+      status: args.status ?? "open",
+      path: args.path,
+      search: args.search,
+    }).paginate({ numItems, cursor: args.cursor ?? null })
     return {
       comments: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
       cursor: result.isDone ? null : result.continueCursor,

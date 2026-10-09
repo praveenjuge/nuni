@@ -23,9 +23,11 @@ npx @nuniapp/cli@latest id                   # just a new project ID
 npx @nuniapp/cli@latest login                         # approve this terminal in the dashboard
 npx @nuniapp/cli@latest whoami                        # who you are signed in as
 npx @nuniapp/cli@latest comments [--status open|resolved] [--page /path] [--limit 20]
+                                 [--search "words"] [--group page|element]
+npx @nuniapp/cli@latest pages                            # pages with open comments
 npx @nuniapp/cli@latest comment <id> [--save-screenshot <dir>]
 npx @nuniapp/cli@latest reply <id> "message"
-npx @nuniapp/cli@latest resolve <id> [--note "what changed"]
+npx @nuniapp/cli@latest resolve <id...> [--note "what changed"]
 npx @nuniapp/cli@latest reopen <id>
 npx @nuniapp/cli@latest logout
 npx @nuniapp/cli@latest mcp                           # MCP server on stdio

@@ -14,10 +14,12 @@ import {
 import {
   CommandError,
   listComments,
+  listPages,
   login,
   logout,
+  reopen,
   reply,
-  setStatus,
+  markResolved,
   showComment,
   whoami,
   type CommandContext,
@@ -39,9 +41,11 @@ Usage
 
   npx @nuniapp/cli@latest login              sign in to this project's comments
   npx @nuniapp/cli@latest comments [--status open|resolved] [--page /path] [--limit 20]
+                                   [--search "words"] [--group page|element]
+  npx @nuniapp/cli@latest pages
   npx @nuniapp/cli@latest comment <id> [--save-screenshot <dir>]
   npx @nuniapp/cli@latest reply <id> "message"
-  npx @nuniapp/cli@latest resolve <id> [--note "what changed"]
+  npx @nuniapp/cli@latest resolve <id...> [--note "what changed"]
   npx @nuniapp/cli@latest reopen <id>
   npx @nuniapp/cli@latest whoami | logout
   npx @nuniapp/cli@latest mcp                MCP server for coding agents (stdio)
@@ -51,10 +55,11 @@ Commands
   prompt    Print the ready-made prompt for Codex, Claude Code, Cursor, etc.
   id        Print a new project ID
   login     Approve this terminal in the Nuni dashboard (works over SSH too)
-  comments  List comments, newest first
+  comments  List comments, newest first (or best match with --search)
+  pages     Pages with open comments, most first
   comment   One comment with the element, DOM, styles, console and screenshot
   reply     Reply in a comment's thread, as the owner
-  resolve   Mark a comment resolved (with an optional note); reopen does the opposite
+  resolve   Mark comments resolved (with an optional note); reopen does the opposite
   mcp       Run the MCP server: claude mcp add nuni -- npx -y @nuniapp/cli@latest mcp
 
 The project comes from --project, $NUNI_PROJECT, or the nuni_ ID in your code.
@@ -74,6 +79,8 @@ const OPTIONS = {
   limit: { type: "string" },
   "save-screenshot": { type: "string" },
   note: { type: "string" },
+  search: { type: "string" },
+  group: { type: "string" },
   json: { type: "boolean", default: false },
   help: { type: "boolean", short: "h", default: false },
   version: { type: "boolean", short: "v", default: false },
@@ -84,6 +91,7 @@ const ACCOUNT_COMMANDS = new Set([
   "logout",
   "whoami",
   "comments",
+  "pages",
   "comment",
   "reply",
   "resolve",
@@ -231,6 +239,8 @@ async function runAccountCommand(
         return await whoami(ctx)
       case "comments":
         return await listComments(ctx, values)
+      case "pages":
+        return await listPages(ctx)
       case "comment":
         return await showComment(ctx, arg, {
           saveScreenshot: values["save-screenshot"],
@@ -238,9 +248,9 @@ async function runAccountCommand(
       case "reply":
         return await reply(ctx, arg, positionals[2])
       case "resolve":
-        return await setStatus(ctx, arg, "resolved", values.note)
+        return await markResolved(ctx, positionals.slice(1), values.note)
       case "reopen":
-        return await setStatus(ctx, arg, "open")
+        return await reopen(ctx, arg)
       default: {
         const server = createMcpServer({
           remote: ctx.remote,

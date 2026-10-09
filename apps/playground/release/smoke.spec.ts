@@ -41,6 +41,8 @@ function atLeast(version: string, min: string) {
 const HAS_CONTEXT = atLeast(VERSION, "0.1.4")
 /** The MCP server, replies, reactions and text comments shipped in 0.1.5. */
 const HAS_THREADS = atLeast(VERSION, "0.1.5")
+/** Searching, page lists, grouping and resolving several shipped in 0.1.9. */
+const HAS_AGENT_SEARCH = atLeast(VERSION, "0.1.9")
 /** Before 0.1.7 the composer showed the screenshot and only sent it once shown. */
 const SHOWS_SHOT = HAS_CONTEXT && !atLeast(VERSION, "0.1.7")
 const CDN = `https://cdn.jsdelivr.net/npm/@nuniapp/widget@${VERSION}/dist`
@@ -237,13 +239,18 @@ test("MCP server lists its tools", async () => {
     expect(init.serverInfo.version).toBe(VERSION)
     const tools = (answers.get(2)?.result as { tools: { name: string }[] })
       .tools
-    expect(tools.map((t) => t.name).sort()).toEqual([
-      "get_comment",
-      "list_comments",
-      "reopen_comment",
-      "reply_to_comment",
-      "resolve_comment",
-    ])
+    expect(tools.map((t) => t.name).sort()).toEqual(
+      [
+        "get_comment",
+        "list_comments",
+        "reopen_comment",
+        "reply_to_comment",
+        "resolve_comment",
+        ...(HAS_AGENT_SEARCH
+          ? ["list_pages", "resolve_comments", "search_comments"]
+          : []),
+      ].sort()
+    )
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

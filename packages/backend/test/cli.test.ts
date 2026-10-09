@@ -196,4 +196,48 @@ describe("nuni login (device code)", () => {
       })
     ).rejects.toThrow(/Not signed in/)
   })
+
+  it("searches comments and lists pages for the agent", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const typo = await addComment(t, publicId, { body: "Typo in the heading" })
+    await addComment(t, publicId, { body: "Make this bigger" })
+    await addComment(t, publicId, { path: "/", body: "Another typo here" })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    const { token } = await alice.mutation(api.sessions.create, {
+      publicId,
+      origin: "http://localhost:3000",
+    })
+
+    const found = await t.query(api.comments.listForAgent, {
+      publicId,
+      sessionToken: token,
+      search: "typo",
+    })
+    expect(found.comments.map((c) => c.body).sort()).toEqual([
+      "Another typo here",
+      "Typo in the heading",
+    ])
+    const onPricing = await t.query(api.comments.listForAgent, {
+      publicId,
+      sessionToken: token,
+      search: "typo",
+      path: "/pricing",
+    })
+    expect(onPricing.comments.map((c) => c._id)).toEqual([typo])
+
+    expect(
+      await t.query(api.comments.pagesForAgent, {
+        publicId,
+        sessionToken: token,
+      })
+    ).toEqual([
+      { path: "/pricing", openCount: 2 },
+      { path: "/", openCount: 1 },
+    ])
+    await expect(
+      t.query(api.comments.pagesForAgent, { publicId, sessionToken: "nope" })
+    ).rejects.toThrow(/Not signed in/)
+  })
 })

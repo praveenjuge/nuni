@@ -3,9 +3,10 @@ import { createInterface } from "node:readline"
 import { buildCommentPrompt, PACKAGES } from "@nuni/shared"
 
 import { credentialFor } from "./credentials"
-import { formatCommentList } from "./format"
+import { formatCommentList, formatPageList } from "./format"
 import { ProjectError, resolveProject } from "./project"
 import { RemoteError, type Remote } from "./remote"
+import { formatResolveResult, resolveComments } from "./resolve"
 
 /**
  * A Model Context Protocol server over stdio (newline-delimited JSON-RPC),
@@ -64,6 +65,7 @@ export interface McpOptions {
 }
 
 const LOGIN = `npx ${PACKAGES.cli}@latest login`
+const MAX_RESOLVE = 50
 
 class ToolError extends Error {}
 
@@ -114,45 +116,96 @@ export function createMcpServer(options: McpOptions) {
     return { publicId: project, token: credential.token }
   }
 
+  const DETAIL_HINT =
+    "Call get_comment with an id for the element, DOM, styles, console errors, failed requests and screenshot."
+
+  const listSchema = {
+    status: {
+      type: "string",
+      enum: ["open", "resolved"],
+      description: "Defaults to open.",
+    },
+    page: {
+      type: "string",
+      description: "Only comments on this path, for example /pricing.",
+    },
+    group_by: {
+      type: "string",
+      enum: ["page", "element"],
+      description:
+        "Put related comments together: by page, or by the element they are on (several comments about the same button, heading or text).",
+    },
+    limit: { type: "integer", minimum: 1, maximum: 50 },
+  }
+
+  async function list(args: Json, search?: string): Promise<ToolResult> {
+    const { publicId, token } = session()
+    const status = args.status === "resolved" ? "resolved" : "open"
+    const page = await remote.listComments(publicId, token, {
+      status,
+      path: typeof args.page === "string" ? args.page : undefined,
+      search,
+      limit: typeof args.limit === "number" ? args.limit : 20,
+    })
+    return text(
+      formatCommentList(page.comments, {
+        status,
+        more: Boolean(page.cursor),
+        order: search ? "best match first" : undefined,
+        groupBy:
+          args.group_by === "page" || args.group_by === "element"
+            ? args.group_by
+            : undefined,
+        detailHint: DETAIL_HINT,
+      })
+    )
+  }
+
   const tools: Tool[] = [
     {
       name: "list_comments",
       title: "List Nuni comments",
       description:
-        "List feedback comments left on the live site with Nuni, newest first. Each has an id, the page, the author and the element it is pinned to. Use get_comment for the full context.",
+        "List feedback comments left on the live site with Nuni, newest first. Each has an id, the page, the author and the element it is pinned to. Group them by page or element to fix related ones together. Use get_comment for the full context.",
       inputSchema: {
         type: "object",
-        properties: {
-          status: {
-            type: "string",
-            enum: ["open", "resolved"],
-            description: "Defaults to open.",
-          },
-          page: {
-            type: "string",
-            description: "Only comments on this path, for example /pricing.",
-          },
-          limit: { type: "integer", minimum: 1, maximum: 50 },
-        },
+        properties: listSchema,
         additionalProperties: false,
       },
       annotations: { readOnlyHint: true },
-      async run(args) {
+      run: (args) => list(args),
+    },
+    {
+      name: "search_comments",
+      title: "Search Nuni comments",
+      description:
+        'Find comments by the words in them or the author\'s name, best match first. For example "typo", "button color" or a person\'s name.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The words to look for." },
+          ...listSchema,
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true },
+      run: (args) => list(args, str(args, "query")),
+    },
+    {
+      name: "list_pages",
+      title: "List pages with Nuni comments",
+      description:
+        "The site's pages that have open comments, with how many each has, most first. Use a path with list_comments to work through one page.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true },
+      async run() {
         const { publicId, token } = session()
-        const status = args.status === "resolved" ? "resolved" : "open"
-        const page = await remote.listComments(publicId, token, {
-          status,
-          path: typeof args.page === "string" ? args.page : undefined,
-          limit: typeof args.limit === "number" ? args.limit : 20,
-        })
-        return text(
-          formatCommentList(page.comments, {
-            status,
-            more: Boolean(page.cursor),
-            detailHint:
-              "Call get_comment with an id for the element, DOM, styles, console errors, failed requests and screenshot.",
-          })
-        )
+        return text(formatPageList(await remote.listPages(publicId, token)))
       },
     },
     {
@@ -239,6 +292,50 @@ export function createMcpServer(options: McpOptions) {
       },
     },
     {
+      name: "resolve_comments",
+      title: "Resolve several Nuni comments",
+      description:
+        "Resolve several comments at once, for example all the ones a single change fixed. The note, if any, is posted as a reply on each. Comments that can't be resolved are listed; the rest still are.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ids: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            maxItems: MAX_RESOLVE,
+          },
+          note: {
+            type: "string",
+            description:
+              "Optional: what was changed, posted as a reply on each.",
+          },
+        },
+        required: ["ids"],
+        additionalProperties: false,
+      },
+      annotations: { idempotentHint: true },
+      async run(args) {
+        const ids = Array.isArray(args.ids)
+          ? args.ids.filter((id): id is string => typeof id === "string")
+          : []
+        if (!ids.length) throw new ToolError(`"ids" is required`)
+        if (ids.length > MAX_RESOLVE) {
+          throw new ToolError(`Resolve up to ${MAX_RESOLVE} comments at a time`)
+        }
+        const result = await resolveComments(
+          remote,
+          session(),
+          ids,
+          typeof args.note === "string" ? args.note : undefined
+        )
+        return {
+          ...text(formatResolveResult(result)),
+          ...(result.resolved.length ? {} : { isError: true }),
+        }
+      },
+    },
+    {
       name: "reopen_comment",
       title: "Reopen a Nuni comment",
       description: "Reopen a resolved comment.",
@@ -296,7 +393,7 @@ export function createMcpServer(options: McpOptions) {
               version: options.version,
             },
             instructions:
-              "Nuni comments are feedback pinned to elements on the live site. List them, read one with its full context, fix the code, then resolve it.",
+              "Nuni comments are feedback pinned to elements on the live site. List them (by page or grouped by element), search them, read one with its full context, fix the code, then resolve it. Resolve several at once when one change fixed them all.",
           }
           break
         }

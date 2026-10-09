@@ -91,3 +91,56 @@ test("MCP stdio lists, replies and resolves with real owner credentials", async 
     await client.close()
   }
 })
+
+test("agents search, list pages, group and resolve several comments", async ({
+  page,
+  ownerPage,
+  projectId,
+}, testInfo) => {
+  const first = "Typo in the pricing heading"
+  const second = "Another typo in the footer"
+  const third = "Make the logo bigger"
+  await addComment(page, projectId, first)
+  await addComment(page, projectId, second)
+  await addComment(page, projectId, third)
+  await claimProject(ownerPage, projectId)
+  const session = cliSession(testInfo, projectId)
+  await session.login(ownerPage)
+
+  const found = JSON.parse(
+    await session.run("comments", "--search", "typo", "--json")
+  ) as { comments: { _id: string; body: string }[] }
+  expect(found.comments.map((c) => c.body).sort()).toEqual([second, first])
+  expect(await session.run("pages")).toMatch(/3 open {2}\//)
+  expect(await session.run("comments", "--group", "page")).toContain(
+    "grouped by page"
+  )
+
+  const client = await session.mcp()
+  try {
+    const pages = await client.callTool({ name: "list_pages", arguments: {} })
+    expect(pages.isError).not.toBe(true)
+    expect(JSON.stringify(pages.content)).toContain("3 open")
+    const searched = await client.callTool({
+      name: "search_comments",
+      arguments: { query: "typo", group_by: "page" },
+    })
+    expect(searched.isError).not.toBe(true)
+    expect(JSON.stringify(searched.content)).toContain(first)
+    expect(JSON.stringify(searched.content)).not.toContain(third)
+    const resolved = await client.callTool({
+      name: "resolve_comments",
+      arguments: {
+        ids: found.comments.map((c) => c._id),
+        note: "Fixed both typos",
+      },
+    })
+    expect(resolved.isError).not.toBe(true)
+  } finally {
+    await client.close()
+  }
+  const open = JSON.parse(await session.run("comments", "--json")) as {
+    comments: { body: string }[]
+  }
+  expect(open.comments.map((c) => c.body)).toEqual([third])
+})
