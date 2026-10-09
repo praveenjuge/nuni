@@ -49,7 +49,12 @@ function describe(c: OwnerComment, n: number): string[] {
     : `<${c.anchor.tag}>`
   return [
     `${n}. ${c._id} · ${c.page.path} · ${c.authorName} · ${timeAgo(c.createdAt)}`,
-    `   "${oneLine(c.body)}"`,
+    ...(c.body ? [`   "${oneLine(c.body)}"`] : []),
+    ...(c.suggestion
+      ? [
+          `   Suggests: "${oneLine(c.suggestion.before, 60)}" → "${oneLine(c.suggestion.after, 60)}"`,
+        ]
+      : []),
     c.anchor.quote
       ? `   On the text "${oneLine(c.anchor.quote.exact, 60)}" in ${element}`
       : `   ${c.anchor.region ? "On an area of" : "On"} ${element}`,

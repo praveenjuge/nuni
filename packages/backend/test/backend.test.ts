@@ -285,6 +285,101 @@ describe("widget comments", () => {
         .quote
     ).toBeUndefined()
   })
+
+  it("stores suggested text changes for the commented text only", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const secret = generateSecret()
+    const quote = { exact: "Start free trial", prefix: "", suffix: "" }
+
+    // On selected words, with no comment text: the suggestion says it all.
+    const onText = await t.mutation(internal.comments.createFromWidget, {
+      publicId,
+      ip: "1.1.1.1",
+      body: "  ",
+      authorName: "Sam",
+      authorSecret: secret,
+      suggestion: { before: "Start free trial", after: "Try it free" },
+      page: page(),
+      anchor: { ...anchor, quote },
+      viewport: { w: 1280, h: 800, dpr: 2 },
+      userAgent: "test",
+    })
+    // On a small element's whole text (the anchor text is "Buy now").
+    await addComment(t, publicId, {
+      suggestion: { before: "Buy now", after: "Buy" },
+    })
+    const listed = await t.query(api.comments.listForPage, {
+      publicId,
+      path: "/pricing",
+    })
+    expect(
+      listed
+        .map((c) => c.suggestion)
+        .sort((a, b) => a!.after.localeCompare(b!.after))
+    ).toEqual([
+      { before: "Buy now", after: "Buy" },
+      { before: "Start free trial", after: "Try it free" },
+    ])
+    expect(listed.find((c) => c._id === onText)?.body).toBe("")
+
+    for (const suggestion of [
+      // Not the commented text.
+      { before: "Something else", after: "New" },
+      // Unchanged or empty.
+      { before: "Buy now", after: "Buy now" },
+      { before: "Buy now", after: "  " },
+      // Too long.
+      { before: "Buy now", after: "x".repeat(LIMITS.quoteMaxLength + 1) },
+    ]) {
+      await expect(addComment(t, publicId, { suggestion })).rejects.toThrow(
+        /suggest/i
+      )
+    }
+    // Areas have no text to replace.
+    await expect(
+      addComment(t, publicId, {
+        anchor: { region: { x: 0, y: 0, w: 0.5, h: 0.5 } },
+        suggestion: { before: "Buy now", after: "Buy" },
+      })
+    ).rejects.toThrow(/suggest/i)
+    // The comment text can be emptied when there is a suggestion, not otherwise.
+    await t.mutation(api.comments.editOwn, {
+      id: onText,
+      authorSecret: secret,
+      body: " ",
+    })
+    const plain = await addComment(t, publicId, { secret })
+    await expect(
+      t.mutation(api.comments.editOwn, {
+        id: plain,
+        authorSecret: secret,
+        body: " ",
+      })
+    ).rejects.toThrow(/empty/)
+
+    // The author can change the new words, and they are searchable.
+    await t.mutation(api.comments.editOwn, {
+      id: onText,
+      authorSecret: secret,
+      body: "Shorter reads better",
+      suggestion: "Try free",
+    })
+    await expect(
+      t.mutation(api.comments.editOwn, {
+        id: onText,
+        authorSecret: secret,
+        body: "",
+        suggestion: "Start free trial",
+      })
+    ).rejects.toThrow(/suggest/i)
+    const edited = await t.run((ctx) => ctx.db.get(onText))
+    expect(edited).toMatchObject({
+      body: "Shorter reads better",
+      suggestion: { before: "Start free trial", after: "Try free" },
+    })
+    expect(edited?.searchText).toContain("Try free")
+  })
 })
 
 describe("claiming and owner actions", () => {

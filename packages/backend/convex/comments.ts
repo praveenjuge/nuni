@@ -40,6 +40,7 @@ import {
   contextValidator,
   pageValidator,
   statusValidator,
+  suggestionValidator,
   viewportValidator,
 } from "./validators"
 
@@ -49,6 +50,7 @@ function toPublic(c: Doc<"comments">) {
     _creationTime: c._creationTime,
     status: c.status,
     body: c.body,
+    suggestion: c.suggestion,
     authorName: c.authorName,
     authorKeyHash: c.authorKeyHash,
     // Public listings share comments across origins by path, so never expose
@@ -124,8 +126,46 @@ function cleanContext(context: CommentContext | undefined) {
   return out.console || out.network || out.dom ? out : undefined
 }
 
-function searchTextFor(body: string, authorName: string) {
-  return `${authorName}\n${body}`
+function searchTextFor(
+  c: Pick<Doc<"comments">, "body" | "authorName" | "suggestion">
+) {
+  return [c.authorName, c.body, c.suggestion?.after].filter(Boolean).join("\n")
+}
+
+/**
+ * The words a suggestion replaces must be the commented text itself: the
+ * selected words, or the whole text of a small element like a button.
+ */
+function cleanSuggestion(
+  suggestion: { before: string; after: string } | undefined,
+  anchor: { text: string; quote?: AnchorQuote; region?: unknown }
+) {
+  if (!suggestion) return undefined
+  const before = suggestion.before.trim()
+  const after = suggestion.after.replace(/\r\n/g, "\n").trim()
+  const target = anchor.quote
+    ? anchor.quote.exact
+    : anchor.region
+      ? ""
+      : anchor.text
+  if (!before || before !== target) {
+    fail("invalid_suggestion", "A suggestion has to change the commented text")
+  }
+  if (!after || after === before) {
+    fail("invalid_suggestion", "Change the text to suggest an edit")
+  }
+  if (after.length > LIMITS.quoteMaxLength) {
+    fail(
+      "invalid_suggestion",
+      `Suggestions are limited to ${LIMITS.quoteMaxLength} characters`
+    )
+  }
+  return { before, after }
+}
+
+/** The comment text: may be empty when the suggestion says it all. */
+function cleanCommentBody(body: string, hasSuggestion: boolean) {
+  return hasSuggestion && !body.trim() ? "" : cleanBody(body)
 }
 
 function originOf(url: string): string | null {
@@ -220,6 +260,7 @@ export const createFromWidget = internalMutation({
     body: v.string(),
     authorName: v.string(),
     authorSecret: v.string(),
+    suggestion: v.optional(suggestionValidator),
     page: pageValidator,
     anchor: anchorValidator,
     viewport: viewportValidator,
@@ -249,7 +290,17 @@ export const createFromWidget = internalMutation({
     ) {
       fail("invalid_page", "Page path must not continue the host")
     }
-    const body = cleanBody(args.body)
+    const anchor = {
+      ...cleanAnchor(args.anchor),
+      scope: args.anchor.scope?.slice(0, 6).map((step) => ({
+        kind: step.kind,
+        host: cleanAnchor(step.host),
+      })),
+      quote: cleanQuote(args.anchor.quote),
+      region: args.anchor.region && cleanRegion(args.anchor.region),
+    }
+    const suggestion = cleanSuggestion(args.suggestion, anchor)
+    const body = cleanCommentBody(args.body, Boolean(suggestion))
     const authorName = cleanName(args.authorName)
     if (args.authorSecret.length < 16 || args.authorSecret.length > 128) {
       fail("invalid_author", "Invalid author key")
@@ -280,9 +331,10 @@ export const createFromWidget = internalMutation({
       projectId: project._id,
       status: "open",
       body,
+      suggestion,
       authorName,
       authorKeyHash: await sha256Hex(args.authorSecret),
-      searchText: searchTextFor(body, authorName),
+      searchText: searchTextFor({ body, authorName, suggestion }),
       page: {
         ...args.page,
         origin,
@@ -292,15 +344,7 @@ export const createFromWidget = internalMutation({
         hash: clampString(args.page.hash, 1000),
         path: clampString(args.page.path, 1000),
       },
-      anchor: {
-        ...cleanAnchor(args.anchor),
-        scope: args.anchor.scope?.slice(0, 6).map((step) => ({
-          kind: step.kind,
-          host: cleanAnchor(step.host),
-        })),
-        quote: cleanQuote(args.anchor.quote),
-        region: args.anchor.region && cleanRegion(args.anchor.region),
-      },
+      anchor,
       viewport: args.viewport,
       context: cleanContext(args.context),
       userAgent: clampString(args.userAgent, 400),
@@ -334,13 +378,27 @@ async function loadOwnComment(
 }
 
 export const editOwn = mutation({
-  args: { id: v.id("comments"), authorSecret: v.string(), body: v.string() },
-  handler: async (ctx, { id, authorSecret, body }) => {
+  args: {
+    id: v.id("comments"),
+    authorSecret: v.string(),
+    body: v.string(),
+    /** New words for a comment that suggests a text change. */
+    suggestion: v.optional(v.string()),
+  },
+  handler: async (ctx, { id, authorSecret, body, suggestion: after }) => {
     const comment = await loadOwnComment(ctx, id, authorSecret)
-    const clean = cleanBody(body)
+    const suggestion =
+      comment.suggestion && after !== undefined
+        ? cleanSuggestion(
+            { before: comment.suggestion.before, after },
+            comment.anchor
+          )
+        : comment.suggestion
+    const clean = cleanCommentBody(body, Boolean(suggestion))
     await ctx.db.patch(id, {
       body: clean,
-      searchText: searchTextFor(clean, comment.authorName),
+      suggestion,
+      searchText: searchTextFor({ ...comment, body: clean, suggestion }),
       editedAt: Date.now(),
     })
   },
@@ -804,7 +862,7 @@ export const rebuildSearchText = internalMutation({
     for (const c of batch.page) {
       if (c.searchText === undefined) {
         await ctx.db.patch(c._id, {
-          searchText: searchTextFor(c.body, c.authorName),
+          searchText: searchTextFor(c),
         })
       }
     }

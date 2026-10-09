@@ -205,3 +205,46 @@ test("unknown pages offer a working route back to projects", async ({
     ownerPage.getByRole("heading", { name: "Projects", exact: true })
   ).toBeVisible()
 })
+
+test("suggested text changes show the old and new words", async ({
+  page,
+  ownerPage,
+  projectId,
+}) => {
+  await page.goto(`/pricing?project=${projectId}`)
+  await page
+    .locator("#nuni-root .toolbar")
+    .getByRole("button", { name: "Add a comment" })
+    .click()
+  await page
+    .locator(".plan")
+    .first()
+    .getByRole("button", { name: "Choose plan" })
+    .click()
+  const composer = page.locator('#nuni-root [data-card="composer"]')
+  await composer.getByPlaceholder("Your name").fill("Val Visitor")
+  await composer.getByRole("button", { name: "Suggest an edit" }).click()
+  await composer.getByRole("textbox", { name: "New text" }).fill("Pick a plan")
+  await composer.getByRole("button", { name: "Post" }).click()
+  await expect(page.locator("#nuni-root .toast")).toHaveText("Comment added")
+
+  await claimProject(ownerPage, projectId)
+  await ownerPage
+    .context()
+    .grantPermissions(["clipboard-read", "clipboard-write"])
+  await ownerPage.goto(`${dashboardURL}/p/${projectId}`)
+  const detail = ownerPage.getByRole("article", { name: "Selected comment" })
+  const edit = detail.getByRole("region", { name: "Suggested edit" })
+  await expect(edit.locator("del")).toHaveText("Choose plan")
+  await expect(edit.locator("ins")).toHaveText("Pick a plan")
+  await edit.getByRole("button", { name: "Copy new text" }).click()
+  await expect(ownerPage.getByText("New text copied")).toBeVisible()
+  expect(await ownerPage.evaluate(() => navigator.clipboard.readText())).toBe(
+    "Pick a plan"
+  )
+  await expect(
+    ownerPage
+      .getByRole("list", { name: "Open comments" })
+      .getByText("Choose plan")
+  ).toBeVisible()
+})

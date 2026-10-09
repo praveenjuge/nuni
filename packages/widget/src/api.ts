@@ -2,6 +2,7 @@ import { api } from "@nuni/backend/api"
 import type {
   Anchor,
   CommentContext,
+  TextSuggestion,
   OwnerComment,
   Thread,
   WidgetComment,
@@ -24,6 +25,7 @@ export interface PageSummary {
 
 export interface NewComment {
   body: string
+  suggestion?: TextSuggestion
   authorName: string
   authorSecret: string
   page: WidgetComment["page"]
@@ -243,12 +245,13 @@ export class NuniApi {
     }
   }
 
-  editOwn(id: string, authorSecret: string, body: string) {
+  editOwn(id: string, authorSecret: string, body: string, suggestion?: string) {
     return this.run(
       this.client.mutation(api.comments.editOwn, {
         id: id as never,
         authorSecret,
         body,
+        suggestion,
       })
     )
   }

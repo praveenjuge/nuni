@@ -546,6 +546,14 @@ function CommentRow({
           )}
         </span>
         <span className="line-clamp-2 text-sm text-foreground/80">
+          {c.suggestion && (
+            <>
+              <del className="text-muted-foreground">{c.suggestion.before}</del>
+              {" → "}
+              <ins className="no-underline">{c.suggestion.after}</ins>
+              {c.body && " · "}
+            </>
+          )}
           {c.body}
         </span>
         <span className="truncate font-mono text-xs text-muted-foreground">

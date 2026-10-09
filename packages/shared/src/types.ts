@@ -103,12 +103,21 @@ export interface CommentContext {
   dom?: DomContext
 }
 
+/** New words the commenter suggests for the commented text. */
+export interface TextSuggestion {
+  /** The text on the page when the comment was left. */
+  before: string
+  after: string
+}
+
 /** Shape of a comment as the widget receives it. */
 export interface WidgetComment {
   _id: string
   _creationTime: number
   status: CommentStatus
+  /** Can be empty when the comment is only a suggestion. */
   body: string
+  suggestion?: TextSuggestion
   authorName: string
   authorKeyHash: string
   /** Public listings only include origin, path and title. */

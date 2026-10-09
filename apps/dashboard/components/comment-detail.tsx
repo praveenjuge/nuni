@@ -178,12 +178,18 @@ export function CommentDetail({
       </header>
 
       <div className="grid gap-3">
-        {c.anchor.quote && (
-          <blockquote className="border-l-2 border-primary/60 pl-3 text-sm text-muted-foreground italic">
-            {c.anchor.quote.exact}
-          </blockquote>
+        {c.suggestion ? (
+          <SuggestedEdit suggestion={c.suggestion} />
+        ) : (
+          c.anchor.quote && (
+            <blockquote className="border-l-2 border-primary/60 pl-3 text-sm text-muted-foreground italic">
+              {c.anchor.quote.exact}
+            </blockquote>
+          )
         )}
-        <p className="text-[15px]/relaxed whitespace-pre-wrap">{c.body}</p>
+        {c.body && (
+          <p className="text-[15px]/relaxed whitespace-pre-wrap">{c.body}</p>
+        )}
       </div>
 
       <dl className="grid grid-cols-[5rem_1fr] gap-x-3 gap-y-1.5 text-sm">
@@ -255,5 +261,41 @@ export function CommentDetail({
         }}
       />
     </article>
+  )
+}
+
+/** The commented words struck through, and the words suggested instead. */
+function SuggestedEdit({
+  suggestion,
+}: {
+  suggestion: { before: string; after: string }
+}) {
+  return (
+    <section
+      aria-label="Suggested edit"
+      className="grid gap-1.5 rounded-lg bg-muted/60 p-3 text-sm whitespace-pre-wrap"
+    >
+      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        Suggested edit
+        <Button
+          size="xs"
+          variant="ghost"
+          className="-my-1 ml-auto"
+          onClick={async () => {
+            await navigator.clipboard.writeText(suggestion.after)
+            toast("New text copied")
+          }}
+        >
+          <ClipboardCopyIcon data-icon="inline-start" />
+          Copy new text
+        </Button>
+      </div>
+      <del className="text-muted-foreground decoration-destructive/70">
+        {suggestion.before}
+      </del>
+      <ins className="justify-self-start rounded bg-primary/10 px-1 text-foreground no-underline">
+        {suggestion.after}
+      </ins>
+    </section>
   )
 }

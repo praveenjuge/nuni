@@ -6,6 +6,7 @@ import {
   contextValidator,
   pageValidator,
   statusValidator,
+  suggestionValidator,
   viewportValidator,
 } from "./validators"
 
@@ -38,6 +39,8 @@ export default defineSchema({
     body: v.string(),
     authorName: v.string(),
     authorKeyHash: v.string(),
+    /** New words for the commented text; `before` is the text as it was. */
+    suggestion: v.optional(suggestionValidator),
     page: pageValidator,
     anchor: anchorValidator,
     viewport: viewportValidator,

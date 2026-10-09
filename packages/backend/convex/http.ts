@@ -152,6 +152,7 @@ http.route({
         authorName: String(payload.authorName ?? ""),
         authorSecret: String(payload.authorSecret ?? ""),
         // Shape is enforced by the mutation's validators.
+        suggestion: (payload.suggestion ?? undefined) as never,
         page: payload.page as never,
         anchor: payload.anchor as never,
         viewport: payload.viewport as never,

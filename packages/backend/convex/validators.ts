@@ -101,3 +101,9 @@ export const contextValidator = v.object({
 })
 
 export const statusValidator = v.union(v.literal("open"), v.literal("resolved"))
+
+/** A text change the commenter suggests: the words on the page, and theirs. */
+export const suggestionValidator = v.object({
+  before: v.string(),
+  after: v.string(),
+})

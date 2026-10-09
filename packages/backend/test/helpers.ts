@@ -55,10 +55,12 @@ export async function addComment(
     origin?: string
     context?: Record<string, unknown>
     anchor?: Record<string, unknown>
+    suggestion?: { before: string; after: string }
   } = {}
 ) {
   return t.mutation(internal.comments.createFromWidget, {
     ...(opts.context ? { context: opts.context as never } : {}),
+    ...(opts.suggestion ? { suggestion: opts.suggestion } : {}),
     publicId,
     ip: opts.ip ?? "1.1.1.1",
     body: opts.body ?? "Make this bigger",

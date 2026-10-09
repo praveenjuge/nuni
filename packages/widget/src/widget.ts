@@ -56,6 +56,11 @@ import { sha256Hex } from "./sha256"
 import { scrollToPin } from "./scroll-to-pin"
 import { KEYS, read, write } from "./storage"
 import { STYLES } from "./styles"
+import {
+  renderSuggestion,
+  renderSuggestionLine,
+  suggestableText,
+} from "./suggestion"
 
 interface Placement {
   element: Element | null
@@ -72,6 +77,11 @@ interface Draft {
   dom?: DomContext
   /** Taken while the person types and uploaded once the comment is posted. */
   screenshot?: Promise<Blob | null>
+  /** The commented text, when new words can be suggested for it. */
+  suggestFrom?: string | null
+  suggesting?: boolean
+  /** The suggested words, as typed. */
+  suggestion?: string
   error?: string
   sending?: boolean
 }
@@ -1130,6 +1140,7 @@ export class NuniWidget {
         // Context is a bonus; never block a comment on it.
       }
     }
+    draft.suggestFrom = suggestableText(draft.anchor, element)
     this.card = { kind: "composer", draft }
     this.activeId = null
     this.render()
@@ -1567,7 +1578,21 @@ export class NuniWidget {
     const cleanName = name.trim().slice(0, LIMITS.nameMaxLength)
     const cleanBody = body.trim()
     if (!cleanName) return this.setDraftError(draft, this.t("enterName"))
-    if (!cleanBody) return this.setDraftError(draft, this.t("writeFirst"))
+    const before = draft.suggesting ? draft.suggestFrom : null
+    const after = (draft.suggestion ?? before ?? "").trim()
+    if (before != null && (!after || after === before)) {
+      return this.setDraftError(draft, this.t("changeTextFirst"))
+    }
+    if (after.length > LIMITS.quoteMaxLength) {
+      return this.setDraftError(
+        draft,
+        this.t("suggestionTooLong", { count: LIMITS.quoteMaxLength })
+      )
+    }
+    const suggestion = before != null ? { before, after } : undefined
+    if (!cleanBody && !suggestion) {
+      return this.setDraftError(draft, this.t("writeFirst"))
+    }
     if (cleanBody.length > LIMITS.bodyMaxLength) {
       return this.setDraftError(
         draft,
@@ -1585,6 +1610,7 @@ export class NuniWidget {
     try {
       const id = await this.api.createComment({
         body: cleanBody,
+        suggestion,
         authorName: cleanName,
         authorSecret: this.secret,
         page: {
@@ -1802,11 +1828,27 @@ export class NuniWidget {
     })
   }
 
-  private saveEdit(c: WidgetComment, body: string) {
+  private saveEdit(c: WidgetComment, body: string, suggestion?: string) {
     void this.act(
       c._id,
-      () => this.api.editOwn(c._id, this.secret, body),
+      () => this.api.editOwn(c._id, this.secret, body, suggestion),
       this.t("saved")
+    )
+  }
+
+  /** For the owner: the suggested words, ready to paste into the code. */
+  private copyNewTextButton(text: string) {
+    return h(
+      "button",
+      {
+        class: "cmp-link",
+        type: "button",
+        onclick: () =>
+          void copyText(text).then((ok) =>
+            this.showToast(this.t(ok ? "newTextCopied" : "copyFailed"))
+          ),
+      },
+      this.t("copyNewText")
     )
   }
 
@@ -1914,7 +1956,7 @@ export class NuniWidget {
         "aria-label",
         this.t("pinLabel", {
           name: comment.authorName,
-          body: comment.body.slice(0, 80),
+          body: (comment.body || comment.suggestion?.after || "").slice(0, 80),
         })
       )
       if (comment.replyCount) pin.dataset.replies = String(comment.replyCount)
@@ -2135,7 +2177,7 @@ export class NuniWidget {
     const matches = (...texts: (string | undefined)[]) =>
       !query || texts.some((t) => t?.toLocaleLowerCase().includes(query))
     const list = (this.tab === "open" ? open : resolved).filter((c) =>
-      matches(c.body, c.authorName, c.anchor.quote?.exact)
+      matches(c.body, c.authorName, c.anchor.quote?.exact, c.suggestion?.after)
     )
     const placed = list.filter((c) => this.placements.get(c._id)?.element)
     const lost = list.filter((c) => !this.placements.get(c._id)?.element)
@@ -2178,10 +2220,12 @@ export class NuniWidget {
               )
             : null
         ),
-        c.anchor.quote
-          ? h("div", { class: "item-quote" }, c.anchor.quote.exact)
-          : null,
-        h("div", { class: "item-text" }, c.body)
+        c.suggestion
+          ? renderSuggestionLine(c.suggestion)
+          : c.anchor.quote
+            ? h("div", { class: "item-quote" }, c.anchor.quote.exact)
+            : null,
+        c.body ? h("div", { class: "item-text" }, c.body) : null
       )
 
     const children: Node[] = []
@@ -2385,14 +2429,34 @@ export class NuniWidget {
       "data-focus-key": "name",
       "aria-label": this.t("yourName"),
     })
+    const before = draft.suggestFrom ?? null
+    const suggesting = Boolean(draft.suggesting) && before !== null
     const textarea = h("textarea", {
       class: "cmp-text",
-      placeholder: this.t("leaveComment"),
+      placeholder: this.t(suggesting ? "addNote" : "leaveComment"),
       maxlength: LIMITS.bodyMaxLength,
       rows: 3,
       "data-focus-key": "body",
       "aria-label": this.t("comment"),
     })
+    const suggestInput = suggesting
+      ? h("textarea", {
+          class: "cmp-suggest",
+          maxlength: LIMITS.quoteMaxLength,
+          rows: 1,
+          "data-focus-key": "suggestion",
+          "aria-label": this.t("newText"),
+        })
+      : null
+    if (suggestInput) suggestInput.value = draft.suggestion ?? before ?? ""
+    // A changed text is enough to post; a note is optional then.
+    const canPost = () =>
+      Boolean(textarea.value.trim()) ||
+      Boolean(
+        suggestInput &&
+        suggestInput.value.trim() &&
+        suggestInput.value.trim() !== before
+      )
     const prev = this.uiLayer.querySelector<HTMLTextAreaElement>(
       '[data-focus-key="body"]'
     )
@@ -2411,23 +2475,31 @@ export class NuniWidget {
       {
         class: "cmp-post",
         type: "submit",
-        disabled: Boolean(draft.sending) || !textarea.value.trim(),
+        disabled: Boolean(draft.sending) || !canPost(),
       },
       draft.sending ? this.t("posting") : this.t("post"),
       icon(ICONS.arrowUp)
     )
     const update = () => {
-      post.disabled = Boolean(draft.sending) || !textarea.value.trim()
+      post.disabled = Boolean(draft.sending) || !canPost()
       const left = LIMITS.bodyMaxLength - textarea.value.length
       counter.textContent =
         left <= LIMITS.bodyMaxLength * 0.1
           ? this.t("charsLeft", { count: left })
           : ""
       // Grow with the text, up to the max height in the styles.
-      textarea.style.height = "auto"
-      textarea.style.height = `${textarea.scrollHeight + 2}px`
+      for (const field of [textarea, suggestInput]) {
+        if (!field) continue
+        field.style.height = "auto"
+        field.style.height = `${field.scrollHeight + 2}px`
+      }
     }
     textarea.addEventListener("input", () => {
+      update()
+      this.positionCard()
+    })
+    suggestInput?.addEventListener("input", () => {
+      draft.suggestion = suggestInput.value
       update()
       this.positionCard()
     })
@@ -2443,12 +2515,24 @@ export class NuniWidget {
         textarea.value,
         needsName ? nameInput.value : this.name
       )
-    textarea.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        submit()
-      }
-    })
+    for (const field of [textarea, suggestInput]) {
+      field?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault()
+          submit()
+        }
+      })
+    }
+    const setSuggesting = (on: boolean) => {
+      draft.suggesting = on
+      draft.error = undefined
+      this.render()
+      const field = this.uiLayer.querySelector<HTMLTextAreaElement>(
+        `[data-focus-key="${on ? "suggestion" : "body"}"]`
+      )
+      field?.focus()
+      if (on) field?.select()
+    }
     return h(
       "form",
       {
@@ -2481,9 +2565,31 @@ export class NuniWidget {
               this.t("notYou")
             )
       ),
-      draft.anchor.quote
-        ? h("blockquote", { class: "quote" }, draft.anchor.quote.exact)
-        : null,
+      suggesting
+        ? h(
+            "div",
+            { class: "suggest" },
+            h(
+              "div",
+              { class: "suggest-label" },
+              this.t("suggestedEdit"),
+              h("span", { class: "spacer" }),
+              h(
+                "button",
+                {
+                  class: "cmp-link",
+                  type: "button",
+                  onclick: () => setSuggesting(false),
+                },
+                this.t("removeSuggestion")
+              )
+            ),
+            h("del", {}, before),
+            suggestInput
+          )
+        : draft.anchor.quote
+          ? h("blockquote", { class: "quote" }, draft.anchor.quote.exact)
+          : null,
       textarea,
       draft.error
         ? h("div", { class: "error cmp-error", role: "alert" }, draft.error)
@@ -2497,6 +2603,18 @@ export class NuniWidget {
           h("kbd", {}, this.i18n.mod),
           h("kbd", {}, "↵")
         ),
+        before !== null && !suggesting
+          ? h(
+              "button",
+              {
+                class: "cmp-link cmp-suggest-btn",
+                type: "button",
+                onclick: () => setSuggesting(true),
+              },
+              icon(ICONS.edit),
+              this.t("suggestEdit")
+            )
+          : null,
         counter,
         h("span", { class: "spacer" }),
         post
@@ -2535,15 +2653,43 @@ export class NuniWidget {
       const textarea = h("textarea", {
         class: "field",
         maxlength: LIMITS.bodyMaxLength,
+        placeholder: comment.suggestion ? this.t("addNote") : null,
         "data-focus-key": "edit",
+        "aria-label": this.t("comment"),
       })
       const prev = this.uiLayer.querySelector<HTMLTextAreaElement>(
         '[data-focus-key="edit"]'
       )
       textarea.value = prev ? prev.value : comment.body
+      const suggestField = comment.suggestion
+        ? h("textarea", {
+            class: "field",
+            rows: 2,
+            maxlength: LIMITS.quoteMaxLength,
+            "data-focus-key": "edit-suggestion",
+            "aria-label": this.t("newText"),
+          })
+        : null
+      if (suggestField && comment.suggestion) {
+        const prevSuggestion = this.uiLayer.querySelector<HTMLTextAreaElement>(
+          '[data-focus-key="edit-suggestion"]'
+        )
+        suggestField.value = prevSuggestion
+          ? prevSuggestion.value
+          : comment.suggestion.after
+      }
       body = h(
         "div",
         { class: "card-body" },
+        comment.suggestion && suggestField
+          ? h(
+              "div",
+              { class: "suggest" },
+              h("div", { class: "suggest-label" }, this.t("suggestedEdit")),
+              h("del", {}, comment.suggestion.before),
+              suggestField
+            )
+          : null,
         textarea,
         h(
           "div",
@@ -2567,7 +2713,8 @@ export class NuniWidget {
               class: "btn btn-primary",
               type: "button",
               disabled: Boolean(card.busy),
-              onclick: () => this.saveEdit(comment, textarea.value),
+              onclick: () =>
+                this.saveEdit(comment, textarea.value, suggestField?.value),
             },
             this.t("save")
           )
@@ -2664,10 +2811,18 @@ export class NuniWidget {
         h(
           "div",
           { class: "msg-main" },
-          comment.anchor.quote
-            ? h("blockquote", { class: "quote" }, comment.anchor.quote.exact)
+          comment.suggestion
+            ? renderSuggestion(
+                comment.suggestion,
+                this.t("suggestedEdit"),
+                owner ? this.copyNewTextButton(comment.suggestion.after) : null
+              )
+            : comment.anchor.quote
+              ? h("blockquote", { class: "quote" }, comment.anchor.quote.exact)
+              : null,
+          comment.body
+            ? h("div", { class: "comment-body" }, comment.body)
             : null,
-          h("div", { class: "comment-body" }, comment.body),
           this.ownerDetail?._id === comment._id &&
             this.ownerDetail.screenshotUrl
             ? h(
