@@ -11,41 +11,50 @@ import {
 } from "./_generated/server"
 import {
   actingOwner,
+  authorLookup,
   cleanBody,
   cleanName,
   fail,
   imageUrls,
   projectByPublicId,
   requireOwner,
-  sha256Hex,
+  widgetAuthor,
+  type AuthorLookup,
+  type WidgetAuthor,
 } from "./lib"
 import { ipKey, rateLimiter } from "./rateLimits"
+import { widgetAuthorArgs } from "./validators"
 
 /**
  * Replies in a comment's thread. Public like comments: anyone with the
  * project ID can read them. Authors edit and delete their own with the same
- * browser secret they comment with; the owner can remove any.
+ * browser secret (or commenter sign-in) they comment with; the owner can
+ * remove any.
  */
 
-export function toReplyView(r: Doc<"replies">) {
+export async function toReplyView(r: Doc<"replies">, author: AuthorLookup) {
   return {
     _id: r._id,
     commentId: r.commentId,
     body: r.body,
-    authorName: r.authorName,
     authorKeyHash: r.authorKeyHash,
     isOwner: Boolean(r.ownerId),
     createdAt: r.createdAt,
     editedAt: r.editedAt,
+    ...(await author(r)),
   }
 }
 
-export async function repliesFor(ctx: QueryCtx, commentId: Id<"comments">) {
+export async function repliesFor(
+  ctx: QueryCtx,
+  commentId: Id<"comments">,
+  author: AuthorLookup = authorLookup(ctx)
+) {
   const replies = await ctx.db
     .query("replies")
     .withIndex("by_comment", (q) => q.eq("commentId", commentId))
     .take(LIMITS.repliesPerComment)
-  return replies.map(toReplyView)
+  return Promise.all(replies.map((r) => toReplyView(r, author)))
 }
 
 /** The comment, checked to belong to the project. */
@@ -63,12 +72,6 @@ export async function commentInProject(
   return { project, comment }
 }
 
-export function checkSecret(authorSecret: string) {
-  if (authorSecret.length < 16 || authorSecret.length > 128) {
-    fail("invalid_author", "Invalid author key")
-  }
-}
-
 async function insertReply(
   ctx: MutationCtx,
   comment: Doc<"comments">,
@@ -76,6 +79,7 @@ async function insertReply(
     body: string
     authorName: string
     authorKeyHash: string
+    authorId?: Id<"users">
     ownerId?: Id<"users">
   }
 ) {
@@ -90,6 +94,7 @@ async function insertReply(
     body: cleanBody(fields.body),
     authorName: cleanName(fields.authorName),
     authorKeyHash: fields.authorKeyHash,
+    authorId: fields.authorId,
     ownerId: fields.ownerId,
     createdAt: now,
   })
@@ -100,7 +105,8 @@ async function insertReply(
 
 /**
  * From the widget, through the HTTP action (which supplies the IP). With a
- * valid owner session it is an owner reply, under the owner's name.
+ * valid owner session it is an owner reply, under the owner's name; with a
+ * commenter sign-in, it is under the commenter's account.
  */
 export const createFromWidget = internalMutation({
   args: {
@@ -109,11 +115,10 @@ export const createFromWidget = internalMutation({
     ip: v.string(),
     body: v.string(),
     authorName: v.string(),
-    authorSecret: v.string(),
+    ...widgetAuthorArgs,
     sessionToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    checkSecret(args.authorSecret)
     const { ok } = await rateLimiter.limit(ctx, "replyPerIp", {
       key: ipKey(args.ip, args.publicId),
     })
@@ -127,10 +132,18 @@ export const createFromWidget = internalMutation({
       ? await actingOwner(ctx, project, { sessionToken: args.sessionToken })
       : null
     const owner = ownerId ? await ctx.db.get(ownerId) : null
+    const author = await widgetAuthor(ctx, project._id, args)
+    // The account's name and avatar are shown unless the reply is under
+    // another person's owner name.
+    const authorId =
+      author.user && (!owner || owner._id === author.user._id)
+        ? author.user._id
+        : undefined
     return insertReply(ctx, comment, {
       body: args.body,
-      authorName: owner?.name ?? args.authorName,
-      authorKeyHash: await sha256Hex(args.authorSecret),
+      authorName: owner?.name ?? author.user?.name ?? args.authorName,
+      authorKeyHash: author.key,
+      authorId,
       ownerId: ownerId ?? undefined,
     })
   },
@@ -208,11 +221,12 @@ export const listForComment = query({
 async function loadOwnReply(
   ctx: MutationCtx,
   id: Id<"replies">,
-  authorSecret: string
+  auth: WidgetAuthor
 ) {
   const reply = await ctx.db.get(id)
   if (!reply) fail("not_found", "Reply not found")
-  if ((await sha256Hex(authorSecret)) !== reply.authorKeyHash) {
+  const { keys } = await widgetAuthor(ctx, reply.projectId, auth)
+  if (!keys.includes(reply.authorKeyHash)) {
     fail("forbidden", "You can only change your own replies")
   }
   const { ok } = await rateLimiter.limit(ctx, "editPerAuthor", {
@@ -260,17 +274,17 @@ export async function deleteThread(
 }
 
 export const editOwn = mutation({
-  args: { id: v.id("replies"), authorSecret: v.string(), body: v.string() },
-  handler: async (ctx, { id, authorSecret, body }) => {
-    await loadOwnReply(ctx, id, authorSecret)
+  args: { id: v.id("replies"), ...widgetAuthorArgs, body: v.string() },
+  handler: async (ctx, { id, body, ...auth }) => {
+    await loadOwnReply(ctx, id, auth)
     await ctx.db.patch(id, { body: cleanBody(body), editedAt: Date.now() })
   },
 })
 
 export const deleteOwn = mutation({
-  args: { id: v.id("replies"), authorSecret: v.string() },
-  handler: async (ctx, { id, authorSecret }) => {
-    await removeReply(ctx, await loadOwnReply(ctx, id, authorSecret))
+  args: { id: v.id("replies"), ...widgetAuthorArgs },
+  handler: async (ctx, { id, ...auth }) => {
+    await removeReply(ctx, await loadOwnReply(ctx, id, auth))
   },
 })
 

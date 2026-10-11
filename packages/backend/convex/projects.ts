@@ -239,6 +239,10 @@ export const deleteBatch = internalMutation({
         .withIndex("by_project", (q) => q.eq("projectId", projectId))
         .take(DELETE_BATCH),
       ctx.db
+        .query("commenterSessions")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .take(DELETE_BATCH),
+      ctx.db
         .query("transfers")
         .withIndex("by_project", (q) => q.eq("projectId", projectId))
         .take(DELETE_BATCH),

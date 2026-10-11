@@ -2,7 +2,7 @@ import type { AuthConfig } from "convex/server"
 
 const clientId = process.env.WORKOS_CLIENT_ID
 /** Preserve hosted WorkOS defaults when Convex throws for an unset optional API URL. */
-function workosApiUrl(): string {
+export function workosApiUrl(): string {
   try {
     return process.env.WORKOS_API_URL ?? "https://api.workos.com"
   } catch {

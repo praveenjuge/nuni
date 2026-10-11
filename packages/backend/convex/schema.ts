@@ -39,7 +39,10 @@ export default defineSchema({
     status: statusValidator,
     body: v.string(),
     authorName: v.string(),
+    /** A browser key's hash, or `user:<id>` when written while signed in. */
     authorKeyHash: v.string(),
+    /** The signed-in commenter; their name and avatar are shown. */
+    authorId: v.optional(v.id("users")),
     /** New words for the commented text; `before` is the text as it was. */
     suggestion: v.optional(suggestionValidator),
     page: pageValidator,
@@ -95,13 +98,16 @@ export default defineSchema({
     body: v.string(),
     authorName: v.string(),
     authorKeyHash: v.string(),
+    /** The signed-in commenter; their name and avatar are shown. */
+    authorId: v.optional(v.id("users")),
     /** Set when the project owner wrote it (shown with an Owner badge). */
     ownerId: v.optional(v.id("users")),
     createdAt: v.number(),
     editedAt: v.optional(v.number()),
   })
     .index("by_comment", ["commentId", "createdAt"])
-    .index("by_project", ["projectId"]),
+    .index("by_project", ["projectId"])
+    .index("by_project_author", ["projectId", "authorKeyHash"]),
 
   /** One emoji from one author on a comment or one of its replies. */
   reactions: defineTable({
@@ -114,7 +120,8 @@ export default defineSchema({
   })
     .index("by_comment", ["commentId"])
     .index("by_target_author_emoji", ["targetId", "authorKeyHash", "emoji"])
-    .index("by_project", ["projectId"]),
+    .index("by_project", ["projectId"])
+    .index("by_project_author", ["projectId", "authorKeyHash"]),
 
   /** Open comment count per page, so the widget can list other pages. */
   pageStats: defineTable({
@@ -135,6 +142,22 @@ export default defineSchema({
     userAgent: v.optional(v.string()),
     expiresAt: v.number(),
     lastUsedAt: v.optional(v.number()),
+  })
+    .index("by_tokenHash", ["tokenHash"])
+    .index("by_project", ["projectId"])
+    .index("by_user", ["userId"])
+    .index("by_expires", ["expiresAt"]),
+
+  /**
+   * A visitor signed in to comment under their account on one project's
+   * site. Never grants owner tools. Only the token's hash is stored.
+   */
+  commenterSessions: defineTable({
+    tokenHash: v.string(),
+    userId: v.id("users"),
+    projectId: v.id("projects"),
+    origin: v.string(),
+    expiresAt: v.number(),
   })
     .index("by_tokenHash", ["tokenHash"])
     .index("by_project", ["projectId"])

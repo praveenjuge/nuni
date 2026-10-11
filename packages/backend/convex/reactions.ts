@@ -2,13 +2,15 @@ import { LIMITS, REACTIONS } from "@nuni/shared"
 import { v } from "convex/values"
 
 import { mutation } from "./_generated/server"
-import { fail, sha256Hex } from "./lib"
+import { fail, widgetAuthor } from "./lib"
 import { rateLimiter } from "./rateLimits"
-import { checkSecret, commentInProject } from "./replies"
+import { commentInProject } from "./replies"
+import { widgetAuthorArgs } from "./validators"
 
 /**
  * Add or remove one emoji on a comment or one of its replies. Each author
- * (browser secret) has at most one of each emoji per message.
+ * (signed-in commenter, or browser secret) has at most one of each emoji per
+ * message.
  */
 export const toggle = mutation({
   args: {
@@ -16,13 +18,12 @@ export const toggle = mutation({
     commentId: v.string(),
     targetId: v.string(),
     emoji: v.string(),
-    authorSecret: v.string(),
+    ...widgetAuthorArgs,
   },
   handler: async (ctx, args) => {
     if (!(REACTIONS as readonly string[]).includes(args.emoji)) {
       fail("invalid_reaction", "Unknown reaction")
     }
-    checkSecret(args.authorSecret)
     const { comment } = await commentInProject(
       ctx,
       args.publicId,
@@ -35,7 +36,11 @@ export const toggle = mutation({
         fail("not_found", "Reply not found")
       }
     }
-    const authorKeyHash = await sha256Hex(args.authorSecret)
+    const { key: authorKeyHash } = await widgetAuthor(
+      ctx,
+      comment.projectId,
+      args
+    )
     const { ok } = await rateLimiter.limit(ctx, "reactPerAuthor", {
       key: authorKeyHash,
     })

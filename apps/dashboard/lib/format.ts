@@ -23,6 +23,19 @@ export function hostOf(origin: string): string {
   }
 }
 
+/** An http(s) origin from a link's query, or null. */
+export function cleanOrigin(value: string | undefined): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.origin
+      : null
+  } catch {
+    return null
+  }
+}
+
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (parts.length > 1)

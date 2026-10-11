@@ -186,6 +186,89 @@ export async function sessionFromToken(
   return session
 }
 
+/** A signed-in commenter's session for this project, if the token is live. */
+export async function commenterFromToken(
+  ctx: Ctx,
+  projectId: Id<"projects">,
+  token: string
+): Promise<Doc<"users"> | null> {
+  if (!token || token.length > 200) return null
+  const tokenHash = await sha256Hex(token)
+  const session = await ctx.db
+    .query("commenterSessions")
+    .withIndex("by_tokenHash", (q) => q.eq("tokenHash", tokenHash))
+    .unique()
+  if (
+    !session ||
+    session.expiresAt < Date.now() ||
+    session.projectId !== projectId
+  ) {
+    return null
+  }
+  return ctx.db.get(session.userId)
+}
+
+/** The author key of a signed-in commenter. Never a hash, so never a browser's. */
+export function userAuthorKey(userId: Id<"users">) {
+  return `user:${userId}`
+}
+
+export function checkSecret(authorSecret: string) {
+  if (authorSecret.length < 16 || authorSecret.length > 128) {
+    fail("invalid_author", "Invalid author key")
+  }
+}
+
+/** What the widget sends to say who is writing. */
+export type WidgetAuthor = { authorSecret: string; commenterToken?: string }
+
+/**
+ * Who is writing from the widget: the signed-in commenter when there is a
+ * commenter token, otherwise this browser's key. A token that is no longer
+ * valid fails instead of quietly writing as a guest.
+ */
+export async function widgetAuthor(
+  ctx: Ctx,
+  projectId: Id<"projects">,
+  { authorSecret, commenterToken }: WidgetAuthor
+): Promise<{ key: string; user: Doc<"users"> | null; keys: string[] }> {
+  checkSecret(authorSecret)
+  const browserKey = await sha256Hex(authorSecret)
+  if (!commenterToken) {
+    return { key: browserKey, user: null, keys: [browserKey] }
+  }
+  const user = await commenterFromToken(ctx, projectId, commenterToken)
+  if (!user) fail("signed_out", "You've been signed out. Sign in again.")
+  const key = userAuthorKey(user._id)
+  // This browser's guest comments stay editable while signed in.
+  return { key, user, keys: [key, browserKey] }
+}
+
+/**
+ * The name and avatar to show for a comment or reply. Signed-in authors
+ * show their account's current ones; each user is read once per call.
+ */
+export function authorLookup(ctx: QueryCtx) {
+  const users = new Map<Id<"users">, Promise<Doc<"users"> | null>>()
+  return async (row: { authorId?: Id<"users">; authorName: string }) => {
+    if (!row.authorId) return { authorName: row.authorName }
+    let user = users.get(row.authorId)
+    if (!user) {
+      user = ctx.db.get(row.authorId)
+      users.set(row.authorId, user)
+    }
+    const found = await user
+    if (!found) return { authorName: row.authorName }
+    return {
+      authorName: found.name,
+      signedIn: true as const,
+      avatarUrl: found.avatarUrl,
+    }
+  }
+}
+
+export type AuthorLookup = ReturnType<typeof authorLookup>
+
 /**
  * Resolve who is acting as the owner: either the dashboard JWT or a widget
  * session token. Returns the owner user id, or throws.
