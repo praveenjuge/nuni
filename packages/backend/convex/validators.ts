@@ -110,3 +110,12 @@ export const suggestionValidator = v.object({
   before: v.string(),
   after: v.string(),
 })
+
+/**
+ * Who is writing from the widget: the browser's key, and the commenter's
+ * session token when they signed in.
+ */
+export const widgetAuthorArgs = {
+  authorSecret: v.string(),
+  commenterToken: v.optional(v.string()),
+}

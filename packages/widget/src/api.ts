@@ -23,11 +23,24 @@ export interface PageSummary {
   count: number
 }
 
-export interface NewComment {
+/**
+ * Who is writing: this browser's key, and the commenter's sign-in when they
+ * signed in. The browser key is sent either way.
+ */
+export interface Author {
+  authorSecret: string
+  commenterToken?: string
+}
+
+/** The signed-in commenter, as the widget shows them. */
+export type Commenter =
+  | { valid: false }
+  | { valid: true; name: string; avatarUrl?: string; authorKey: string }
+
+export interface NewComment extends Author {
   body: string
   suggestion?: TextSuggestion
   authorName: string
-  authorSecret: string
   page: WidgetComment["page"]
   anchor: Anchor
   viewport: WidgetComment["viewport"]
@@ -95,10 +108,10 @@ export class NuniApi {
   }
 
   /** The visitor's own comments on every page, live. */
-  onMine(authorSecret: string, cb: (comments: WidgetComment[]) => void) {
+  onMine(author: Author, cb: (comments: WidgetComment[]) => void) {
     return this.client.onUpdate(
       api.comments.listMine,
-      { publicId: this.config.project, authorSecret },
+      { publicId: this.config.project, ...author },
       (comments) => cb(comments as WidgetComment[]),
       () => {}
     )
@@ -123,6 +136,33 @@ export class NuniApi {
       cb,
       () => {}
     )
+  }
+
+  /** Who a stored commenter sign-in belongs to, live (invalid once revoked). */
+  onCommenter(commenterToken: string, cb: (result: Commenter) => void) {
+    return this.client.onUpdate(
+      api.commenters.validate,
+      { publicId: this.config.project, commenterToken },
+      cb,
+      () => {}
+    )
+  }
+
+  /** Right after signing in: this browser's guest comments become the account's. */
+  linkBrowser(authorSecret: string, commenterToken: string) {
+    return this.run(
+      this.client.mutation(api.commenters.linkBrowser, {
+        publicId: this.config.project,
+        authorSecret,
+        commenterToken,
+      })
+    )
+  }
+
+  signOutCommenter(commenterToken: string) {
+    return this.client
+      .mutation(api.commenters.signOut, { commenterToken })
+      .catch(() => null)
   }
 
   /** A comment with the owner-only context (screenshot, console, DOM). */
@@ -186,13 +226,14 @@ export class NuniApi {
   }
 
   /** Through the HTTP action, so replies are rate limited per IP. */
-  async createReply(reply: {
-    commentId: string
-    body: string
-    authorName: string
-    authorSecret: string
-    sessionToken?: string
-  }): Promise<string> {
+  async createReply(
+    reply: {
+      commentId: string
+      body: string
+      authorName: string
+      sessionToken?: string
+    } & Author
+  ): Promise<string> {
     let response: Response
     try {
       response = await fetch(`${this.config.convexSiteUrl}/widget/replies`, {
@@ -221,19 +262,19 @@ export class NuniApi {
   }
 
   /** Attach the element's screenshot (for the owner) to a just-posted comment. */
-  uploadScreenshot(id: string, authorSecret: string, image: Blob) {
-    return this.upload("screenshot", id, authorSecret, image)
+  uploadScreenshot(id: string, author: Author, image: Blob) {
+    return this.upload("screenshot", id, author, image)
   }
 
   /** An image for everyone: picked, pasted or a marked-up screenshot. */
-  uploadImage(id: string, authorSecret: string, image: Blob) {
-    return this.upload("image", id, authorSecret, image)
+  uploadImage(id: string, author: Author, image: Blob) {
+    return this.upload("image", id, author, image)
   }
 
   private async upload(
     kind: "screenshot" | "image",
     id: string,
-    authorSecret: string,
+    author: Author,
     image: Blob
   ) {
     const response = await fetch(
@@ -244,7 +285,10 @@ export class NuniApi {
           "Content-Type": image.type,
           "X-Nuni-Project": this.config.project,
           "X-Nuni-Comment": id,
-          "X-Nuni-Author": authorSecret,
+          "X-Nuni-Author": author.authorSecret,
+          ...(author.commenterToken
+            ? { "X-Nuni-Commenter": author.commenterToken }
+            : {}),
         },
         body: image,
       }
@@ -269,22 +313,22 @@ export class NuniApi {
     }
   }
 
-  editOwn(id: string, authorSecret: string, body: string, suggestion?: string) {
+  editOwn(id: string, author: Author, body: string, suggestion?: string) {
     return this.run(
       this.client.mutation(api.comments.editOwn, {
         id: id as never,
-        authorSecret,
+        ...author,
         body,
         suggestion,
       })
     )
   }
 
-  deleteOwn(id: string, authorSecret: string) {
+  deleteOwn(id: string, author: Author) {
     return this.run(
       this.client.mutation(api.comments.deleteOwn, {
         id: id as never,
-        authorSecret,
+        ...author,
       })
     )
   }
@@ -341,21 +385,21 @@ export class NuniApi {
     )
   }
 
-  editReply(id: string, authorSecret: string, body: string) {
+  editReply(id: string, author: Author, body: string) {
     return this.run(
       this.client.mutation(api.replies.editOwn, {
         id: id as never,
-        authorSecret,
+        ...author,
         body,
       })
     )
   }
 
-  deleteReply(id: string, authorSecret: string) {
+  deleteReply(id: string, author: Author) {
     return this.run(
       this.client.mutation(api.replies.deleteOwn, {
         id: id as never,
-        authorSecret,
+        ...author,
       })
     )
   }
@@ -373,7 +417,7 @@ export class NuniApi {
     commentId: string,
     targetId: string,
     emoji: string,
-    authorSecret: string
+    author: Author
   ) {
     return this.run(
       this.client.mutation(api.reactions.toggle, {
@@ -381,7 +425,7 @@ export class NuniApi {
         commentId,
         targetId,
         emoji,
-        authorSecret,
+        ...author,
       })
     )
   }

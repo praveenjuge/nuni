@@ -15,7 +15,7 @@ function corsHeaders(request: Request): HeadersInit {
     "Access-Control-Allow-Origin": request.headers.get("Origin") ?? "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "Content-Type, X-Nuni-Project, X-Nuni-Comment, X-Nuni-Author",
+      "Content-Type, X-Nuni-Project, X-Nuni-Comment, X-Nuni-Author, X-Nuni-Commenter",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   }
@@ -117,6 +117,10 @@ async function readJson(
 }
 
 /** The real image type from the file's first bytes, whatever the header says. */
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined
+}
+
 function sniffImage(bytes: Uint8Array): string | null {
   const at = (i: number, ...values: number[]) =>
     values.every((value, j) => bytes[i + j] === value)
@@ -151,6 +155,7 @@ http.route({
         body: String(payload.body ?? ""),
         authorName: String(payload.authorName ?? ""),
         authorSecret: String(payload.authorSecret ?? ""),
+        commenterToken: optionalString(payload.commenterToken),
         // Shape is enforced by the mutation's validators.
         suggestion: (payload.suggestion ?? undefined) as never,
         page: payload.page as never,
@@ -221,10 +226,8 @@ http.route({
         body: String(payload.body ?? ""),
         authorName: String(payload.authorName ?? ""),
         authorSecret: String(payload.authorSecret ?? ""),
-        sessionToken:
-          typeof payload.sessionToken === "string"
-            ? payload.sessionToken
-            : undefined,
+        commenterToken: optionalString(payload.commenterToken),
+        sessionToken: optionalString(payload.sessionToken),
       })
       return json(request, 201, { id })
     } catch (error) {
@@ -260,6 +263,7 @@ function uploadRoute(kind: "screenshot" | "image", maxBytes: number) {
       publicId: request.headers.get("X-Nuni-Project") ?? "",
       commentId: request.headers.get("X-Nuni-Comment") ?? "",
       authorSecret: request.headers.get("X-Nuni-Author") ?? "",
+      commenterToken: request.headers.get("X-Nuni-Commenter") ?? undefined,
     }
     try {
       await ctx.runMutation(internal.comments.checkUpload, {

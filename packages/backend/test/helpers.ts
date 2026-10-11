@@ -51,6 +51,7 @@ export async function addComment(
     ip?: string
     body?: string
     secret?: string
+    commenterToken?: string
     path?: string
     origin?: string
     context?: Record<string, unknown>
@@ -66,6 +67,7 @@ export async function addComment(
     body: opts.body ?? "Make this bigger",
     authorName: "Sam",
     authorSecret: opts.secret ?? generateSecret(),
+    commenterToken: opts.commenterToken,
     page: page(opts.path, opts.origin),
     anchor: { ...anchor, ...opts.anchor },
     viewport: { w: 1280, h: 800, dpr: 2 },

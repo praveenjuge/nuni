@@ -10,7 +10,7 @@ export const authKit = new AuthKit<DataModel>(components.workOSAuthKit, {
   authFunctions,
 })
 
-function displayName(data: {
+export function displayName(data: {
   firstName?: string | null
   lastName?: string | null
   email?: string | null

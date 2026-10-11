@@ -20,6 +20,7 @@ import {
 } from "./_generated/server"
 import {
   actingOwner,
+  authorLookup,
   bumpPageOpen,
   clampString,
   cleanBody,
@@ -32,8 +33,10 @@ import {
   projectByPublicId,
   requireOwner,
   requireUser,
-  sha256Hex,
   currentUser,
+  widgetAuthor,
+  type AuthorLookup,
+  type WidgetAuthor,
 } from "./lib"
 import { ipKey, rateLimiter } from "./rateLimits"
 import { deleteThread, repliesFor } from "./replies"
@@ -45,16 +48,16 @@ import {
   statusValidator,
   suggestionValidator,
   viewportValidator,
+  widgetAuthorArgs,
 } from "./validators"
 
-function toPublic(c: Doc<"comments">) {
+async function toPublic(c: Doc<"comments">, author: AuthorLookup) {
   return {
     _id: c._id,
     _creationTime: c._creationTime,
     status: c.status,
     body: c.body,
     suggestion: c.suggestion,
-    authorName: c.authorName,
     authorKeyHash: c.authorKeyHash,
     // Public listings share comments across origins by path, so never expose
     // another environment's full URL (its query string may be sensitive).
@@ -70,13 +73,19 @@ function toPublic(c: Doc<"comments">) {
     /** Visitors' widgets couldn't find the element, last they looked. */
     pinLost: c.pinLostAt !== undefined,
     replyCount: c.replyCount ?? 0,
+    // The name, and the account's avatar when signed in.
+    ...(await author(c)),
   }
 }
 
 /** Full shape for the owner: page URL, user agent and captured context. */
-async function toOwner(ctx: QueryCtx, c: Doc<"comments">) {
+async function toOwner(
+  ctx: QueryCtx,
+  c: Doc<"comments">,
+  author: AuthorLookup = authorLookup(ctx)
+) {
   return {
-    ...toPublic(c),
+    ...(await toPublic(c, author)),
     page: c.page,
     pinLostAt: c.pinLostAt,
     userAgent: c.userAgent,
@@ -85,7 +94,7 @@ async function toOwner(ctx: QueryCtx, c: Doc<"comments">) {
       ? await ctx.storage.getUrl(c.screenshotId)
       : null,
     imageUrls: await imageUrls(ctx, c),
-    replies: c.replyCount ? await repliesFor(ctx, c._id) : [],
+    replies: c.replyCount ? await repliesFor(ctx, c._id, author) : [],
   }
 }
 
@@ -136,7 +145,7 @@ function cleanContext(context: CommentContext | undefined) {
   return out.console || out.network || out.dom ? out : undefined
 }
 
-function searchTextFor(
+export function searchTextFor(
   c: Pick<Doc<"comments">, "body" | "authorName" | "suggestion">
 ) {
   return [c.authorName, c.body, c.suggestion?.after].filter(Boolean).join("\n")
@@ -211,30 +220,38 @@ export const listForPage = query({
       byStatus("open", LIMITS.pageOpenLimit),
       byStatus("resolved", LIMITS.pageResolvedLimit),
     ])
-    return [...open, ...resolved].map(toPublic)
+    const author = authorLookup(ctx)
+    return Promise.all([...open, ...resolved].map((c) => toPublic(c, author)))
   },
 })
 
 /**
- * The commenter's own comments on every page, newest first. Takes their
- * browser key, never its hash: hashes are public in every listing.
+ * The commenter's own comments on every page, newest first: their account's
+ * when signed in, otherwise this browser's. Takes the browser key, never its
+ * hash: hashes are public in every listing.
  */
 export const listMine = query({
-  args: { publicId: v.string(), authorSecret: v.string() },
-  handler: async (ctx, { publicId, authorSecret }) => {
+  args: {
+    publicId: v.string(),
+    authorSecret: v.string(),
+    commenterToken: v.optional(v.string()),
+  },
+  handler: async (ctx, { publicId, ...auth }) => {
     const project = await projectByPublicId(ctx, publicId)
-    if (!project || authorSecret.length < 16 || authorSecret.length > 128) {
-      return []
-    }
-    const authorKeyHash = await sha256Hex(authorSecret)
+    if (!project) return []
+    const { key } = await widgetAuthor(ctx, project._id, auth).catch(() => ({
+      key: null,
+    }))
+    if (!key) return []
     const mine = await ctx.db
       .query("comments")
       .withIndex("by_project_author", (q) =>
-        q.eq("projectId", project._id).eq("authorKeyHash", authorKeyHash)
+        q.eq("projectId", project._id).eq("authorKeyHash", key)
       )
       .order("desc")
       .take(LIMITS.yoursLimit)
-    return mine.map(toPublic)
+    const author = authorLookup(ctx)
+    return Promise.all(mine.map((c) => toPublic(c, author)))
   },
 })
 
@@ -308,6 +325,7 @@ export const createFromWidget = internalMutation({
     body: v.string(),
     authorName: v.string(),
     authorSecret: v.string(),
+    commenterToken: v.optional(v.string()),
     suggestion: v.optional(suggestionValidator),
     page: pageValidator,
     anchor: anchorValidator,
@@ -341,10 +359,6 @@ export const createFromWidget = internalMutation({
     const anchor = cleanCommentAnchor(args.anchor)
     const suggestion = cleanSuggestion(args.suggestion, anchor)
     const body = cleanCommentBody(args.body, Boolean(suggestion))
-    const authorName = cleanName(args.authorName)
-    if (args.authorSecret.length < 16 || args.authorSecret.length > 128) {
-      fail("invalid_author", "Invalid author key")
-    }
 
     const perIp = await rateLimiter.limit(ctx, "commentPerIp", {
       key: ipKey(args.ip, args.publicId),
@@ -356,6 +370,8 @@ export const createFromWidget = internalMutation({
     if (!perProject.ok) fail("rate_limited", "Too many comments right now")
 
     const project = await ensureProject(ctx, args.publicId, origin)
+    const author = await widgetAuthor(ctx, project._id, args)
+    const authorName = cleanName(author.user?.name ?? args.authorName)
     if (
       !project.ownerId &&
       project.commentCount >= LIMITS.unclaimedCommentCap
@@ -373,7 +389,8 @@ export const createFromWidget = internalMutation({
       body,
       suggestion,
       authorName,
-      authorKeyHash: await sha256Hex(args.authorSecret),
+      authorKeyHash: author.key,
+      authorId: author.user?._id,
       searchText: searchTextFor({ body, authorName, suggestion }),
       page: {
         ...args.page,
@@ -403,11 +420,12 @@ export const createFromWidget = internalMutation({
 async function loadOwnComment(
   ctx: MutationCtx,
   id: Id<"comments">,
-  authorSecret: string
+  auth: WidgetAuthor
 ) {
   const comment = await ctx.db.get(id)
   if (!comment) fail("not_found", "Comment not found")
-  if ((await sha256Hex(authorSecret)) !== comment.authorKeyHash) {
+  const { keys } = await widgetAuthor(ctx, comment.projectId, auth)
+  if (!keys.includes(comment.authorKeyHash)) {
     fail("forbidden", "You can only change your own comments")
   }
   const { ok } = await rateLimiter.limit(ctx, "editPerAuthor", {
@@ -420,13 +438,13 @@ async function loadOwnComment(
 export const editOwn = mutation({
   args: {
     id: v.id("comments"),
-    authorSecret: v.string(),
+    ...widgetAuthorArgs,
     body: v.string(),
     /** New words for a comment that suggests a text change. */
     suggestion: v.optional(v.string()),
   },
-  handler: async (ctx, { id, authorSecret, body, suggestion: after }) => {
-    const comment = await loadOwnComment(ctx, id, authorSecret)
+  handler: async (ctx, { id, body, suggestion: after, ...auth }) => {
+    const comment = await loadOwnComment(ctx, id, auth)
     const suggestion =
       comment.suggestion && after !== undefined
         ? cleanSuggestion(
@@ -468,9 +486,9 @@ export async function removeComment(
 }
 
 export const deleteOwn = mutation({
-  args: { id: v.id("comments"), authorSecret: v.string() },
-  handler: async (ctx, { id, authorSecret }) => {
-    const comment = await loadOwnComment(ctx, id, authorSecret)
+  args: { id: v.id("comments"), ...widgetAuthorArgs },
+  handler: async (ctx, { id, ...auth }) => {
+    const comment = await loadOwnComment(ctx, id, auth)
     await removeComment(ctx, comment)
   },
 })
@@ -721,10 +739,11 @@ export const listForOwner = query({
     const result = await ownerComments(ctx, project._id, args).paginate(
       args.paginationOpts
     )
+    const author = authorLookup(ctx)
     return {
       ...result,
       // The owner sees the full page location and the captured context.
-      page: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
+      page: await Promise.all(result.page.map((c) => toOwner(ctx, c, author))),
     }
   },
 })
@@ -785,8 +804,11 @@ export const listForAgent = query({
       path: args.path,
       search: args.search,
     }).paginate({ numItems, cursor: args.cursor ?? null })
+    const author = authorLookup(ctx)
     return {
-      comments: await Promise.all(result.page.map((c) => toOwner(ctx, c))),
+      comments: await Promise.all(
+        result.page.map((c) => toOwner(ctx, c, author))
+      ),
       cursor: result.isDone ? null : result.continueCursor,
     }
   },
@@ -905,7 +927,7 @@ export const getById = query({
     if (!project || !commentId) return null
     const comment = await ctx.db.get(commentId)
     if (!comment || comment.projectId !== project._id) return null
-    return toPublic(comment)
+    return toPublic(comment, authorLookup(ctx))
   },
 })
 
@@ -957,7 +979,7 @@ const uploadArgs = {
   kind: uploadKindValidator,
   publicId: v.string(),
   commentId: v.string(),
-  authorSecret: v.string(),
+  ...widgetAuthorArgs,
 }
 
 /**
@@ -1009,8 +1031,7 @@ async function uploadTarget(
     kind: UploadKind
     publicId: string
     commentId: string
-    authorSecret: string
-  }
+  } & WidgetAuthor
 ) {
   const project = await projectByPublicId(ctx, args.publicId)
   const id = ctx.db.normalizeId("comments", args.commentId)
@@ -1018,7 +1039,8 @@ async function uploadTarget(
   if (!project || !comment || comment.projectId !== project._id) {
     fail("not_found", "Comment not found")
   }
-  if ((await sha256Hex(args.authorSecret)) !== comment.authorKeyHash) {
+  const { keys } = await widgetAuthor(ctx, project._id, args)
+  if (!keys.includes(comment.authorKeyHash)) {
     fail("forbidden", "You can only add images to your own comment")
   }
   if (args.kind === "screenshot" && comment.screenshotId) {

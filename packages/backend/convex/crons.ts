@@ -11,6 +11,12 @@ crons.daily(
 )
 
 crons.daily(
+  "delete expired commenter sessions",
+  { hourUTC: 3, minuteUTC: 23 },
+  internal.commenters.cleanupExpired
+)
+
+crons.daily(
   "delete unfinished CLI logins",
   { hourUTC: 3, minuteUTC: 29 },
   internal.cliAuth.cleanupExpired

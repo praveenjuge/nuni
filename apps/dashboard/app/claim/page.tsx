@@ -5,20 +5,9 @@ import { redirect } from "next/navigation"
 
 import { ClaimFlow } from "@/components/claim-flow"
 import { APP_URL } from "@/lib/config"
+import { cleanOrigin } from "@/lib/format"
 
 export const metadata: Metadata = { title: "Claim this site" }
-
-function cleanOrigin(value: string | undefined): string | null {
-  if (!value) return null
-  try {
-    const url = new URL(value)
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.origin
-      : null
-  } catch {
-    return null
-  }
-}
 
 export default async function Page(props: PageProps<"/claim">) {
   const params = await props.searchParams

@@ -325,6 +325,10 @@ button { cursor: pointer; }
   justify-content: center;
   flex: none;
 }
+.avatar { position: relative; overflow: hidden; }
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.signed-in { display: inline-flex; flex: none; color: var(--n-fg-muted); }
+.signed-in .icon { width: 13px; height: 13px; }
 .author { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta { color: var(--n-fg-muted); font-size: 12px; white-space: nowrap; }
 .badge {
@@ -553,6 +557,10 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
   white-space: nowrap;
 }
 .cmp-link:hover { color: var(--n-fg); }
+.cmp-head-guest { padding-right: 116px; }
+.cmp-sign-in { position: absolute; top: 13px; right: 44px; height: 32px; display: inline-flex; align-items: center; gap: 4px; }
+.cmp-sign-in .icon { width: 13px; height: 13px; }
+.signed-in-as { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .composer .quote, .composer .suggest { margin: 6px 14px 0; }
 .suggest {
   display: grid;

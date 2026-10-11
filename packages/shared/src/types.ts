@@ -120,6 +120,9 @@ export interface WidgetComment {
   suggestion?: TextSuggestion
   authorName: string
   authorKeyHash: string
+  /** Written while signed in: the name and avatar come from the account. */
+  signedIn?: boolean
+  avatarUrl?: string
   /** Public listings only include origin, path and title. */
   page: {
     origin: string
@@ -151,6 +154,9 @@ export interface ReplyView {
   body: string
   authorName: string
   authorKeyHash: string
+  /** Written while signed in: the name and avatar come from the account. */
+  signedIn?: boolean
+  avatarUrl?: string
   /** Written by the project owner (widget session, dashboard or CLI). */
   isOwner: boolean
   createdAt: number

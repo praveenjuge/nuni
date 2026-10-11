@@ -34,6 +34,7 @@ import {
 import {
   NuniApi,
   NuniApiError,
+  type Author,
   type PageSummary,
   type ProjectStatus,
 } from "./api"
@@ -193,12 +194,25 @@ function isTypingTarget(target: EventTarget | null | undefined) {
   )
 }
 
-function avatar(name: string): HTMLSpanElement {
-  return h(
+/** Initials, under the account photo of an author who signed in. */
+function avatar(name: string, photo?: string): HTMLSpanElement {
+  const el = h(
     "span",
     { class: "avatar", style: `background:${colorFor(name)}` },
     initials(name)
   )
+  if (photo?.startsWith("https://")) {
+    const img = h("img", {
+      src: photo,
+      alt: "",
+      loading: "lazy",
+      referrerpolicy: "no-referrer",
+      // The initials show if the photo can't load.
+      onerror: () => img.remove(),
+    })
+    el.append(img)
+  }
+  return el
 }
 
 function describeElement(el: Element): string {
@@ -309,6 +323,17 @@ export class NuniWidget {
   private secretHash = ""
   private ownerToken: string | null
   private ownerName: string | null = null
+  /** The visitor's sign-in to comment under their account, if any. */
+  private commenterToken: string | null
+  private commenter: {
+    name: string
+    avatarUrl?: string
+    /** The author key on their comments. */
+    authorKey: string
+  } | null = null
+  private commenterUnsub: (() => void) | null = null
+  /** The sign-in the Yours list was subscribed with. */
+  private mineToken: string | null = null
   private deepLinkId: string | null = null
   /** A deep-linked comment that is outside the page listing window. */
   private extraComment: WidgetComment | null = null
@@ -380,6 +405,7 @@ export class NuniWidget {
     }
     this.secret = secret
     this.ownerToken = read(KEYS.session(config.project))
+    this.commenterToken = read(KEYS.commenter(config.project))
     this.lastViewedId = read(KEYS.lastViewed(config.project))
     this.position = oneOf(
       read(KEYS.position(config.project)) ?? undefined,
@@ -488,6 +514,7 @@ export class NuniWidget {
       })
     )
     if (this.ownerToken) this.watchSession(this.ownerToken)
+    if (this.commenterToken) this.watchCommenter(this.commenterToken)
 
     this.readDeepLink()
     this.subscribePage()
@@ -567,6 +594,7 @@ export class NuniWidget {
     this.endToolbarDrag?.()
     this.pageUnsub?.()
     this.sessionUnsub?.()
+    this.commenterUnsub?.()
     this.ownerDetailUnsub?.()
     this.threadUnsub?.()
     this.mineUnsub?.()
@@ -641,6 +669,80 @@ export class NuniWidget {
     })
   }
 
+  private watchCommenter(token: string) {
+    this.commenterUnsub?.()
+    this.commenterUnsub = this.api.onCommenter(token, (result) => {
+      if (this.commenterToken !== token) return
+      if (result.valid) {
+        const { name, avatarUrl, authorKey } = result
+        this.commenter = { name, avatarUrl, authorKey }
+      } else {
+        this.forgetCommenter()
+      }
+      this.render()
+    })
+  }
+
+  /** Back to commenting as a guest in this browser. */
+  private forgetCommenter() {
+    this.commenterUnsub?.()
+    this.commenterUnsub = null
+    this.commenterToken = null
+    this.commenter = null
+    write(KEYS.commenter(this.config.project), null)
+    this.syncMine()
+  }
+
+  /** Who is writing, for every comment, reply, reaction and upload. */
+  private get author(): Author {
+    return {
+      authorSecret: this.secret,
+      commenterToken: this.commenterToken ?? undefined,
+    }
+  }
+
+  /** The name new comments go out under. */
+  private get displayName() {
+    return this.commenter?.name ?? this.name
+  }
+
+  /** The key on what this visitor writes now. */
+  private get authorKey() {
+    return this.commenter?.authorKey ?? this.secretHash
+  }
+
+  /** Signed in or not, this browser's own guest comments stay editable. */
+  private ownsKey(key: string) {
+    return (
+      Boolean(key) &&
+      (key === this.secretHash || key === this.commenter?.authorKey)
+    )
+  }
+
+  /** An author's photo and name, marked when they wrote it signed in. */
+  private authorLine(row: {
+    authorName: string
+    signedIn?: boolean
+    avatarUrl?: string
+  }) {
+    return [
+      avatar(row.authorName, row.signedIn ? row.avatarUrl : undefined),
+      h("span", { class: "author" }, row.authorName),
+      row.signedIn
+        ? h(
+            "span",
+            {
+              class: "signed-in",
+              role: "img",
+              "aria-label": this.t("signedInGithub"),
+              title: this.t("signedInGithub"),
+            },
+            icon(ICONS.github)
+          )
+        : null,
+    ]
+  }
+
   /** Keep the owner-only details of the open thread subscribed. */
   private syncOwnerDetail() {
     const token = this.ownerToken
@@ -684,7 +786,7 @@ export class NuniWidget {
   }
 
   private isMine(comment: WidgetComment) {
-    return Boolean(this.secretHash) && comment.authorKeyHash === this.secretHash
+    return this.ownsKey(comment.authorKeyHash)
   }
 
   private visibleComments() {
@@ -1295,7 +1397,7 @@ export class NuniWidget {
     try {
       // A capture still running when Post was clicked is sent when it lands.
       const image = await shot
-      if (image) await this.api.uploadScreenshot(id, this.secret, image)
+      if (image) await this.api.uploadScreenshot(id, this.author, image)
     } catch {
       // The comment is posted; the screenshot is optional.
     }
@@ -1307,7 +1409,7 @@ export class NuniWidget {
     revokeImages(draft)
     try {
       for (const image of images) {
-        await this.api.uploadImage(id, this.secret, image.blob)
+        await this.api.uploadImage(id, this.author, image.blob)
       }
     } catch (error) {
       this.showToast(
@@ -1677,6 +1779,38 @@ export class NuniWidget {
     if (!popup) location.href = url.toString()
   }
 
+  /** Sign in to comment under an account, in a popup on the dashboard. */
+  private openCommenterSignIn() {
+    const url = new URL(`${this.config.appUrl}/dashboard/comment-sign-in`)
+    url.searchParams.set("project", this.config.project)
+    url.searchParams.set("origin", location.origin)
+    const popup = window.open(
+      url.toString(),
+      "nuni-comment-sign-in",
+      "popup,width=480,height=680"
+    )
+    if (!popup) location.href = url.toString()
+  }
+
+  private async onCommenterSignedIn(token: string) {
+    this.commenterToken = token
+    write(KEYS.commenter(this.config.project), token)
+    // Best effort: guest comments from this browser join the account.
+    await this.api.linkBrowser(this.secret, token).catch(() => null)
+    if (this.commenterToken !== token) return
+    this.watchCommenter(token)
+    this.syncMine()
+    this.showToast(this.t("commenterSignedIn"))
+  }
+
+  private signOutCommenter() {
+    const token = this.commenterToken
+    if (!token) return
+    this.forgetCommenter()
+    void this.api.signOutCommenter(token)
+    this.showToast(this.t("signedOut"))
+  }
+
   private onMessage(e: MessageEvent) {
     let appOrigin: string
     try {
@@ -1690,12 +1824,16 @@ export class NuniWidget {
       project?: string
       token?: string
     } | null
+    if (!data || data.project !== this.config.project) return
     if (
-      !data ||
-      data.type !== "nuni:session" ||
-      data.project !== this.config.project
-    )
+      data.type === "nuni:commenter" &&
+      typeof data.token === "string" &&
+      data.token.startsWith("nuni_c_")
+    ) {
+      void this.onCommenterSignedIn(data.token)
       return
+    }
+    if (data.type !== "nuni:session") return
     if (typeof data.token !== "string" || !data.token.startsWith("nuni_s_"))
       return
     this.ownerToken = data.token
@@ -1760,7 +1898,10 @@ export class NuniWidget {
   // --------------------------------------------------------------- actions
 
   private async submitDraft(draft: Draft, body: string, name: string) {
-    const cleanName = name.trim().slice(0, LIMITS.nameMaxLength)
+    const signedIn = Boolean(this.commenter)
+    const cleanName = (this.commenter?.name ?? name)
+      .trim()
+      .slice(0, LIMITS.nameMaxLength)
     const cleanBody = body.trim()
     if (!cleanName) return this.setDraftError(draft, this.t("enterName"))
     const before = draft.suggesting ? draft.suggestFrom : null
@@ -1784,8 +1925,10 @@ export class NuniWidget {
         this.t("commentTooLong", { count: LIMITS.bodyMaxLength })
       )
     }
-    this.name = cleanName
-    write(KEYS.name, cleanName)
+    if (!signedIn) {
+      this.name = cleanName
+      write(KEYS.name, cleanName)
+    }
     draft.sending = true
     draft.error = undefined
     this.render()
@@ -1797,7 +1940,7 @@ export class NuniWidget {
         body: cleanBody,
         suggestion,
         authorName: cleanName,
-        authorSecret: this.secret,
+        ...this.author,
         page: {
           ...loc,
           path: this.pageKey,
@@ -1949,7 +2092,7 @@ export class NuniWidget {
     if (!sure) return
     const token = this.ownerToken
     const action = this.isMine(c)
-      ? () => this.api.deleteOwn(c._id, this.secret)
+      ? () => this.api.deleteOwn(c._id, this.author)
       : token
         ? () => this.api.remove(c._id, token)
         : null
@@ -1967,13 +2110,15 @@ export class NuniWidget {
   }
 
   private isMyReply(reply: ReplyView) {
-    return Boolean(this.secretHash) && reply.authorKeyHash === this.secretHash
+    return this.ownsKey(reply.authorKeyHash)
   }
 
   private async sendReply(comment: WidgetComment, body: string, name: string) {
     const card = this.card
     if (card?.kind !== "thread" || card.id !== comment._id) return
-    const authorName = (this.isOwner ? this.ownerName : name)
+    const authorName = (
+      this.isOwner ? this.ownerName : (this.commenter?.name ?? name)
+    )
       ?.trim()
       .slice(0, LIMITS.nameMaxLength)
     const clean = body.trim()
@@ -1988,7 +2133,7 @@ export class NuniWidget {
       this.render()
       return
     }
-    if (!this.isOwner) {
+    if (!this.isOwner && !this.commenter) {
       this.name = authorName
       write(KEYS.name, authorName)
     }
@@ -2000,7 +2145,7 @@ export class NuniWidget {
         commentId: comment._id,
         body: clean,
         authorName,
-        authorSecret: this.secret,
+        ...this.author,
         sessionToken: this.ownerToken ?? undefined,
       })
       const box = this.uiLayer.querySelector<HTMLTextAreaElement>(
@@ -2021,7 +2166,7 @@ export class NuniWidget {
     emoji: string
   ) {
     void this.api
-      .toggleReaction(comment._id, targetId, emoji, this.secret)
+      .toggleReaction(comment._id, targetId, emoji, this.author)
       .catch((error: unknown) => {
         if (this.card?.kind === "thread" && this.card.id === comment._id) {
           this.card.error =
@@ -2036,7 +2181,7 @@ export class NuniWidget {
     if (!sure) return
     const token = this.ownerToken
     const action = this.isMyReply(reply)
-      ? () => this.api.deleteReply(reply._id, this.secret)
+      ? () => this.api.deleteReply(reply._id, this.author)
       : token
         ? () => this.api.removeReply(reply._id, token)
         : null
@@ -2050,7 +2195,7 @@ export class NuniWidget {
   ) {
     void this.act(
       comment._id,
-      () => this.api.editReply(reply._id, this.secret, body),
+      () => this.api.editReply(reply._id, this.author, body),
       this.t("saved")
     ).then((ok) => {
       if (ok && this.card?.kind === "thread") {
@@ -2063,7 +2208,7 @@ export class NuniWidget {
   private saveEdit(c: WidgetComment, body: string, suggestion?: string) {
     void this.act(
       c._id,
-      () => this.api.editOwn(c._id, this.secret, body, suggestion),
+      () => this.api.editOwn(c._id, this.author, body, suggestion),
       this.t("saved")
     )
   }
@@ -2096,15 +2241,23 @@ export class NuniWidget {
     this.render()
   }
 
+  /** Keep Yours subscribed with the current sign-in, once the panel opened. */
+  private syncMine() {
+    if (!this.mineUnsub && !this.panelOpen) return
+    if (this.mineUnsub && this.mineToken === this.commenterToken) return
+    this.mineUnsub?.()
+    this.mine = null
+    this.mineToken = this.commenterToken
+    this.mineUnsub = this.api.onMine(this.author, (mine) => {
+      this.mine = mine
+      this.render()
+    })
+  }
+
   private togglePanel(open = !this.panelOpen) {
     if (open === this.panelOpen) return
     this.panelOpen = open
-    if (open && !this.mineUnsub) {
-      this.mineUnsub = this.api.onMine(this.secret, (mine) => {
-        this.mine = mine
-        this.render()
-      })
-    }
+    if (open) this.syncMine()
     if (open) {
       this.keepFocus()
       this.focusNext = '.panel [role="tab"][aria-selected="true"]'
@@ -2221,9 +2374,11 @@ export class NuniWidget {
       const pin = h(
         "div",
         { class: "pin pin-draft pin-pending", "aria-hidden": "true" },
-        this.name ? initials(this.name) : "+"
+        this.displayName ? initials(this.displayName) : "+"
       )
-      pin.style.background = this.name ? colorFor(this.name) : "var(--n-accent)"
+      pin.style.background = this.displayName
+        ? colorFor(this.displayName)
+        : "var(--n-accent)"
       pin.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`
       this.pinLayer.append(pin)
     }
@@ -2503,12 +2658,7 @@ export class NuniWidget {
         h(
           "div",
           { class: "row" },
-          h(
-            "span",
-            { class: "avatar", style: `background:${colorFor(c.authorName)}` },
-            initials(c.authorName)
-          ),
-          h("span", { class: "author" }, c.authorName),
+          ...this.authorLine(c),
           h(
             "span",
             { class: "meta" },
@@ -2705,33 +2855,59 @@ export class NuniWidget {
         },
         ...children
       ),
-      this.status && !this.status.claimed && !this.isOwner
-        ? this.renderPanelFooter()
-        : null
+      this.renderPanelFooter()
     )
   }
 
   private renderPanelFooter() {
+    const claimable = this.status && !this.status.claimed && !this.isOwner
+    const commenter = this.commenter
+    if (!claimable && !commenter) return null
     return h(
       "div",
       { class: "panel-foot" },
-      h(
-        "div",
-        { class: "row" },
-        h("span", { class: "meta" }, this.t("ownSite")),
-        h("span", { class: "spacer" }),
-        h(
-          "button",
-          { class: "btn", type: "button", onclick: () => this.openClaim() },
-          icon(ICONS.github),
-          this.t("claim")
-        )
-      )
+      commenter
+        ? h(
+            "div",
+            { class: "row" },
+            avatar(commenter.name, commenter.avatarUrl),
+            h(
+              "span",
+              { class: "meta signed-in-as" },
+              this.t("signedInAs", { name: commenter.name })
+            ),
+            h("span", { class: "spacer" }),
+            h(
+              "button",
+              {
+                class: "cmp-link",
+                type: "button",
+                onclick: () => this.signOutCommenter(),
+              },
+              this.t("signOut")
+            )
+          )
+        : null,
+      claimable
+        ? h(
+            "div",
+            { class: "row" },
+            h("span", { class: "meta" }, this.t("ownSite")),
+            h("span", { class: "spacer" }),
+            h(
+              "button",
+              { class: "btn", type: "button", onclick: () => this.openClaim() },
+              icon(ICONS.github),
+              this.t("claim")
+            )
+          )
+        : null
     )
   }
 
   private renderComposer(draft: Draft, cls: string): HTMLElement {
-    const needsName = !this.name
+    const commenter = this.commenter
+    const needsName = !commenter && !this.name
     const avatar = h("span", {
       class: "avatar cmp-avatar",
       "aria-hidden": "true",
@@ -2897,28 +3073,48 @@ export class NuniWidget {
           submit()
         },
       },
-      h(
-        "div",
-        { class: "cmp-head" },
-        avatar,
-        needsName ? nameInput : h("span", { class: "author" }, this.name),
-        h("span", { class: "spacer" }),
-        needsName
-          ? null
-          : h(
+      commenter
+        ? h(
+            "div",
+            { class: "cmp-head" },
+            ...this.authorLine({
+              authorName: commenter.name,
+              avatarUrl: commenter.avatarUrl,
+              signedIn: true,
+            }),
+            h("span", { class: "spacer" }),
+            h(
               "button",
               {
                 class: "cmp-link",
                 type: "button",
-                onclick: () => {
-                  this.name = ""
-                  this.render()
-                  this.focusComposer()
-                },
+                onclick: () => this.signOutCommenter(),
               },
-              this.t("notYou")
+              this.t("signOut")
             )
-      ),
+          )
+        : h(
+            "div",
+            { class: "cmp-head cmp-head-guest" },
+            avatar,
+            needsName ? nameInput : h("span", { class: "author" }, this.name),
+            h("span", { class: "spacer" }),
+            needsName
+              ? null
+              : h(
+                  "button",
+                  {
+                    class: "cmp-link",
+                    type: "button",
+                    onclick: () => {
+                      this.name = ""
+                      this.render()
+                      this.focusComposer()
+                    },
+                  },
+                  this.t("notYou")
+                )
+          ),
       suggesting
         ? h(
             "div",
@@ -3042,6 +3238,20 @@ export class NuniWidget {
         h("span", { class: "spacer" }),
         post
       ),
+      // Shown in the header, but after the comment in tab order, like Cancel.
+      commenter
+        ? null
+        : h(
+            "button",
+            {
+              class: "cmp-link cmp-sign-in",
+              type: "button",
+              title: this.t("signInGithub"),
+              onclick: () => this.openCommenterSignIn(),
+            },
+            icon(ICONS.github),
+            this.t("signIn")
+          ),
       // Last in tab order, so Tab goes from the name to the comment.
       h(
         "button",
@@ -3195,8 +3405,7 @@ export class NuniWidget {
         h(
           "div",
           { class: "card-head" },
-          avatar(comment.authorName),
-          h("span", { class: "author" }, comment.authorName),
+          ...this.authorLine(comment),
           h(
             "span",
             { class: "meta" },
@@ -3424,7 +3633,7 @@ export class NuniWidget {
       "div",
       { class: "reactions" },
       ...summaries.map((r) => {
-        const mine = r.authorKeyHashes.includes(this.secretHash)
+        const mine = r.authorKeyHashes.includes(this.authorKey)
         return h(
           "button",
           {
@@ -3548,8 +3757,7 @@ export class NuniWidget {
         h(
           "div",
           { class: "card-head" },
-          avatar(reply.authorName),
-          h("span", { class: "author" }, reply.authorName),
+          ...this.authorLine(reply),
           reply.isOwner
             ? h("span", { class: "badge badge-owner" }, this.t("owner"))
             : null,
@@ -3606,7 +3814,7 @@ export class NuniWidget {
       )
     })
 
-    const needsName = !owner && !this.name
+    const needsName = !owner && !this.displayName
     const nameInput = h("input", {
       class: "reply-name",
       placeholder: this.t("yourName"),
@@ -3742,7 +3950,7 @@ export class NuniWidget {
   private focusComposer() {
     requestAnimationFrame(() => {
       const target = this.uiLayer.querySelector<HTMLElement>(
-        this.name ? '[data-focus-key="body"]' : '[data-focus-key="name"]'
+        this.displayName ? '[data-focus-key="body"]' : '[data-focus-key="name"]'
       )
       target?.focus()
     })

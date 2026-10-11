@@ -11,6 +11,12 @@ users:
     last_name: Owner
     password: nuni-local-password
     email_verified: true
+  - id: user_nuni_commenter
+    email: commenter@nuni.test
+    first_name: Casey
+    last_name: Commenter
+    password: nuni-local-password
+    email_verified: true
 webhookEndpoints:
   - endpoint_url: http://127.0.0.1:3311/workos/webhook
     secret: whsec_nuni_local
