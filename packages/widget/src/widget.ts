@@ -1346,6 +1346,8 @@ export class NuniWidget {
       void this.movePin(repinId, draft)
       return
     }
+    // A comment on selected text skips picking, so show the pins here too.
+    this.setPinsHidden(false, true)
     if (this.config.capture.dom) {
       try {
         draft.dom = domContext(element)

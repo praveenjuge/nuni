@@ -100,4 +100,18 @@ test("Shift+C hides the pins, and they come back when needed", async ({
   await expect(toast(page)).toHaveText("Comments shown")
   await expect(pins(page)).toHaveCount(1)
   await expect(pins(page).first()).toBeVisible()
+
+  // Commenting on selected text shows them again too.
+  await page.keyboard.press("Shift+C")
+  await expect(pins(page)).toHaveCount(0)
+  await page.getByText("Unlimited projects").evaluate((el) => {
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    getSelection()!.removeAllRanges()
+    getSelection()!.addRange(range)
+  })
+  await page.keyboard.press("c")
+  await expect(root(page).locator('[data-card="composer"]')).toBeVisible()
+  await expect(pins(page)).toHaveCount(1)
+  await expect(hideButton(page)).toHaveAttribute("aria-pressed", "false")
 })
