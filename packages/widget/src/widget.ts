@@ -298,6 +298,8 @@ export class NuniWidget {
   private pages: PageSummary[] = []
 
   private picking = false
+  /** The visitor hid the pins (Shift+C); remembered for this project. */
+  private pinsHidden: boolean
   private panelOpen = false
   private tab: PanelTab = "open"
   /** The visitor's own comments on every page; loaded once the panel opens. */
@@ -407,6 +409,7 @@ export class NuniWidget {
     this.ownerToken = read(KEYS.session(config.project))
     this.commenterToken = read(KEYS.commenter(config.project))
     this.lastViewedId = read(KEYS.lastViewed(config.project))
+    this.pinsHidden = read(KEYS.hidden(config.project)) === "1"
     this.position = oneOf(
       read(KEYS.position(config.project)) ?? undefined,
       POSITIONS,
@@ -789,12 +792,29 @@ export class NuniWidget {
     return this.ownsKey(comment.authorKeyHash)
   }
 
+  /** The open thread keeps its pin while the rest are hidden. */
   private visibleComments() {
     return this.comments.filter(
       (c) =>
-        c.status ===
-          (this.panelOpen && this.tab === "resolved" ? "resolved" : "open") ||
+        (!this.pinsHidden &&
+          c.status ===
+            (this.panelOpen && this.tab === "resolved"
+              ? "resolved"
+              : "open")) ||
         (this.card?.kind === "thread" && this.card.id === c._id)
+    )
+  }
+
+  /** Hide or show the pins, like Figma's Shift+C. */
+  private setPinsHidden(hidden: boolean, quiet = false) {
+    if (this.pinsHidden === hidden) return
+    this.pinsHidden = hidden
+    write(KEYS.hidden(this.config.project), hidden ? "1" : null)
+    if (quiet) return
+    this.showToast(
+      hidden
+        ? this.withKey("commentsHidden", "commentsHiddenKey")
+        : this.t("commentsShown")
     )
   }
 
@@ -1109,6 +1129,8 @@ export class NuniWidget {
     this.dragBox = null
     if (on) {
       this.card = null
+      // Adding a comment shows the others again, like Figma.
+      this.setPinsHidden(false, true)
       if (window.matchMedia(MOBILE_QUERY).matches) this.panelOpen = false
       // The page and its same-origin iframes: anything in them can be picked.
       this.pickDocs = [document, ...frameDocuments(document)]
@@ -1575,8 +1597,11 @@ export class NuniWidget {
     const hotkey = this.config.hotkey
     if (hotkey && e.key.toLowerCase() === hotkey) {
       e.preventDefault()
+      // Shift and a letter hotkey hides or shows the pins.
+      if (e.shiftKey && hotkey !== hotkey.toUpperCase())
+        this.setPinsHidden(!this.pinsHidden)
       // Selected text on the page: comment on those words.
-      if (!this.picking && this.pageSelection()) this.commentOnSelection()
+      else if (!this.picking && this.pageSelection()) this.commentOnSelection()
       else this.setPicking(!this.picking)
     }
   }
@@ -2432,6 +2457,7 @@ export class NuniWidget {
         role: "toolbar",
         "aria-label": this.t("toolbar"),
         "data-dragging": !!drag,
+        "data-pins-hidden": this.pinsHidden,
         style: drag && `transform: translate(${drag.dx}px, ${drag.dy}px)`,
         onpointerdown: (e: Event) => this.startToolbarDrag(e as PointerEvent),
       },
@@ -2470,6 +2496,19 @@ export class NuniWidget {
         },
         icon(ICONS.list),
         h("span", { class: "tb-count" }, String(open))
+      ),
+      h(
+        "button",
+        {
+          class: "tb-btn tb-icon",
+          type: "button",
+          "aria-pressed": String(this.pinsHidden),
+          "data-focus-key": "tb-hide",
+          "aria-label": this.t("hideComments"),
+          title: this.withKey("hideComments", "hideCommentsKey"),
+          onclick: () => this.setPinsHidden(!this.pinsHidden),
+        },
+        icon(this.pinsHidden ? ICONS.eyeOff : ICONS.eye)
       )
     )
   }

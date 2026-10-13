@@ -110,6 +110,9 @@ button { cursor: pointer; }
   justify-content: center;
 }
 .tb-btn[aria-pressed="true"] .tb-count { background: rgba(255,255,255,0.25); color: inherit; }
+.tb-icon { width: 36px; padding: 0; justify-content: center; }
+/* Pins hidden: the count stays, dimmed, so the comments aren't lost. */
+.toolbar[data-pins-hidden] .tb-count { opacity: 0.55; }
 
 /* Picking */
 .pick-hint {
