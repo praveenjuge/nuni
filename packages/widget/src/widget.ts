@@ -305,6 +305,9 @@ export class NuniWidget {
   /** The visitor's own comments on every page; loaded once the panel opens. */
   private mine: WidgetComment[] | null = null
   private mineUnsub: (() => void) | null = null
+  /** Comments on every page, grouped in the panel; loaded once it opens. */
+  private site: WidgetComment[] | null = null
+  private siteUnsub: (() => void) | null = null
   /** The comment whose pin the owner is moving, while picking. */
   private repinId: string | null = null
   /** Lost (true) or found (false), as last reported in this page view. */
@@ -601,6 +604,7 @@ export class NuniWidget {
     this.ownerDetailUnsub?.()
     this.threadUnsub?.()
     this.mineUnsub?.()
+    this.siteUnsub?.()
     clearTimeout(this.pinReportTimer)
     this.resolveRun++
     for (const stop of this.scopeWatchers.values()) stop()
@@ -2285,6 +2289,12 @@ export class NuniWidget {
     if (open === this.panelOpen) return
     this.panelOpen = open
     if (open) this.syncMine()
+    if (open && !this.siteUnsub) {
+      this.siteUnsub = this.api.onSite((site) => {
+        this.site = site
+        this.render()
+      })
+    }
     if (open) {
       this.keepFocus()
       this.focusNext = '.panel [role="tab"][aria-selected="true"]'
@@ -2628,8 +2638,32 @@ export class NuniWidget {
     )
     const placed = list.filter((c) => this.placements.get(c._id)?.element)
     const lost = list.filter((c) => !this.placements.get(c._id)?.element)
+    // Other pages' comments, grouped by page, newest page first.
+    const elsewhere = (this.site ?? []).filter(
+      (c) => c.page.path !== this.pageKey
+    )
+    const elsewhereOf = (status: WidgetComment["status"]) =>
+      elsewhere.filter((c) => c.status === status)
+    const groups = new Map<string, WidgetComment[]>()
+    for (const c of elsewhereOf(
+      this.tab === "resolved" ? "resolved" : "open"
+    )) {
+      if (
+        !matches(
+          c.body,
+          c.authorName,
+          c.anchor.quote?.exact,
+          c.suggestion?.after,
+          c.page.path
+        )
+      )
+        continue
+      groups.set(c.page.path, [...(groups.get(c.page.path) ?? []), c])
+    }
+    // Pages past the newest comments listed (or before they load): a link.
+    const listed = new Set(elsewhere.map((c) => c.page.path))
     const otherPages = this.pages.filter(
-      (p) => p.path !== this.pageKey && matches(p.path)
+      (p) => p.path !== this.pageKey && !listed.has(p.path) && matches(p.path)
     )
 
     const content = (c: WidgetComment) => [
@@ -2686,15 +2720,17 @@ export class NuniWidget {
       )
     }
 
-    const item = (c: WidgetComment) =>
+    // A comment here opens in place; one on another page links there.
+    const item = (c: WidgetComment, href?: string | null) =>
       h(
-        "button",
+        href === undefined ? "button" : href === null ? "div" : "a",
         {
           class: "item",
-          type: "button",
           "aria-current": c._id === this.lastViewedId ? "true" : null,
           "data-focus-key": `item-${c._id}`,
-          onclick: () => this.focusComment(c._id),
+          ...(href === undefined
+            ? { type: "button", onclick: () => this.focusComment(c._id) }
+            : { href }),
         },
         h(
           "div",
@@ -2741,31 +2777,43 @@ export class NuniWidget {
       }
     } else if (!this.loaded) {
       children.push(h("div", { class: "empty" }, this.t("loading")))
-    } else if (!list.length && query) {
-      children.push(
-        h(
-          "div",
-          { class: "empty" },
-          this.t("noMatches", { query: this.search.trim() })
-        )
-      )
-    } else if (!list.length) {
-      children.push(
-        h(
-          "div",
-          { class: "empty" },
-          this.tab === "open"
-            ? this.withKey("noOpen", "noOpenKey")
-            : this.t("noResolved")
-        )
-      )
     } else {
-      children.push(...placed.map(item))
-      if (lost.length) {
+      // This page first, then every other page with its comments.
+      const others = groups.size > 0 || otherPages.length > 0
+      if (others && (list.length || !query)) {
+        children.push(h("div", { class: "section-label" }, this.t("thisPage")))
+      }
+      if (list.length) {
+        children.push(...placed.map((c) => item(c)))
+        if (lost.length) {
+          children.push(
+            h("div", { class: "section-label" }, this.t("notFoundHere"))
+          )
+          children.push(...lost.map((c) => item(c)))
+        }
+      } else if (!query) {
         children.push(
-          h("div", { class: "section-label" }, this.t("notFoundHere"))
+          h(
+            "div",
+            { class: "empty" },
+            this.tab === "open"
+              ? this.withKey("noOpen", "noOpenKey")
+              : this.t("noResolved")
+          )
         )
-        children.push(...lost.map(item))
+      }
+      for (const [path, comments] of groups) {
+        children.push(h("div", { class: "section-label" }, path))
+        children.push(...comments.map((c) => item(c, commentHref(c, location))))
+      }
+      if (!children.length && !otherPages.length) {
+        children.push(
+          h(
+            "div",
+            { class: "empty" },
+            this.t("noMatches", { query: this.search.trim() })
+          )
+        )
       }
     }
     if (otherPages.length && this.tab !== "mine") {
@@ -2877,9 +2925,13 @@ export class NuniWidget {
               },
             },
             tab === "open"
-              ? this.t("tabOpen", { count: open.length })
+              ? this.t("tabOpen", {
+                  count: open.length + elsewhereOf("open").length,
+                })
               : tab === "resolved"
-                ? this.t("tabResolved", { count: resolved.length })
+                ? this.t("tabResolved", {
+                    count: resolved.length + elsewhereOf("resolved").length,
+                  })
                 : this.mine
                   ? this.t("tabYours", { count: this.mine.length })
                   : this.t("yours")

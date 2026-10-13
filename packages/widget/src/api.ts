@@ -117,6 +117,16 @@ export class NuniApi {
     )
   }
 
+  /** Comments on every page, newest first, live. */
+  onSite(cb: (comments: WidgetComment[]) => void) {
+    return this.client.onUpdate(
+      api.comments.listForSite,
+      { publicId: this.config.project },
+      (comments) => cb(comments as WidgetComment[]),
+      () => {}
+    )
+  }
+
   onPages(cb: (pages: PageSummary[]) => void) {
     return this.client.onUpdate(
       api.comments.pagesWithComments,

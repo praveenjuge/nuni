@@ -111,3 +111,54 @@ test("Yours lists your comments on every page and opens them", async ({
   )
   await other.close()
 })
+
+test("the panel lists every page's comments, this page first, and searches them all", async ({
+  page,
+}) => {
+  const project = projectId()
+  const stamp = Date.now()
+  await page.goto(`/?project=${project}`)
+  await root(page)
+    .locator(".toolbar")
+    .getByRole("button", { name: "Add a comment" })
+    .click()
+  await page.locator(".lead").click()
+  const composer = root(page).locator('[data-card="composer"]')
+  await composer.getByPlaceholder("Your name").fill("Sam Visitor")
+  await composer.getByPlaceholder("Leave a comment").fill(`Home note ${stamp}`)
+  await composer.getByRole("button", { name: "Post" }).click()
+  await expect(root(page).locator(".toast")).toHaveText("Comment added")
+  await page.goto(`/pricing?project=${project}`)
+  await addComment(page, 0, `Starter note ${stamp}`)
+  await addComment(page, 1, `Pro note ${stamp}`)
+
+  await openPanel(page)
+  const list = panel(page).getByRole("tabpanel")
+  const sections = list.locator(".section-label")
+  await expect(panel(page).getByRole("tab", { name: "Open (3)" })).toBeVisible()
+  await expect(sections).toHaveText(["This page", "/"])
+  await expect(list.locator(".item")).toHaveCount(3)
+  // Comments here open in place; the one on another page is a link there.
+  await expect(items(page)).toHaveCount(2)
+  const home = list.getByRole("link", { name: /Home note/ })
+  await expect(home).toBeVisible()
+
+  // Search looks through every page.
+  const search = panel(page).getByRole("searchbox", { name: "Search comments" })
+  await search.fill("home note")
+  await expect(list.locator(".item")).toHaveCount(1)
+  await expect(sections).toHaveText(["/"])
+  await search.fill("note")
+  await expect(list.locator(".item")).toHaveCount(3)
+  await search.fill("")
+
+  // Opening it goes to that page, with the comment open.
+  await home.click()
+  await expect(page).toHaveURL(/127\.0\.0\.1:5173\/\?project=/)
+  await expect(root(page).locator('[data-card="thread"]')).toContainText(
+    `Home note ${stamp}`
+  )
+  await openPanel(page)
+  await expect(sections).toHaveText(["This page", "/pricing"])
+  await expect(list.getByRole("link", { name: /Pro note/ })).toBeVisible()
+})
