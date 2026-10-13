@@ -2803,7 +2803,7 @@ export class NuniWidget {
         )
       }
       for (const [path, comments] of groups) {
-        children.push(h("div", { class: "section-label" }, path))
+        children.push(h("div", { class: "section-label section-path" }, path))
         children.push(...comments.map((c) => item(c, commentHref(c, location))))
       }
       if (!children.length && !otherPages.length) {
