@@ -78,6 +78,8 @@ Using React? Use [`@nuniapp/react`](https://www.npmjs.com/package/@nuniapp/react
 
 - Press **C** (or the Comment button), click any element and write your comment. Select text to comment on the words, or drag a box to comment on an area.
 - Everything works from the keyboard: while adding, the arrow keys move between elements and Enter comments.
+- Press **Shift+C** (Shift and the `hotkey`; or the eye button) to hide the pins and see the page clean. Adding a comment or opening one shows them again.
+- The comments list shows this page first, then every other page's comments grouped under its path. Search looks through all of them, and a comment on another page opens there.
 - Pins follow their element through layout changes, responsive breakpoints and content edits. If an element is removed, its comment is listed as "Couldn't find on this page" instead of pinned to the wrong thing.
 - Your name is remembered in this browser. You can edit and delete your own comments.
 - The site owner claims the project from the widget ("Claim Nuni", GitHub sign-in) and can then resolve, reopen and delete comments.

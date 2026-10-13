@@ -255,6 +255,32 @@ export const listMine = query({
   },
 })
 
+/**
+ * Comments on every page (all origins), newest first, for the widget's
+ * panel. Like `listForPage`: open ones, then the most recently resolved.
+ */
+export const listForSite = query({
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const project = await projectByPublicId(ctx, publicId)
+    if (!project) return []
+    const byStatus = (status: "open" | "resolved", limit: number) =>
+      ctx.db
+        .query("comments")
+        .withIndex("by_project_status", (q) =>
+          q.eq("projectId", project._id).eq("status", status)
+        )
+        .order("desc")
+        .take(limit)
+    const [open, resolved] = await Promise.all([
+      byStatus("open", LIMITS.siteOpenLimit),
+      byStatus("resolved", LIMITS.siteResolvedLimit),
+    ])
+    const author = authorLookup(ctx)
+    return Promise.all([...open, ...resolved].map((c) => toPublic(c, author)))
+  },
+})
+
 /** Pages with open comments, for the widget list. Reads maintained counts. */
 export const pagesWithComments = query({
   args: { publicId: v.string() },

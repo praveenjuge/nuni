@@ -110,6 +110,9 @@ button { cursor: pointer; }
   justify-content: center;
 }
 .tb-btn[aria-pressed="true"] .tb-count { background: rgba(255,255,255,0.25); color: inherit; }
+.tb-icon { width: 36px; padding: 0; justify-content: center; }
+/* Pins hidden: the count stays, dimmed, so the comments aren't lost. */
+.toolbar[data-pins-hidden] .tb-count { opacity: 0.55; }
 
 /* Picking */
 .pick-hint {
@@ -743,6 +746,8 @@ textarea.field { resize: vertical; min-height: 72px; max-height: 240px; }
 .panel-search .field { padding-left: 32px; }
 .item-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
 .section-label { padding: 12px 10px 4px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--n-fg-muted); }
+/* A page's path, as written: paths are case-sensitive. */
+.section-path { text-transform: none; letter-spacing: 0; font-size: 12px; overflow-wrap: anywhere; }
 .empty { padding: 32px 16px; text-align: center; color: var(--n-fg-muted); }
 .panel-foot { padding: 12px; border-top: 1px solid var(--n-border); display: grid; gap: 8px; font-size: 13px; }
 .link { border: 0; background: none; padding: 0; color: var(--n-accent); font-weight: 600; text-decoration: none; }

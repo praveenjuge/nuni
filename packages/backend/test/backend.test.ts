@@ -40,6 +40,33 @@ describe("widget comments", () => {
     ])
   })
 
+  it("lists comments on every page, open first, for the panel", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId, { body: "Pricing one" })
+    await addComment(t, publicId, { path: "/about", body: "About one" })
+    const id = await addComment(t, publicId, {
+      path: "/docs",
+      body: "Docs one",
+    })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await alice.mutation(api.projects.claim, { publicId })
+    await alice.mutation(api.comments.resolve, { id })
+
+    const site = await t.query(api.comments.listForSite, { publicId })
+    expect(site.map((c) => [c.body, c.page.path, c.status])).toEqual([
+      ["About one", "/about", "open"],
+      ["Pricing one", "/pricing", "open"],
+      ["Docs one", "/docs", "resolved"],
+    ])
+    expect(site[0]).not.toHaveProperty("userAgent")
+    expect(
+      await t.query(api.comments.listForSite, {
+        publicId: generateProjectId(),
+      })
+    ).toEqual([])
+  })
+
   it("rejects invalid project ids and empty bodies", async () => {
     const t = setup()
     await expect(addComment(t, "nuni_nope")).rejects.toThrow()

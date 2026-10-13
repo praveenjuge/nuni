@@ -298,11 +298,16 @@ export class NuniWidget {
   private pages: PageSummary[] = []
 
   private picking = false
+  /** The visitor hid the pins (Shift+C); remembered for this project. */
+  private pinsHidden: boolean
   private panelOpen = false
   private tab: PanelTab = "open"
   /** The visitor's own comments on every page; loaded once the panel opens. */
   private mine: WidgetComment[] | null = null
   private mineUnsub: (() => void) | null = null
+  /** Comments on every page, grouped in the panel; loaded once it opens. */
+  private site: WidgetComment[] | null = null
+  private siteUnsub: (() => void) | null = null
   /** The comment whose pin the owner is moving, while picking. */
   private repinId: string | null = null
   /** Lost (true) or found (false), as last reported in this page view. */
@@ -407,6 +412,7 @@ export class NuniWidget {
     this.ownerToken = read(KEYS.session(config.project))
     this.commenterToken = read(KEYS.commenter(config.project))
     this.lastViewedId = read(KEYS.lastViewed(config.project))
+    this.pinsHidden = read(KEYS.hidden(config.project)) === "1"
     this.position = oneOf(
       read(KEYS.position(config.project)) ?? undefined,
       POSITIONS,
@@ -598,6 +604,7 @@ export class NuniWidget {
     this.ownerDetailUnsub?.()
     this.threadUnsub?.()
     this.mineUnsub?.()
+    this.siteUnsub?.()
     clearTimeout(this.pinReportTimer)
     this.resolveRun++
     for (const stop of this.scopeWatchers.values()) stop()
@@ -789,12 +796,29 @@ export class NuniWidget {
     return this.ownsKey(comment.authorKeyHash)
   }
 
+  /** The open thread keeps its pin while the rest are hidden. */
   private visibleComments() {
     return this.comments.filter(
       (c) =>
-        c.status ===
-          (this.panelOpen && this.tab === "resolved" ? "resolved" : "open") ||
+        (!this.pinsHidden &&
+          c.status ===
+            (this.panelOpen && this.tab === "resolved"
+              ? "resolved"
+              : "open")) ||
         (this.card?.kind === "thread" && this.card.id === c._id)
+    )
+  }
+
+  /** Hide or show the pins, like Figma's Shift+C. */
+  private setPinsHidden(hidden: boolean, quiet = false) {
+    if (this.pinsHidden === hidden) return
+    this.pinsHidden = hidden
+    write(KEYS.hidden(this.config.project), hidden ? "1" : null)
+    if (quiet) return
+    this.showToast(
+      hidden
+        ? this.withKey("commentsHidden", "commentsHiddenKey")
+        : this.t("commentsShown")
     )
   }
 
@@ -1109,6 +1133,8 @@ export class NuniWidget {
     this.dragBox = null
     if (on) {
       this.card = null
+      // Adding a comment shows the others again, like Figma.
+      this.setPinsHidden(false, true)
       if (window.matchMedia(MOBILE_QUERY).matches) this.panelOpen = false
       // The page and its same-origin iframes: anything in them can be picked.
       this.pickDocs = [document, ...frameDocuments(document)]
@@ -1324,6 +1350,8 @@ export class NuniWidget {
       void this.movePin(repinId, draft)
       return
     }
+    // A comment on selected text skips picking, so show the pins here too.
+    this.setPinsHidden(false, true)
     if (this.config.capture.dom) {
       try {
         draft.dom = domContext(element)
@@ -1575,8 +1603,11 @@ export class NuniWidget {
     const hotkey = this.config.hotkey
     if (hotkey && e.key.toLowerCase() === hotkey) {
       e.preventDefault()
+      // Shift and a letter hotkey hides or shows the pins.
+      if (e.shiftKey && hotkey !== hotkey.toUpperCase())
+        this.setPinsHidden(!this.pinsHidden)
       // Selected text on the page: comment on those words.
-      if (!this.picking && this.pageSelection()) this.commentOnSelection()
+      else if (!this.picking && this.pageSelection()) this.commentOnSelection()
       else this.setPicking(!this.picking)
     }
   }
@@ -2258,6 +2289,12 @@ export class NuniWidget {
     if (open === this.panelOpen) return
     this.panelOpen = open
     if (open) this.syncMine()
+    if (open && !this.siteUnsub) {
+      this.siteUnsub = this.api.onSite((site) => {
+        this.site = site
+        this.render()
+      })
+    }
     if (open) {
       this.keepFocus()
       this.focusNext = '.panel [role="tab"][aria-selected="true"]'
@@ -2432,6 +2469,7 @@ export class NuniWidget {
         role: "toolbar",
         "aria-label": this.t("toolbar"),
         "data-dragging": !!drag,
+        "data-pins-hidden": this.pinsHidden,
         style: drag && `transform: translate(${drag.dx}px, ${drag.dy}px)`,
         onpointerdown: (e: Event) => this.startToolbarDrag(e as PointerEvent),
       },
@@ -2470,6 +2508,19 @@ export class NuniWidget {
         },
         icon(ICONS.list),
         h("span", { class: "tb-count" }, String(open))
+      ),
+      h(
+        "button",
+        {
+          class: "tb-btn tb-icon",
+          type: "button",
+          "aria-pressed": String(this.pinsHidden),
+          "data-focus-key": "tb-hide",
+          "aria-label": this.t("hideComments"),
+          title: this.withKey("hideComments", "hideCommentsKey"),
+          onclick: () => this.setPinsHidden(!this.pinsHidden),
+        },
+        icon(this.pinsHidden ? ICONS.eyeOff : ICONS.eye)
       )
     )
   }
@@ -2582,13 +2633,41 @@ export class NuniWidget {
         c.authorName,
         c.anchor.quote?.exact,
         c.suggestion?.after,
-        this.tab === "mine" ? c.page.path : undefined
+        c.page.path
       )
     )
     const placed = list.filter((c) => this.placements.get(c._id)?.element)
     const lost = list.filter((c) => !this.placements.get(c._id)?.element)
+    // Other pages' comments, grouped by page, newest page first.
+    const elsewhere = (this.site ?? []).filter(
+      (c) => c.page.path !== this.pageKey
+    )
+    const elsewhereOf = (status: WidgetComment["status"]) =>
+      elsewhere.filter((c) => c.status === status)
+    const groups = new Map<string, WidgetComment[]>()
+    for (const c of elsewhereOf(
+      this.tab === "resolved" ? "resolved" : "open"
+    )) {
+      if (
+        !matches(
+          c.body,
+          c.authorName,
+          c.anchor.quote?.exact,
+          c.suggestion?.after,
+          c.page.path
+        )
+      )
+        continue
+      groups.set(c.page.path, [...(groups.get(c.page.path) ?? []), c])
+    }
+    // Pages past the newest comments listed (or before they load): a link.
+    const listed = new Set(
+      elsewhereOf(this.tab === "resolved" ? "resolved" : "open").map(
+        (c) => c.page.path
+      )
+    )
     const otherPages = this.pages.filter(
-      (p) => p.path !== this.pageKey && matches(p.path)
+      (p) => p.path !== this.pageKey && !listed.has(p.path) && matches(p.path)
     )
 
     const content = (c: WidgetComment) => [
@@ -2645,15 +2724,17 @@ export class NuniWidget {
       )
     }
 
-    const item = (c: WidgetComment) =>
+    // A comment here opens in place; one on another page links there.
+    const item = (c: WidgetComment, href?: string | null) =>
       h(
-        "button",
+        href === undefined ? "button" : href === null ? "div" : "a",
         {
           class: "item",
-          type: "button",
           "aria-current": c._id === this.lastViewedId ? "true" : null,
           "data-focus-key": `item-${c._id}`,
-          onclick: () => this.focusComment(c._id),
+          ...(href === undefined
+            ? { type: "button", onclick: () => this.focusComment(c._id) }
+            : { href }),
         },
         h(
           "div",
@@ -2700,31 +2781,43 @@ export class NuniWidget {
       }
     } else if (!this.loaded) {
       children.push(h("div", { class: "empty" }, this.t("loading")))
-    } else if (!list.length && query) {
-      children.push(
-        h(
-          "div",
-          { class: "empty" },
-          this.t("noMatches", { query: this.search.trim() })
-        )
-      )
-    } else if (!list.length) {
-      children.push(
-        h(
-          "div",
-          { class: "empty" },
-          this.tab === "open"
-            ? this.withKey("noOpen", "noOpenKey")
-            : this.t("noResolved")
-        )
-      )
     } else {
-      children.push(...placed.map(item))
-      if (lost.length) {
+      // This page first, then every other page with its comments.
+      const others = groups.size > 0 || otherPages.length > 0
+      if (others && (list.length || !query)) {
+        children.push(h("div", { class: "section-label" }, this.t("thisPage")))
+      }
+      if (list.length) {
+        children.push(...placed.map((c) => item(c)))
+        if (lost.length) {
+          children.push(
+            h("div", { class: "section-label" }, this.t("notFoundHere"))
+          )
+          children.push(...lost.map((c) => item(c)))
+        }
+      } else if (!query) {
         children.push(
-          h("div", { class: "section-label" }, this.t("notFoundHere"))
+          h(
+            "div",
+            { class: "empty" },
+            this.tab === "open"
+              ? this.withKey("noOpen", "noOpenKey")
+              : this.t("noResolved")
+          )
         )
-        children.push(...lost.map(item))
+      }
+      for (const [path, comments] of groups) {
+        children.push(h("div", { class: "section-label section-path" }, path))
+        children.push(...comments.map((c) => item(c, commentHref(c, location))))
+      }
+      if (!children.length && !otherPages.length) {
+        children.push(
+          h(
+            "div",
+            { class: "empty" },
+            this.t("noMatches", { query: this.search.trim() })
+          )
+        )
       }
     }
     if (otherPages.length && this.tab !== "mine") {
@@ -2769,7 +2862,7 @@ export class NuniWidget {
           icon(ICONS.close)
         )
       ),
-      this.comments.length || this.mine?.length
+      this.comments.length || this.mine?.length || this.site?.length
         ? h(
             "div",
             { class: "panel-search" },
@@ -2836,9 +2929,13 @@ export class NuniWidget {
               },
             },
             tab === "open"
-              ? this.t("tabOpen", { count: open.length })
+              ? this.t("tabOpen", {
+                  count: open.length + elsewhereOf("open").length,
+                })
               : tab === "resolved"
-                ? this.t("tabResolved", { count: resolved.length })
+                ? this.t("tabResolved", {
+                    count: resolved.length + elsewhereOf("resolved").length,
+                  })
                 : this.mine
                   ? this.t("tabYours", { count: this.mine.length })
                   : this.t("yours")

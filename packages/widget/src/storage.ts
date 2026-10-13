@@ -29,4 +29,6 @@ export const KEYS = {
   position: (project: string) => `nuni:position:${project}`,
   /** The comment this visitor opened last, marked in the panel. */
   lastViewed: (project: string) => `nuni:last-viewed:${project}`,
+  /** This visitor hid the pins (Shift+C). */
+  hidden: (project: string) => `nuni:hidden:${project}`,
 } as const
