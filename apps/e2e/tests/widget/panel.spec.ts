@@ -151,6 +151,9 @@ test("the panel lists every page's comments, this page first, and searches them 
   await expect(sections).toHaveText(["/"])
   await search.fill("note")
   await expect(list.locator(".item")).toHaveCount(3)
+  // A page's path finds its comments, this page's too.
+  await search.fill("/pricing")
+  await expect(list.locator(".item")).toHaveCount(2)
   await search.fill("")
 
   // Opening it goes to that page, with the comment open.

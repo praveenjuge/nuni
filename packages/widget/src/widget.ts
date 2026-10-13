@@ -2633,7 +2633,7 @@ export class NuniWidget {
         c.authorName,
         c.anchor.quote?.exact,
         c.suggestion?.after,
-        this.tab === "mine" ? c.page.path : undefined
+        c.page.path
       )
     )
     const placed = list.filter((c) => this.placements.get(c._id)?.element)
