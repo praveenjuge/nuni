@@ -114,6 +114,7 @@ test("Yours lists your comments on every page and opens them", async ({
 
 test("the panel lists every page's comments, this page first, and searches them all", async ({
   page,
+  browser,
 }) => {
   const project = projectId()
   const stamp = Date.now()
@@ -161,4 +162,24 @@ test("the panel lists every page's comments, this page first, and searches them 
   await openPanel(page)
   await expect(sections).toHaveText(["This page", "/pricing"])
   await expect(list.getByRole("link", { name: /Pro note/ })).toBeVisible()
+
+  // A new visitor on a page with no comments still sees, and searches, the
+  // others.
+  const other = await browser.newContext()
+  const visitor = await other.newPage()
+  await visitor.goto(`/tasks?project=${project}`)
+  await openPanel(visitor)
+  const theirs = panel(visitor).getByRole("tabpanel")
+  await expect(theirs.locator(".section-label")).toHaveText([
+    "This page",
+    "/pricing",
+    "/",
+  ])
+  await expect(theirs).toContainText("No open comments on this page.")
+  await panel(visitor)
+    .getByRole("searchbox", { name: "Search comments" })
+    .fill("starter")
+  await expect(theirs.locator(".item")).toHaveCount(1)
+  await expect(theirs.locator(".section-label")).toHaveText(["/pricing"])
+  await other.close()
 })

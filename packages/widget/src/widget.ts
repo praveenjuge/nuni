@@ -2661,7 +2661,11 @@ export class NuniWidget {
       groups.set(c.page.path, [...(groups.get(c.page.path) ?? []), c])
     }
     // Pages past the newest comments listed (or before they load): a link.
-    const listed = new Set(elsewhere.map((c) => c.page.path))
+    const listed = new Set(
+      elsewhereOf(this.tab === "resolved" ? "resolved" : "open").map(
+        (c) => c.page.path
+      )
+    )
     const otherPages = this.pages.filter(
       (p) => p.path !== this.pageKey && !listed.has(p.path) && matches(p.path)
     )
@@ -2858,7 +2862,7 @@ export class NuniWidget {
           icon(ICONS.close)
         )
       ),
-      this.comments.length || this.mine?.length
+      this.comments.length || this.mine?.length || this.site?.length
         ? h(
             "div",
             { class: "panel-search" },
