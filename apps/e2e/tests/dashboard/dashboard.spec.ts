@@ -97,7 +97,7 @@ test("triage comments: reply, undo, bulk resolve and delete", async ({
   await expect(ownerPage.getByText(second, { exact: true })).toHaveCount(0)
 })
 
-test("rename, allow another origin, and delete a project", async ({
+test("rename, add and remove a site, and delete a project", async ({
   ownerPage,
   projectId,
 }) => {
@@ -113,11 +113,25 @@ test("rename, allow another origin, and delete a project", async ({
       .getByText("staging.example.com", { exact: true })
   ).toBeVisible()
   await ownerPage.reload()
+  const sites = ownerPage.getByRole("list", { name: "Sites" })
   await expect(
-    ownerPage
-      .getByRole("list", { name: "Sites" })
-      .getByText("staging.example.com", { exact: true })
+    sites.getByText("staging.example.com", { exact: true })
   ).toBeVisible()
+  await sites
+    .getByRole("button", { name: "Remove staging.example.com", exact: true })
+    .click()
+  await ownerPage
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Remove site", exact: true })
+    .click()
+  await expect(
+    sites.getByText("staging.example.com", { exact: true })
+  ).toHaveCount(0)
+  await ownerPage.reload()
+  await expect(sites.getByRole("listitem")).not.toHaveCount(0)
+  await expect(
+    sites.getByText("staging.example.com", { exact: true })
+  ).toHaveCount(0)
   const name = `Review ${projectId}`
   await ownerPage.getByRole("textbox", { name: "Project name" }).fill(name)
   await ownerPage.getByRole("button", { name: "Save", exact: true }).click()

@@ -693,6 +693,80 @@ describe("claiming and owner actions", () => {
     ).toBe(true)
   })
 
+  it("lets only the owner remove origins, signing out sessions made there", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    await addComment(t, publicId) // registers http://localhost:3000
+    const alice = await signIn(t, "user_alice", "Alice")
+    const bob = await signIn(t, "user_bob", "Bob")
+    await alice.mutation(api.projects.claim, { publicId })
+    const projectId = (await alice.query(api.projects.getMine, { publicId }))!
+      ._id
+    await alice.mutation(api.projects.addOrigin, {
+      projectId,
+      origin: "https://staging.example.com",
+    })
+    const { token: staging } = await alice.mutation(api.sessions.create, {
+      publicId,
+      origin: "https://staging.example.com",
+    })
+    const { token: local } = await alice.mutation(api.sessions.create, {
+      publicId,
+      origin: "http://localhost:3000",
+    })
+    const { token: commenter } = await bob.mutation(api.commenters.create, {
+      publicId,
+      origin: "https://staging.example.com",
+    })
+
+    await expect(
+      bob.mutation(api.projects.removeOrigin, {
+        projectId,
+        origin: "https://staging.example.com",
+      })
+    ).rejects.toThrow()
+    await alice.mutation(api.projects.removeOrigin, {
+      projectId,
+      origin: "https://staging.example.com/",
+    })
+    // Removing one that isn't there is a no-op.
+    await alice.mutation(api.projects.removeOrigin, {
+      projectId,
+      origin: "https://staging.example.com",
+    })
+    const project = await alice.query(api.projects.getMine, { publicId })
+    expect(project?.origins).toEqual(["http://localhost:3000"])
+
+    // Sign-ins made on the removed site are gone; others stay.
+    expect(
+      (
+        await t.query(api.sessions.validate, {
+          publicId,
+          sessionToken: staging,
+        })
+      ).valid
+    ).toBe(false)
+    expect(
+      (await t.query(api.sessions.validate, { publicId, sessionToken: local }))
+        .valid
+    ).toBe(true)
+    expect(
+      (
+        await t.query(api.commenters.validate, {
+          publicId,
+          commenterToken: commenter,
+        })
+      ).valid
+    ).toBe(false)
+    // And no new owner session can be minted there.
+    await expect(
+      alice.mutation(api.sessions.create, {
+        publicId,
+        origin: "https://staging.example.com",
+      })
+    ).rejects.toThrow(/not registered/)
+  })
+
   it("expires widget sessions", async () => {
     const t = setup()
     const publicId = generateProjectId()
