@@ -153,6 +153,32 @@ export const addOrigin = mutation({
   },
 })
 
+/**
+ * Stop treating a site as the project's. Owner and commenter sign-ins made
+ * on it are signed out. Its comments stay, and the widget there still loads,
+ * but owner tools need the site added again.
+ */
+export const removeOrigin = mutation({
+  args: { projectId: v.id("projects"), origin: v.string() },
+  handler: async (ctx, { projectId, origin }) => {
+    const { project } = await requireDashboardOwner(ctx, projectId)
+    const clean = parseOrigin(origin)
+    if (!project.origins.includes(clean)) return
+    await ctx.db.patch(projectId, {
+      origins: project.origins.filter((o) => o !== clean),
+    })
+    for (const table of ["widgetSessions", "commenterSessions"] as const) {
+      const sessions = await ctx.db
+        .query(table)
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .collect()
+      for (const session of sessions) {
+        if (session.origin === clean) await ctx.db.delete(session._id)
+      }
+    }
+  },
+})
+
 export const rename = mutation({
   args: { projectId: v.id("projects"), name: v.string() },
   handler: async (ctx, { projectId, name }) => {

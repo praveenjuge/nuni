@@ -11,6 +11,7 @@ import {
   TerminalIcon,
   Trash2Icon,
   UnlinkIcon,
+  XIcon,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useState, type ReactNode } from "react"
@@ -192,38 +193,52 @@ function GeneralSection({ project }: { project: Doc<"projects"> }) {
 
 function SitesSection({ project }: { project: Doc<"projects"> }) {
   const addOrigin = useMutation(api.projects.addOrigin)
+  const removeOrigin = useMutation(api.projects.removeOrigin)
   const [value, setValue] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [removing, setRemoving] = useState<string | null>(null)
   return (
     <Section
       title="Sites"
       description="Where you can resolve and reply from the widget. Add staging or production once it's deployed."
     >
-      <ul
-        aria-label="Sites"
-        className="grid divide-y rounded-2xl ring-1 ring-foreground/10"
-      >
-        {project.origins.map((origin) => (
-          <li
-            key={origin}
-            className="flex items-center gap-3 px-3 py-2.5 text-sm"
-          >
-            <GlobeIcon
-              className="size-4 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <a
-              href={origin}
-              target="_blank"
-              rel="noreferrer"
-              className="min-w-0 truncate hover:underline"
+      {project.origins.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No sites yet.</p>
+      ) : (
+        <ul
+          aria-label="Sites"
+          className="grid divide-y rounded-2xl ring-1 ring-foreground/10"
+        >
+          {project.origins.map((origin) => (
+            <li
+              key={origin}
+              className="flex items-center gap-3 px-3 py-2.5 text-sm"
             >
-              {hostOf(origin)}
-            </a>
-          </li>
-        ))}
-      </ul>
+              <GlobeIcon
+                className="size-4 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <a
+                href={origin}
+                target="_blank"
+                rel="noreferrer"
+                className="min-w-0 flex-1 truncate hover:underline"
+              >
+                {hostOf(origin)}
+              </a>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Remove ${hostOf(origin)}`}
+                onClick={() => setRemoving(origin)}
+              >
+                <XIcon />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
       <form
         className="grid gap-2"
         onSubmit={async (e) => {
@@ -259,6 +274,21 @@ function SitesSection({ project }: { project: Doc<"projects"> }) {
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
       </form>
+      <ConfirmDialog
+        open={removing !== null}
+        onOpenChange={(open) => !open && setRemoving(null)}
+        title={`Remove ${removing ? hostOf(removing) : "site"}?`}
+        description="Its comments stay. Owners and commenters signed in there are signed out, and owner tools stop working on it until you add it again."
+        action="Remove site"
+        destructive
+        onConfirm={() => {
+          if (!removing) return
+          setError(null)
+          removeOrigin({ projectId: project._id, origin: removing }).catch(
+            (err) => setError(errorMessage(err))
+          )
+        }}
+      />
     </Section>
   )
 }
