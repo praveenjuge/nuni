@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckIcon, CopyIcon } from "lucide-react"
+import { CheckIcon, CopyIcon } from "vadivam-react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"

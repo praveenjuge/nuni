@@ -3,11 +3,11 @@
 import { api } from "@nuni/backend/api"
 import { useMutation, useQuery } from "convex/react"
 import {
-  CheckCircle2Icon,
+  CircleCheckIcon,
   TerminalIcon,
   TriangleAlertIcon,
-  XCircleIcon,
-} from "lucide-react"
+  CircleXIcon,
+} from "vadivam-react"
 import { useState } from "react"
 
 import { FlowShell } from "@/components/flow-shell"
@@ -61,7 +61,7 @@ export function CliApprove({ code }: { code: string }) {
           <>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <CheckCircle2Icon className="size-5 text-primary" /> Terminal
+                <CircleCheckIcon className="size-5 text-primary" /> Terminal
                 signed in
               </CardTitle>
               <CardDescription>
@@ -81,7 +81,7 @@ export function CliApprove({ code }: { code: string }) {
         ) : done?.step === "denied" ? (
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <XCircleIcon className="size-5 text-muted-foreground" /> Denied
+              <CircleXIcon className="size-5 text-muted-foreground" /> Denied
             </CardTitle>
             <CardDescription>The terminal was not signed in.</CardDescription>
           </CardHeader>

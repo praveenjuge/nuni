@@ -14,6 +14,9 @@ test("claimed projects and widget comments appear and resolve live", async ({
   await expect(project).toContainText("1 open")
   await expect(project).toContainText("1 comment")
   await project.click()
+  // Dashboard icons come from Vadivam.
+  await expect(ownerPage.locator("svg.vadivam-chevron-left")).toBeVisible()
+  await expect(ownerPage.locator("svg.lucide")).toHaveCount(0)
   const detail = ownerPage.getByRole("article", { name: "Selected comment" })
   await expect(detail.getByText(body, { exact: true })).toBeVisible()
   await detail.getByRole("button", { name: "Resolve", exact: true }).click()

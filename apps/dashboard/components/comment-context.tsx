@@ -1,7 +1,7 @@
 "use client"
 
 import type { CommentContext as Context } from "@nuni/shared"
-import { ChevronRightIcon } from "lucide-react"
+import { ChevronRightIcon } from "vadivam-react"
 import type { ReactNode } from "react"
 
 import {

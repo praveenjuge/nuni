@@ -1,5 +1,5 @@
 import type { Doc } from "@nuni/backend/dataModel"
-import { ArrowUpRightIcon, ChevronLeftIcon } from "lucide-react"
+import { ArrowUpRightIcon, ChevronLeftIcon } from "vadivam-react"
 import Link from "next/link"
 import type { ReactNode } from "react"
 

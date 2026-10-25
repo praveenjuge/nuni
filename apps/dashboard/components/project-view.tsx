@@ -11,9 +11,9 @@ import {
   MessageSquareIcon,
   RotateCcwIcon,
   SearchIcon,
-  Trash2Icon,
+  TrashIcon,
   XIcon,
-} from "lucide-react"
+} from "vadivam-react"
 import Link from "next/link"
 import {
   useEffect,
@@ -433,7 +433,7 @@ function CommentList({
                     aria-label="Delete selected"
                     onClick={() => setConfirmBulkDelete(true)}
                   >
-                    <Trash2Icon />
+                    <TrashIcon />
                   </Button>
                   <Button
                     size="icon-sm"

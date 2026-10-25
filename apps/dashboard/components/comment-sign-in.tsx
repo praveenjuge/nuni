@@ -2,7 +2,7 @@
 
 import { api } from "@nuni/backend/api"
 import { useAction, useMutation, useQuery } from "convex/react"
-import { CheckCircle2Icon } from "lucide-react"
+import { CircleCheckIcon } from "vadivam-react"
 import { useEffect, useState } from "react"
 
 import { FlowShell } from "@/components/flow-shell"
@@ -119,7 +119,7 @@ export function CommentSignIn({
         {result?.step === "done" && (
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <CheckCircle2Icon className="size-5 text-primary" /> You&apos;re
+              <CircleCheckIcon className="size-5 text-primary" /> You&apos;re
               signed in
             </CardTitle>
             <CardDescription>

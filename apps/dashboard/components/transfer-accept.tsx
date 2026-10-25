@@ -2,7 +2,7 @@
 
 import { api } from "@nuni/backend/api"
 import { useMutation, useQuery } from "convex/react"
-import { ArrowRightLeftIcon } from "lucide-react"
+import { ArrowRightLeftIcon } from "vadivam-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
