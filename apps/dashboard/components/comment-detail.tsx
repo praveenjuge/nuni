@@ -11,8 +11,8 @@ import {
   ExternalLinkIcon,
   EllipsisIcon,
   RotateCcwIcon,
-  Trash2Icon,
-} from "lucide-react"
+  TrashIcon,
+} from "vadivam-react"
 import Image from "next/image"
 import { useState } from "react"
 import { toast } from "sonner"
@@ -178,7 +178,7 @@ export function CommentDetail({
                 variant="destructive"
                 onClick={() => setConfirmDelete(true)}
               >
-                <Trash2Icon /> Delete comment
+                <TrashIcon /> Delete comment
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

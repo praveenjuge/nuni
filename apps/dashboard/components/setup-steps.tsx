@@ -1,7 +1,7 @@
 "use client"
 
 import { buildAgentPrompt, DOCS_URL, generateProjectId } from "@nuni/shared"
-import { PlusIcon } from "lucide-react"
+import { PlusIcon } from "vadivam-react"
 import { useState, type ReactNode } from "react"
 
 import { CopyButton } from "@/components/copy-button"

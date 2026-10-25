@@ -9,10 +9,10 @@ import {
   LinkIcon,
   PlusIcon,
   TerminalIcon,
-  Trash2Icon,
+  TrashIcon,
   UnlinkIcon,
   XIcon,
-} from "lucide-react"
+} from "vadivam-react"
 import { useRouter } from "next/navigation"
 import { useState, type ReactNode } from "react"
 
@@ -515,7 +515,7 @@ function DangerSection({ project }: { project: Doc<"projects"> }) {
             setDeleting(true)
           }}
         >
-          <Trash2Icon /> Delete project
+          <TrashIcon /> Delete project
         </Button>
       </DangerRow>
       {error && <p className="text-xs text-destructive">{error}</p>}

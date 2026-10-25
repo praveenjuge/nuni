@@ -2,7 +2,7 @@
 
 import { api } from "@nuni/backend/api"
 import { useQuery } from "convex/react"
-import { ChevronRightIcon } from "lucide-react"
+import { ChevronRightIcon } from "vadivam-react"
 import Link from "next/link"
 
 import { NewProjectDialog, SetupSteps } from "@/components/setup-steps"

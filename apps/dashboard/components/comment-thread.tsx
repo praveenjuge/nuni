@@ -4,7 +4,7 @@ import { api } from "@nuni/backend/api"
 import type { Id } from "@nuni/backend/dataModel"
 import { LIMITS, type ReplyView } from "@nuni/shared"
 import { useMutation } from "convex/react"
-import { ArrowUpIcon, Trash2Icon } from "lucide-react"
+import { ArrowUpIcon, TrashIcon } from "vadivam-react"
 import { useState } from "react"
 
 import { ConfirmDialog } from "@/components/confirm-dialog"
@@ -76,7 +76,7 @@ export function CommentThread({
                     aria-label="Delete reply"
                     onClick={() => setDeleting(r._id)}
                   >
-                    <Trash2Icon />
+                    <TrashIcon />
                   </Button>
                 </div>
                 <p className="whitespace-pre-wrap">{r.body}</p>

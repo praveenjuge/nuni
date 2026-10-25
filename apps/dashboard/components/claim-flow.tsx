@@ -3,10 +3,10 @@
 import { api } from "@nuni/backend/api"
 import { useMutation, useQuery } from "convex/react"
 import {
-  CheckCircle2Icon,
+  CircleCheckIcon,
   ShieldCheckIcon,
   TriangleAlertIcon,
-} from "lucide-react"
+} from "vadivam-react"
 import { useState } from "react"
 
 import { FlowShell } from "@/components/flow-shell"
@@ -145,7 +145,7 @@ export function ClaimFlow({
           <>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <CheckCircle2Icon className="size-5 text-primary" /> All set
+                <CircleCheckIcon className="size-5 text-primary" /> All set
               </CardTitle>
               <CardDescription>
                 {view.handedOff
