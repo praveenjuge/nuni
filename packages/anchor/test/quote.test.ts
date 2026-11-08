@@ -4,10 +4,15 @@ import {
   captureAnchor,
   captureArea,
   captureSelection,
-  findQuote,
   resolveAnchor,
 } from "../src"
-import { captureQuote, quoteContainer, textMap, textOffset } from "../src/quote"
+import {
+  captureQuote,
+  findQuote,
+  quoteContainer,
+  textMap,
+  textOffset,
+} from "../src/quote"
 
 /** A Range over the nth copy of `words` inside `el`. */
 function select(el: Element, words: string, nth = 0): Range {

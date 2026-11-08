@@ -1,16 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
-  buildCssSelector,
-  buildPath,
   captureAnchor,
   elementText,
-  isStableClass,
-  isStableId,
   pickTarget,
   resolveAnchor,
   textSimilarity,
 } from "../src"
+import { buildCssSelector, buildPath } from "../src/selector"
+import { isStableClass, isStableId } from "../src/stable"
 
 describe("stability heuristics", () => {
   it.each([
@@ -94,14 +92,6 @@ describe("selectors", () => {
     const span = document.querySelector("span")!
     expect(document.querySelector(buildPath(span))).toBe(span)
   })
-
-  it("ignores attributes by prefix", () => {
-    const pro = document.querySelector('[data-testid="pro"]')!
-    const selector = buildCssSelector(pro, {
-      ignoreAttributePrefixes: ["data-testid"],
-    })
-    expect(selector).not.toContain("data-testid")
-  })
 })
 
 describe("pickTarget", () => {
@@ -124,7 +114,7 @@ describe("capture and resolve", () => {
       text: "Hello world",
       classes: ["lead"],
     })
-    const result = resolveAnchor(anchor, document)
+    const result = resolveAnchor(anchor)
     expect(result.element).toBe(el)
     expect(result.confidence).not.toBe("lost")
   })
@@ -133,14 +123,14 @@ describe("capture and resolve", () => {
     document.body.innerHTML = `<ul class="todo"><li class="item">A task</li><li class="item">B task</li><li class="item">C task</li></ul>`
     const anchor = captureAnchor(document.querySelectorAll("li")[1]!)
     document.body.innerHTML = `<ul class="todo"><li class="item">C task</li><li class="item">A task</li><li class="item">B task</li></ul>`
-    expect(resolveAnchor(anchor, document).element?.textContent).toBe("B task")
+    expect(resolveAnchor(anchor).element?.textContent).toBe("B task")
   })
 
   it("reports lost instead of guessing when the item is deleted", () => {
     document.body.innerHTML = `<ul class="todo"><li class="item">Write docs</li><li class="item">Fix login bug</li><li class="item">Plan launch</li></ul>`
     const anchor = captureAnchor(document.querySelectorAll("li")[1]!)
     document.body.innerHTML = `<ul class="todo"><li class="item">Write docs</li><li class="item">Plan launch</li></ul>`
-    const result = resolveAnchor(anchor, document)
+    const result = resolveAnchor(anchor)
     expect(result.element).toBeNull()
     expect(result.confidence).toBe("lost")
   })
@@ -150,7 +140,7 @@ describe("capture and resolve", () => {
     const target = document.querySelectorAll("button")[1]!
     const anchor = captureAnchor(target)
     target.remove()
-    const result = resolveAnchor(anchor, document, {
+    const result = resolveAnchor(anchor, {
       isIgnored: (el) => Boolean(el.closest("#nuni-root")),
     })
     expect(result.element).toBeNull()
@@ -194,14 +184,14 @@ describe("masked areas", () => {
     expect(masked.text).toBe("")
     expect(masked.attrs).toEqual({})
     expect(JSON.stringify(masked)).not.toContain("1,234")
-    expect(resolveAnchor(masked, document).element).toBe(secret)
+    expect(resolveAnchor(masked).element).toBe(secret)
   })
 
   it("keeps masked labels out of the selectors", () => {
     const refund = document.querySelectorAll("[data-nuni-mask] button")[1]!
     const anchor = captureAnchor(refund)
     expect(JSON.stringify(anchor)).not.toContain("1,234")
-    expect(resolveAnchor(anchor, document).element).toBe(refund)
+    expect(resolveAnchor(anchor).element).toBe(refund)
   })
 })
 
@@ -237,18 +227,18 @@ describe("shadow DOM", () => {
 
   it("finds the element again through its host, and not in another card", () => {
     const anchor = captureAnchor(button("Pro"))
-    expect(resolveAnchor(anchor, document).element).toBe(button("Pro"))
+    expect(resolveAnchor(anchor).element).toBe(button("Pro"))
 
     // A card inserted before: still the Pro card.
     const grid = document.querySelector(".grid")!
     grid.prepend(card("Free"))
-    expect(resolveAnchor(anchor, document).element).toBe(button("Pro"))
+    expect(resolveAnchor(anchor).element).toBe(button("Pro"))
 
     // The Pro card removed: lost, not the same-looking button elsewhere.
     document.querySelectorAll("plan-card").forEach((h) => {
       if (h.shadowRoot!.querySelector("h3")!.textContent === "Pro") h.remove()
     })
-    const lost = resolveAnchor(anchor, document)
+    const lost = resolveAnchor(anchor)
     expect(lost.element).toBeNull()
     expect(lost.confidence).toBe("lost")
   })

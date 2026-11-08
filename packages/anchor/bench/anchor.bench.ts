@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs"
+import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { build } from "tsdown"
 
 import { scenarios } from "./fixtures"
-import type * as Engine from "./entry-types"
+import type { Engine } from "./entry"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const MIN_CORRECT_RATE = 0.95
@@ -43,12 +43,18 @@ test.beforeAll(async () => {
     logLevel: "silent",
     deps: { alwaysBundle: [/.*/], onlyBundle: false },
   })
-  const { readFileSync, readdirSync } = await import("node:fs")
   const file = readdirSync(outDir).find((f) => f.startsWith("engine"))!
   bundle = readFileSync(join(outDir, file), "utf8")
 })
 
 const report: Record<string, unknown> = {}
+
+test.afterAll(() => {
+  writeFileSync(
+    join(here, "..", "bench-report.json"),
+    JSON.stringify(report, null, 2)
+  )
+})
 
 test("pin reliability benchmark", async ({ page }) => {
   test.setTimeout(120_000)
@@ -86,8 +92,7 @@ test("pin reliability benchmark", async ({ page }) => {
         const el = find(document)!
         el.scrollIntoView({ block: "center" })
         const r = el.getBoundingClientRect()
-        const api = (window as never as { NuniAnchor: typeof Engine })
-          .NuniAnchor
+        const api = (window as never as { NuniAnchor: Engine }).NuniAnchor
         if (quote) {
           // Select the nth copy of the words, the way a person would.
           const map = api.textMap(el)
@@ -99,15 +104,12 @@ test("pin reliability benchmark", async ({ page }) => {
           const end = at + quote.text.length - 1
           range.setStart(map.nodes[map.node[at]!]!, map.offset[at]!)
           range.setEnd(map.nodes[map.node[end]!]!, map.offset[end]! + 1)
-          return api.captureSelection(range, {
-            ignoreAttributePrefixes: ["data-bench"],
-          })!.anchor
+          return api.captureSelection(range)!.anchor
         }
-        return api.captureAnchor(
-          el,
-          { x: r.left + r.width / 2, y: r.top + r.height / 2 },
-          { ignoreAttributePrefixes: ["data-bench"] }
-        )
+        return api.captureAnchor(el, {
+          x: r.left + r.width / 2,
+          y: r.top + r.height / 2,
+        })
       },
       {
         scrollBefore: s.scrollBefore,
@@ -125,11 +127,8 @@ test("pin reliability benchmark", async ({ page }) => {
     const resolved = await page.evaluate(
       ({ anchor, scrollAfter, quote }) => {
         window.scrollTo(0, scrollAfter ?? 0)
-        const api = (window as never as { NuniAnchor: typeof Engine })
-          .NuniAnchor
-        const result = api.resolveAnchor(anchor, document, {
-          ignoreAttributePrefixes: ["data-bench"],
-        })
+        const api = (window as never as { NuniAnchor: Engine }).NuniAnchor
+        const result = api.resolveAnchor(anchor)
         // A text comment is right when the same words come back, in the
         // marked element, at the expected copy.
         let quoteCorrect = false
@@ -200,10 +199,6 @@ test("pin reliability benchmark", async ({ page }) => {
   report.rate = rate
   report.wrong = wrong
   report.results = results
-  writeFileSync(
-    join(here, "..", "bench-report.json"),
-    JSON.stringify(report, null, 2)
-  )
 
   expect(rate, "re-anchoring success rate").toBeGreaterThanOrEqual(
     MIN_CORRECT_RATE
@@ -234,41 +229,36 @@ test("large page performance", async ({ page }) => {
   )
   await page.addScriptTag({ content: bundle })
   const timing = await page.evaluate((pins) => {
-    const api = (window as never as { NuniAnchor: typeof Engine }).NuniAnchor
+    const api = (window as never as { NuniAnchor: Engine }).NuniAnchor
     const targets = Array.from(
       document.querySelectorAll("button, h3, li span, a")
     ).filter((_, i) => i % 13 === 0)
     const anchors = targets.slice(0, pins).map((el) => api.captureAnchor(el))
     const total = document.getElementsByTagName("*").length
-    const time = (cached: boolean) => {
-      const cache = cached ? api.createResolveCache() : undefined
+    const time = (shared: boolean) => {
+      const cache = shared ? api.createResolveCache() : undefined
       const start = performance.now()
       let correct = 0
       anchors.forEach((a, i) => {
-        if (api.resolveAnchor(a, document, {}, cache).element === targets[i])
-          correct++
+        if (api.resolveAnchor(a, { cache }).element === targets[i]) correct++
       })
       return { ms: Math.round(performance.now() - start), correct }
     }
     return {
       elements: total,
       pins: anchors.length,
-      uncached: time(false),
-      cached: time(true),
+      unshared: time(false),
+      shared: time(true),
     }
   }, PERF_PINS)
   console.log(
-    `Large page: ${timing.elements} elements, ${timing.pins} pins. Resolve all: ${timing.cached.ms} ms with the shared cache (${timing.uncached.ms} ms without).`
+    `Large page: ${timing.elements} elements, ${timing.pins} pins. Resolve all: ${timing.shared.ms} ms with one shared cache (${timing.unshared.ms} ms with one per pin).`
   )
   report.performance = { ...timing, budgetMs: PERF_BUDGET_MS }
-  writeFileSync(
-    join(here, "..", "bench-report.json"),
-    JSON.stringify(report, null, 2)
-  )
-  expect(timing.cached.correct, "pins found on the large page").toBe(
+  expect(timing.shared.correct, "pins found on the large page").toBe(
     timing.pins
   )
-  expect(timing.cached.ms, "time to resolve every pin").toBeLessThan(
+  expect(timing.shared.ms, "time to resolve every pin").toBeLessThan(
     PERF_BUDGET_MS
   )
 })

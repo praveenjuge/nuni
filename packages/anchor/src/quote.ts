@@ -2,7 +2,6 @@ import {
   LIMITS,
   MASK_ATTRIBUTE,
   MASK_SELECTOR,
-  type Anchor,
   type AnchorQuote,
 } from "@nuni/shared"
 
@@ -290,7 +289,6 @@ function findIn(
   const { text } = map
   if (!text) return null
 
-  // Every copy of the words; the context around them picks one.
   let best = -1
   let bestScore = -1
   for (let i = text.indexOf(exact); i >= 0; i = text.indexOf(exact, i + 1)) {
@@ -341,7 +339,6 @@ function closestSpan(
   let best: { start: number; end: number; score: number } | null = null
   let e = 0
   for (const start of starts) {
-    // Ends around start + length, from 70% to 130% of it.
     while (e < ends.length && ends[e]! <= start) e++
     for (let j = e; j < ends.length; j++) {
       const span = ends[j]! - start
@@ -352,12 +349,4 @@ function closestSpan(
     }
   }
   return best
-}
-
-/** Shorthand for the widget: the quote's range for a resolved anchor. */
-export function resolveQuote(
-  anchor: Anchor,
-  element: Element
-): QuoteMatch | null {
-  return anchor.quote ? findQuote(element, anchor.quote) : null
 }

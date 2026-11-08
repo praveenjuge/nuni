@@ -5,8 +5,8 @@
  * whether the engine finds the element marked `data-bench-target` there
  * (or correctly reports it as lost when it was removed).
  *
- * The engine is configured to ignore `data-bench-*` attributes, so the
- * markers are ground truth only.
+ * The engine never reads `data-bench-*` attributes (they are in none of
+ * its attribute lists), so the markers are ground truth only.
  */
 
 export interface Scenario {
