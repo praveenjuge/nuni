@@ -1,6 +1,7 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
+import { handoffMessage } from "@nuni/shared"
 import { useAction, useMutation, useQuery } from "convex/react"
 import { CircleCheckIcon } from "vadivam-react"
 import { useEffect, useState } from "react"
@@ -59,7 +60,7 @@ export function CommentSignIn({
       const opener = window.opener as Window | null
       if (opener && !opener.closed) {
         // The server checked that this origin belongs to the project.
-        opener.postMessage({ type: "nuni:commenter", project, token }, origin)
+        opener.postMessage(handoffMessage("commenter", project, token), origin)
         setResult({ step: "done", handedOff: true })
         setTimeout(() => window.close(), 1200)
       } else {

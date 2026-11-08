@@ -1,3 +1,5 @@
+import { errorMessage as messageOf } from "@nuni/shared"
+
 export function timeAgo(ts: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - ts) / 1000))
   if (s < 45) return "just now"
@@ -43,16 +45,9 @@ export function initials(name: string): string {
   return (parts[0] ?? "?").slice(0, 2).toUpperCase()
 }
 
-/** URL that opens the page with the comment focused by the widget. */
-export { commentUrl as jumpUrl } from "@nuni/shared"
-
 /** The message a Convex error carries, for showing to the person. */
 export function errorMessage(error: unknown): string {
-  const data = (error as { data?: { message?: string } })?.data
-  return (
-    data?.message ??
-    (error instanceof Error ? error.message : "Please try again.")
-  )
+  return messageOf(error, "Please try again.")
 }
 
 /** "in 6 days", "in 3 hours": time left until `ts`. */

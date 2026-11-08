@@ -1,6 +1,7 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
+import { dashboardPath, handoffMessage, projectRoute } from "@nuni/shared"
 import { useMutation, useQuery } from "convex/react"
 import {
   CircleCheckIcon,
@@ -19,7 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { useStoreUser } from "@/components/use-store-user"
-import { hostOf } from "@/lib/format"
+import { errorMessage, hostOf } from "@/lib/format"
 
 type Result =
   | { step: "done"; handedOff: boolean }
@@ -67,7 +68,7 @@ export function ClaimFlow({
         // targetOrigin only constrains which origin may receive the message;
         // the guarantee that this origin belongs to the project is enforced
         // server-side when the session is created.
-        opener.postMessage({ type: "nuni:session", project, token }, origin)
+        opener.postMessage(handoffMessage("session", project, token), origin)
         setResult({ step: "done", handedOff: true })
         setTimeout(() => window.close(), 1200)
       } else {
@@ -156,7 +157,7 @@ export function ClaimFlow({
             <CardContent>
               <a
                 className={buttonVariants({ variant: "outline" })}
-                href={`/dashboard/p/${project}`}
+                href={dashboardPath(projectRoute(project))}
               >
                 Open dashboard
               </a>
@@ -184,13 +185,5 @@ export function ClaimFlow({
         )}
       </Card>
     </FlowShell>
-  )
-}
-
-function errorMessage(error: unknown): string {
-  const data = (error as { data?: { message?: string } })?.data
-  return (
-    data?.message ??
-    (error instanceof Error ? error.message : "Please try again.")
   )
 }

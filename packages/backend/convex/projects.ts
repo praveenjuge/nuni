@@ -17,6 +17,7 @@ import {
   revokeSessions,
   currentUser,
 } from "./lib"
+import { SERVER_LIMITS } from "./limits"
 import { deleteThread } from "./replies"
 import { rateLimiter } from "./rateLimits"
 
@@ -103,7 +104,7 @@ export const listMine = query({
       .query("projects")
       .withIndex("by_owner", (q) => q.eq("ownerId", user._id))
       .order("desc")
-      .take(200)
+      .take(SERVER_LIMITS.projectsListMax)
     return projects
       .filter((p) => !p.deletingAt)
       .map((p) => ({
@@ -143,10 +144,10 @@ export const addOrigin = mutation({
     if (!project) fail("not_found", "Project not found")
     const clean = parseOrigin(origin)
     if (project.origins.includes(clean)) return
-    if (project.origins.length >= LIMITS.maxOriginsPerProject) {
+    if (project.origins.length >= SERVER_LIMITS.maxOriginsPerProject) {
       fail(
         "cap_reached",
-        `A project can have at most ${LIMITS.maxOriginsPerProject} origins`
+        `A project can have at most ${SERVER_LIMITS.maxOriginsPerProject} origins`
       )
     }
     await ctx.db.patch(projectId, { origins: [...project.origins, clean] })
@@ -183,7 +184,7 @@ export const rename = mutation({
   args: { projectId: v.id("projects"), name: v.string() },
   handler: async (ctx, { projectId, name }) => {
     await requireOwner(ctx, projectId)
-    const clean = name.trim().slice(0, LIMITS.nameMaxLength * 2)
+    const clean = name.trim().slice(0, LIMITS.projectNameMaxLength)
     if (!clean) fail("invalid_name", "Name cannot be empty")
     await ctx.db.patch(projectId, { name: clean })
   },
@@ -230,8 +231,6 @@ export const remove = mutation({
   },
 })
 
-const DELETE_BATCH = 100
-
 /** One step of a project delete; schedules the next until nothing is left. */
 export const deleteBatch = internalMutation({
   args: { projectId: v.id("projects") },
@@ -244,7 +243,7 @@ export const deleteBatch = internalMutation({
     const comments = await ctx.db
       .query("comments")
       .withIndex("by_project_status", (q) => q.eq("projectId", projectId))
-      .take(DELETE_BATCH)
+      .take(SERVER_LIMITS.deleteBatch)
     for (const comment of comments) {
       await deleteThread(ctx, comment._id)
       for (const file of commentFiles(comment)) await ctx.storage.delete(file)
@@ -259,29 +258,29 @@ export const deleteBatch = internalMutation({
       ctx.db
         .query("pageStats")
         .withIndex("by_project_path", (q) => q.eq("projectId", projectId))
-        .take(DELETE_BATCH),
+        .take(SERVER_LIMITS.deleteBatch),
       ctx.db
         .query("widgetSessions")
         .withIndex("by_project", (q) => q.eq("projectId", projectId))
-        .take(DELETE_BATCH),
+        .take(SERVER_LIMITS.deleteBatch),
       ctx.db
         .query("commenterSessions")
         .withIndex("by_project", (q) => q.eq("projectId", projectId))
-        .take(DELETE_BATCH),
+        .take(SERVER_LIMITS.deleteBatch),
       ctx.db
         .query("transfers")
         .withIndex("by_project", (q) => q.eq("projectId", projectId))
-        .take(DELETE_BATCH),
+        .take(SERVER_LIMITS.deleteBatch),
       ctx.db
         .query("claims")
         .withIndex("by_project", (q) => q.eq("projectId", projectId))
-        .take(DELETE_BATCH),
+        .take(SERVER_LIMITS.deleteBatch),
       // A CLI sign-in waiting for approval must not carry over to a new
       // project the widget starts later with the same ID.
       ctx.db
         .query("cliLogins")
         .withIndex("by_publicId", (q) => q.eq("publicId", project.publicId))
-        .take(DELETE_BATCH),
+        .take(SERVER_LIMITS.deleteBatch),
     ])
     const rows = rest.flat()
     for (const row of rows) await ctx.db.delete(row._id)

@@ -1,6 +1,11 @@
 "use client"
 
-import { buildAgentPrompt, DOCS_URL, generateProjectId } from "@nuni/shared"
+import {
+  buildAgentPrompt,
+  cliCommand,
+  DOCS_URL,
+  generateProjectId,
+} from "@nuni/shared"
 import { PlusIcon } from "vadivam-react"
 import { useState, type ReactNode } from "react"
 
@@ -34,7 +39,7 @@ export function SetupSteps() {
         <p>
           Prefer the terminal? Run{" "}
           <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
-            npx @nuniapp/cli@latest init
+            {cliCommand("init")}
           </code>
         </p>
       </Step>

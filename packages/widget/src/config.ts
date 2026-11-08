@@ -1,4 +1,4 @@
-import { normalizePath } from "@nuni/shared"
+import { COMMENT_PARAM, normalizePath } from "@nuni/shared"
 
 import type { Messages } from "./i18n"
 
@@ -145,7 +145,10 @@ export function oneOf<T extends string>(
 }
 
 /** Query parameters that never tell pages apart. */
-const IGNORED_PARAMS = /^(nuni|utm_.*|fbclid|gclid|msclkid|ref)$/i
+const IGNORED_PARAMS = new RegExp(
+  `^(${COMMENT_PARAM}|utm_.*|fbclid|gclid|msclkid|ref)$`,
+  "i"
+)
 
 export function pageKeyFor(preset: PageKey = "path"): (url: URL) => string {
   return (url) => {

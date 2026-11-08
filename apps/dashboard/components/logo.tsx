@@ -1,6 +1,7 @@
 import Image from "next/image"
 import Link from "next/link"
 
+import { BASE_PATH } from "@/lib/config"
 import { cn } from "@/lib/utils"
 
 /** The Nuni mark and name, linking to the projects list. */
@@ -13,7 +14,7 @@ export function Logo({ className }: { className?: string }) {
         className
       )}
     >
-      <Image src="/dashboard/icon.svg" alt="" width={24} height={24} />
+      <Image src={`${BASE_PATH}/icon.svg`} alt="" width={24} height={24} />
       Nuni
     </Link>
   )

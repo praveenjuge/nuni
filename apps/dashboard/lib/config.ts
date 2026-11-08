@@ -1,4 +1,9 @@
-export const BASE_PATH = "/dashboard"
+import { DASHBOARD_PATH, DASHBOARD_ROUTES, dashboardUrl } from "@nuni/shared"
+
+import type nextConfig from "../next.config"
+
+/** The basePath: a type error here means next.config.ts disagrees. */
+export const BASE_PATH: (typeof nextConfig)["basePath"] = DASHBOARD_PATH
 
 /**
  * Public origin the dashboard is served from: https://nuni.praveenjuge.com in
@@ -18,4 +23,9 @@ export function safeReturnTo(value: string | null | undefined): string {
   if (!value || !value.startsWith(`${BASE_PATH}`) || value.startsWith("//"))
     return BASE_PATH
   return value
+}
+
+/** Sign in first, then come back to `returnTo` (a path in the dashboard). */
+export function signInUrl(returnTo: string): string {
+  return dashboardUrl(APP_URL, DASHBOARD_ROUTES.signIn, { returnTo })
 }

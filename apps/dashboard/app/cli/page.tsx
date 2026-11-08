@@ -1,25 +1,31 @@
-import { isUserCode } from "@nuni/shared"
+import {
+  cliCommand,
+  DASHBOARD_ROUTES,
+  dashboardPath,
+  isUserCode,
+  normalizeUserCode,
+} from "@nuni/shared"
 import { withAuth } from "@workos-inc/authkit-nextjs"
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 
 import { CliApprove } from "@/components/cli-approve"
-import { APP_URL } from "@/lib/config"
+import { signInUrl } from "@/lib/config"
 
 export const metadata: Metadata = { title: "Sign in the Nuni CLI" }
 
 export default async function Page(props: PageProps<"/cli">) {
   const params = await props.searchParams
   const code =
-    typeof params.code === "string" ? params.code.trim().toUpperCase() : ""
+    typeof params.code === "string" ? normalizeUserCode(params.code) : ""
 
   if (!isUserCode(code)) {
     return (
       <main className="mx-auto grid min-h-svh max-w-sm place-items-center p-6 text-center text-sm">
         <p>
           This sign-in link is incomplete. Run{" "}
-          <code className="font-mono">npx @nuniapp/cli@latest login</code> and
-          open the link it prints.
+          <code className="font-mono">{cliCommand("login")}</code> and open the
+          link it prints.
         </p>
       </main>
     )
@@ -27,10 +33,7 @@ export default async function Page(props: PageProps<"/cli">) {
 
   const { user } = await withAuth()
   if (!user) {
-    const returnTo = `/dashboard/cli?code=${encodeURIComponent(code)}`
-    redirect(
-      `${APP_URL}/dashboard/sign-in?returnTo=${encodeURIComponent(returnTo)}`
-    )
+    redirect(signInUrl(dashboardPath(DASHBOARD_ROUTES.cli, { code })))
   }
 
   return <CliApprove code={code} />

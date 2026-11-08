@@ -9,7 +9,7 @@ import {
   statusValidator,
   suggestionValidator,
   viewportValidator,
-} from "./validators"
+} from "@nuni/shared/validators"
 
 export default defineSchema({
   users: defineTable({

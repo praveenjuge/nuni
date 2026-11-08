@@ -1,9 +1,8 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
-import { buildCommentPrompt } from "@nuni/shared"
+import { buildCommentPrompt, pageLink, type OwnerComment } from "@nuni/shared"
 import { useMutation } from "convex/react"
-import type { FunctionReturnType } from "convex/server"
 import {
   ArchiveIcon,
   CheckIcon,
@@ -39,13 +38,8 @@ import {
   errorMessage,
   hostOf,
   initials,
-  jumpUrl,
   timeAgo,
 } from "@/lib/format"
-
-export type OwnerComment = FunctionReturnType<
-  typeof api.comments.listForOwner
->["page"][number]
 
 /** Everything about one comment: what was said, where, the screenshot and the thread. */
 export function CommentDetail({
@@ -64,6 +58,7 @@ export function CommentDetail({
   const remove = useMutation(api.comments.remove)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const open = c.status === "open"
+  const link = pageLink(c.page, c._id) ?? c.page.url
 
   async function toggleStatus() {
     try {
@@ -146,7 +141,7 @@ export function CommentDetail({
             <TooltipTrigger
               render={
                 <a
-                  href={jumpUrl(c.page, c._id)}
+                  href={link}
                   target="_blank"
                   rel="noreferrer"
                   aria-label="Open on page"
@@ -207,7 +202,7 @@ export function CommentDetail({
           </p>
           <div className="flex flex-wrap gap-2">
             <a
-              href={jumpUrl(c.page, c._id)}
+              href={link}
               target="_blank"
               rel="noreferrer"
               className={buttonVariants({ size: "sm", variant: "outline" })}
@@ -250,7 +245,7 @@ export function CommentDetail({
         <dt className="text-muted-foreground">Page</dt>
         <dd className="min-w-0 truncate">
           <a
-            href={jumpUrl(c.page, c._id)}
+            href={link}
             target="_blank"
             rel="noreferrer"
             className="font-mono text-xs hover:underline"

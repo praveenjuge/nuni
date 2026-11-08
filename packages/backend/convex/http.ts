@@ -1,10 +1,25 @@
-import { LIMITS } from "@nuni/shared"
+import {
+  ERROR_STATUS,
+  HTTP_ROUTES,
+  IMAGE_TYPES_TEXT,
+  LIMITS,
+  LOGIN_POLL_STATUS,
+  UPLOAD_HEADERS,
+  UPLOAD_ROUTES,
+  type ErrorCode,
+  type ErrorData,
+  type NewCommentPayload,
+  type NewReplyPayload,
+  type PinReportPayload,
+  type UploadKind,
+} from "@nuni/shared"
 import { httpRouter } from "convex/server"
 import { ConvexError } from "convex/values"
 
 import { internal } from "./_generated/api"
 import { httpAction } from "./_generated/server"
 import { authKit } from "./auth"
+import { SERVER_LIMITS } from "./limits"
 
 const http = httpRouter()
 
@@ -14,8 +29,10 @@ function corsHeaders(request: Request): HeadersInit {
   return {
     "Access-Control-Allow-Origin": request.headers.get("Origin") ?? "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers":
-      "Content-Type, X-Nuni-Project, X-Nuni-Comment, X-Nuni-Author, X-Nuni-Commenter",
+    "Access-Control-Allow-Headers": [
+      "Content-Type",
+      ...Object.values(UPLOAD_HEADERS),
+    ].join(", "),
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   }
@@ -28,15 +45,9 @@ function json(request: Request, status: number, body: unknown) {
   })
 }
 
-const STATUS_BY_CODE: Record<string, number> = {
-  rate_limited: 429,
-  cap_reached: 403,
-  forbidden: 403,
-  not_found: 404,
-  conflict: 409,
-  expired: 410,
-  too_large: 413,
-  invalid_type: 415,
+function failure(request: Request, code: ErrorCode, message: string) {
+  const body: ErrorData = { code, message }
+  return json(request, ERROR_STATUS[code], body)
 }
 
 function clientIp(request: Request): string {
@@ -51,18 +62,18 @@ function clientIp(request: Request): string {
 /** Map thrown errors to JSON responses with the matching status. */
 function errorResponse(request: Request, error: unknown, invalid: string) {
   if (error instanceof ConvexError) {
-    const data = error.data as { code?: string; message?: string }
-    return json(request, STATUS_BY_CODE[data.code ?? ""] ?? 400, data)
+    const { code } = error.data as Partial<ErrorData>
+    const status = code ? ERROR_STATUS[code] : undefined
+    return json(request, status ?? 400, error.data)
   }
   const message = error instanceof Error ? error.message : String(error)
+  // Convex rejects arguments that don't match the validators before the
+  // function runs, with no code of ours.
   if (message.includes("ArgumentValidationError")) {
-    return json(request, 400, { code: "invalid", message: invalid })
+    return failure(request, "invalid", invalid)
   }
   console.error(error)
-  return json(request, 500, {
-    code: "server_error",
-    message: "Something went wrong",
-  })
+  return failure(request, "server_error", "Something went wrong")
 }
 
 /**
@@ -97,30 +108,28 @@ async function readLimited(
 }
 
 /** A small JSON body, or a ready error response. */
-async function readJson(
+async function readJson<T>(
   request: Request,
   max: number
-): Promise<Record<string, unknown> | Response> {
+): Promise<Partial<Record<keyof T, unknown>> | Response> {
   const raw = await request.text()
-  if (raw.length > max) {
-    return json(request, 413, { code: "too_large", message: "Too large" })
-  }
+  if (raw.length > max) return failure(request, "too_large", "Too large")
   try {
     const value: unknown = JSON.parse(raw)
     if (value && typeof value === "object") {
-      return value as Record<string, unknown>
+      return value as Partial<Record<keyof T, unknown>>
     }
   } catch {
     // Falls through to the error below.
   }
-  return json(request, 400, { code: "bad_json", message: "Invalid JSON" })
+  return failure(request, "bad_json", "Invalid JSON")
 }
 
-/** The real image type from the file's first bytes, whatever the header says. */
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined
 }
 
+/** The real image type from the file's first bytes, whatever the header says. */
 function sniffImage(bytes: Uint8Array): string | null {
   const at = (i: number, ...values: number[]) =>
     values.every((value, j) => bytes[i + j] === value)
@@ -132,19 +141,24 @@ function sniffImage(bytes: Uint8Array): string | null {
   return null
 }
 
-http.route({
-  path: "/widget/comments",
-  method: "OPTIONS",
-  handler: httpAction(async (_ctx, request) => {
-    return new Response(null, { status: 204, headers: corsHeaders(request) })
-  }),
+const preflight = httpAction(async (_ctx, request) => {
+  return new Response(null, { status: 204, headers: corsHeaders(request) })
 })
 
 http.route({
-  path: "/widget/comments",
+  path: HTTP_ROUTES.comments,
+  method: "OPTIONS",
+  handler: preflight,
+})
+
+http.route({
+  path: HTTP_ROUTES.comments,
   method: "POST",
   handler: httpAction(async (ctx, request) => {
-    const payload = await readJson(request, 64_000)
+    const payload = await readJson<NewCommentPayload>(
+      request,
+      SERVER_LIMITS.commentBodyMax
+    )
     if (payload instanceof Response) return payload
     const ip = clientIp(request)
 
@@ -171,20 +185,17 @@ http.route({
   }),
 })
 
-http.route({
-  path: "/widget/pins",
-  method: "OPTIONS",
-  handler: httpAction(async (_ctx, request) => {
-    return new Response(null, { status: 204, headers: corsHeaders(request) })
-  }),
-})
+http.route({ path: HTTP_ROUTES.pins, method: "OPTIONS", handler: preflight })
 
 /** A visitor's widget reporting which pins on a page it found or lost. */
 http.route({
-  path: "/widget/pins",
+  path: HTTP_ROUTES.pins,
   method: "POST",
   handler: httpAction(async (ctx, request) => {
-    const payload = await readJson(request, 16_000)
+    const payload = await readJson<PinReportPayload>(
+      request,
+      SERVER_LIMITS.pinReportBodyMax
+    )
     if (payload instanceof Response) return payload
     const ids = (value: unknown) =>
       Array.isArray(value) ? value.filter((id) => typeof id === "string") : []
@@ -203,20 +214,17 @@ http.route({
   }),
 })
 
-http.route({
-  path: "/widget/replies",
-  method: "OPTIONS",
-  handler: httpAction(async (_ctx, request) => {
-    return new Response(null, { status: 204, headers: corsHeaders(request) })
-  }),
-})
+http.route({ path: HTTP_ROUTES.replies, method: "OPTIONS", handler: preflight })
 
 /** A reply in a comment's thread, rate limited per IP like comments. */
 http.route({
-  path: "/widget/replies",
+  path: HTTP_ROUTES.replies,
   method: "POST",
   handler: httpAction(async (ctx, request) => {
-    const payload = await readJson(request, 16_000)
+    const payload = await readJson<NewReplyPayload>(
+      request,
+      SERVER_LIMITS.replyBodyMax
+    )
     if (payload instanceof Response) return payload
     try {
       const id = await ctx.runMutation(internal.replies.createFromWidget, {
@@ -236,34 +244,38 @@ http.route({
   }),
 })
 
+const UPLOAD_MAX_BYTES: Record<UploadKind, number> = {
+  screenshot: LIMITS.screenshotMaxBytes,
+  image: LIMITS.imageMaxBytes,
+}
+
 /**
  * The author attaches a file right after posting: the element's screenshot
  * (owner-only) or an image for everyone. The comment id and the author's
  * secret travel in headers; the body is the image.
  */
-function uploadRoute(kind: "screenshot" | "image", maxBytes: number) {
+function uploadRoute(kind: UploadKind) {
+  const maxBytes = UPLOAD_MAX_BYTES[kind]
   return httpAction(async (ctx, request) => {
     const declared = Number(request.headers.get("Content-Length") ?? "0")
-    if (declared > maxBytes) {
-      return json(request, 413, { code: "too_large", message: "Too large" })
-    }
+    if (declared > maxBytes) return failure(request, "too_large", "Too large")
     const bytes = await readLimited(request, maxBytes)
-    if (!bytes) {
-      return json(request, 413, { code: "too_large", message: "Too large" })
-    }
+    if (!bytes) return failure(request, "too_large", "Too large")
     const type = sniffImage(bytes)
     if (!type) {
-      return json(request, 415, {
-        code: "invalid_type",
-        message: "Images must be WebP, JPEG or PNG",
-      })
+      return failure(
+        request,
+        "invalid_type",
+        `Images must be ${IMAGE_TYPES_TEXT}`
+      )
     }
     const target = {
       kind,
-      publicId: request.headers.get("X-Nuni-Project") ?? "",
-      commentId: request.headers.get("X-Nuni-Comment") ?? "",
-      authorSecret: request.headers.get("X-Nuni-Author") ?? "",
-      commenterToken: request.headers.get("X-Nuni-Commenter") ?? undefined,
+      publicId: request.headers.get(UPLOAD_HEADERS.project) ?? "",
+      commentId: request.headers.get(UPLOAD_HEADERS.comment) ?? "",
+      authorSecret: request.headers.get(UPLOAD_HEADERS.author) ?? "",
+      commenterToken:
+        request.headers.get(UPLOAD_HEADERS.commenter) ?? undefined,
     }
     try {
       await ctx.runMutation(internal.comments.checkUpload, {
@@ -289,26 +301,23 @@ function uploadRoute(kind: "screenshot" | "image", maxBytes: number) {
   })
 }
 
-for (const [path, kind, maxBytes] of [
-  ["/widget/screenshot", "screenshot", LIMITS.screenshotMaxBytes],
-  ["/widget/image", "image", LIMITS.imageMaxBytes],
-] as const) {
-  http.route({
-    path,
-    method: "OPTIONS",
-    handler: httpAction(async (_ctx, request) => {
-      return new Response(null, { status: 204, headers: corsHeaders(request) })
-    }),
-  })
-  http.route({ path, method: "POST", handler: uploadRoute(kind, maxBytes) })
+for (const [kind, path] of Object.entries(UPLOAD_ROUTES) as [
+  UploadKind,
+  string,
+][]) {
+  http.route({ path, method: "OPTIONS", handler: preflight })
+  http.route({ path, method: "POST", handler: uploadRoute(kind) })
 }
 
 /** `nuni login`, step 1: see cliAuth.ts. */
 http.route({
-  path: "/cli/login/start",
+  path: HTTP_ROUTES.cliLoginStart,
   method: "POST",
   handler: httpAction(async (ctx, request) => {
-    const payload = await readJson(request, 2_000)
+    const payload = await readJson<{ publicId: string; client: string }>(
+      request,
+      SERVER_LIMITS.cliLoginBodyMax
+    )
     if (payload instanceof Response) return payload
     try {
       const login = await ctx.runMutation(internal.cliAuth.start, {
@@ -323,21 +332,22 @@ http.route({
   }),
 })
 
-const POLL_STATUS = { pending: 202, approved: 200, denied: 403, expired: 410 }
-
 /** `nuni login`, step 3: the CLI waits for the owner to approve. */
 http.route({
-  path: "/cli/login/poll",
+  path: HTTP_ROUTES.cliLoginPoll,
   method: "POST",
   handler: httpAction(async (ctx, request) => {
-    const payload = await readJson(request, 2_000)
+    const payload = await readJson<{ deviceSecret: string }>(
+      request,
+      SERVER_LIMITS.cliLoginBodyMax
+    )
     if (payload instanceof Response) return payload
     try {
       const result = await ctx.runMutation(internal.cliAuth.poll, {
         deviceSecret: String(payload.deviceSecret ?? ""),
         ip: clientIp(request),
       })
-      return json(request, POLL_STATUS[result.status], result)
+      return json(request, LOGIN_POLL_STATUS[result.status], result)
     } catch (error) {
       return errorResponse(request, error, "Invalid sign-in request")
     }

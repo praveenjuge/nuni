@@ -2,7 +2,12 @@
 
 import { api } from "@nuni/backend/api"
 import type { Doc, Id } from "@nuni/backend/dataModel"
-import { buildAgentPrompt } from "@nuni/shared"
+import {
+  buildAgentPrompt,
+  DASHBOARD_ROUTES,
+  dashboardUrl,
+  LIMITS,
+} from "@nuni/shared"
 import { useMutation, useQuery } from "convex/react"
 import {
   GlobeIcon,
@@ -34,7 +39,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useStoreUser } from "@/components/use-store-user"
-import { APP_URL, BASE_PATH } from "@/lib/config"
+import { APP_URL } from "@/lib/config"
 import {
   describeAgent,
   errorMessage,
@@ -146,7 +151,7 @@ function GeneralSection({ project }: { project: Doc<"projects"> }) {
               setValue(e.target.value)
               setState("idle")
             }}
-            maxLength={100}
+            maxLength={LIMITS.projectNameMaxLength}
           />
           <Button
             type="submit"
@@ -418,7 +423,7 @@ function TransferSection({ projectId }: { projectId: Id<"projects"> }) {
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">
-          The link works once, for 7 days.
+          The link works once, for {LIMITS.transferTtlMs / 86_400_000} days.
         </p>
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
@@ -431,7 +436,7 @@ function TransferSection({ projectId }: { projectId: Id<"projects"> }) {
             try {
               const { token } = await create({ projectId })
               setLink(
-                `${APP_URL}${BASE_PATH}/transfer?token=${encodeURIComponent(token)}`
+                dashboardUrl(APP_URL, DASHBOARD_ROUTES.transfer, { token })
               )
             } catch (err) {
               setError(errorMessage(err))

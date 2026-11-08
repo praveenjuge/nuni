@@ -3,15 +3,23 @@ import { describe, expect, it } from "vitest"
 import {
   buildAgentPrompt,
   buildCommentPrompt,
-  commentUrl,
+  pageLink,
   describeLocation,
   stripHtmlUrlQueries,
   stripUrlQueries,
   withoutQuery,
+  dashboardUrl,
+  errorMessage,
   generateProjectId,
+  generateUserCode,
+  handoffMessage,
   isLocalOrigin,
   isProjectId,
+  isUserCode,
   normalizePath,
+  normalizeUserCode,
+  projectIdsIn,
+  readHandoff,
 } from "../src"
 
 describe("project ids", () => {
@@ -26,6 +34,65 @@ describe("project ids", () => {
     expect(isProjectId("nuni_0OIl000000000000000000")).toBe(false)
     expect(isProjectId(42)).toBe(false)
     expect(isProjectId("proj_" + "a".repeat(22))).toBe(false)
+  })
+})
+
+describe("user codes", () => {
+  it("generates codes it accepts, once typed back any way", () => {
+    const code = generateUserCode()
+    expect(isUserCode(code)).toBe(true)
+    expect(isUserCode(normalizeUserCode(` ${code.toLowerCase()}\n`))).toBe(true)
+    expect(isUserCode("BCDF-GHJA")).toBe(false)
+  })
+})
+
+describe("projectIdsIn", () => {
+  it("finds every id in source text", () => {
+    const [a, b] = [generateProjectId(), generateProjectId()]
+    expect(
+      projectIdsIn(`init({ project: "${a}" })\n<x data-project='${b}'>`)
+    ).toEqual([a, b])
+    expect(projectIdsIn("nuni_short")).toEqual([])
+  })
+})
+
+describe("dashboard handoff", () => {
+  it("builds dashboard links on any app URL", () => {
+    expect(
+      dashboardUrl("https://app.example/", "/claim", {
+        project: "nuni_x",
+        origin: "http://127.0.0.1:5173",
+      })
+    ).toBe(
+      "https://app.example/dashboard/claim?project=nuni_x&origin=http%3A%2F%2F127.0.0.1%3A5173"
+    )
+    expect(dashboardUrl("https://app.example", "/sign-out")).toBe(
+      "https://app.example/dashboard/sign-out"
+    )
+  })
+
+  it("hands a token only to its project, with the right kind", () => {
+    const session = handoffMessage("session", "p1", "nuni_s_abc")
+    expect(readHandoff(session, "p1")).toEqual({
+      kind: "session",
+      token: "nuni_s_abc",
+    })
+    expect(readHandoff(session, "p2")).toBeNull()
+    expect(
+      readHandoff(handoffMessage("commenter", "p1", "nuni_s_abc"), "p1")
+    ).toBeNull()
+    expect(readHandoff("nuni:session", "p1")).toBeNull()
+  })
+})
+
+describe("errorMessage", () => {
+  it("prefers the backend's message, then the error's, then the fallback", () => {
+    const convex = Object.assign(new Error("[CONVEX] raw"), {
+      data: { code: "not_found", message: "Comment not found" },
+    })
+    expect(errorMessage(convex, "x")).toBe("Comment not found")
+    expect(errorMessage(new Error("Offline"), "x")).toBe("Offline")
+    expect(errorMessage("weird", "Try again")).toBe("Try again")
   })
 })
 
@@ -84,25 +151,51 @@ describe("buildAgentPrompt", () => {
   })
 })
 
-describe("commentUrl", () => {
-  it("adds the deep link and keeps the query and hash route", () => {
+describe("pageLink", () => {
+  const origin = "https://acme.example"
+
+  it("opens the comment and keeps the query, or the path's own", () => {
+    expect(pageLink({ origin, path: "/pricing", search: "?ref=x" }, "c1")).toBe(
+      "https://acme.example/pricing?ref=x&nuni=c1"
+    )
     expect(
-      commentUrl(
-        { origin: "https://a.com", path: "/pricing", search: "?ref=x" },
-        "c1"
-      )
-    ).toBe("https://a.com/pricing?ref=x&nuni=c1")
-    expect(
-      commentUrl({ origin: "https://a.com", path: "/#/settings" }, "c2")
-    ).toBe("https://a.com/?nuni=c2#/settings")
+      pageLink({ origin, path: "/pricing?plan=pro", search: "?ref=x" })
+    ).toBe("https://acme.example/pricing?plan=pro")
+    expect(pageLink({ origin, path: "/pricing" })).toBe(
+      "https://acme.example/pricing"
+    )
   })
 
-  it("never leaves the page's origin", () => {
-    for (const path of ["//evil.example/login", "https://evil.example/x"]) {
-      expect(commentUrl({ origin: "https://a.com", path }, "c3")).toBe(
-        "https://a.com/?nuni=c3"
-      )
+  it("keeps the query before a hash route", () => {
+    expect(pageLink({ origin, path: "/#/settings" }, "c2")).toBe(
+      "https://acme.example/?nuni=c2#/settings"
+    )
+    expect(pageLink({ origin, path: "/#/settings", search: "?ref=x" })).toBe(
+      "https://acme.example/?ref=x#/settings"
+    )
+  })
+
+  it("is null for stored paths that would leave the origin", () => {
+    for (const path of [
+      ".evil.example/verify",
+      "@evil.example/",
+      "-evil.example/",
+      "\t@evil.example/login",
+      "https://evil.example/x",
+    ]) {
+      expect(pageLink({ origin, path, search: "?token=1" }, "c3")).toBeNull()
     }
+  })
+
+  it("keeps leading-slash forms on the origin", () => {
+    // The backend rejects them at ingestion; the link is safe either way.
+    expect(pageLink({ origin, path: "//evil.example/x" })).toBe(
+      "https://acme.example//evil.example/x"
+    )
+  })
+
+  it("treats custom getPageKey keys as non-links", () => {
+    expect(pageLink({ origin, path: "product-123" })).toBeNull()
   })
 })
 

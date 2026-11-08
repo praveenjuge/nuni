@@ -2,6 +2,7 @@ import { generateProjectId, generateSecret, LIMITS } from "@nuni/shared"
 import { describe, expect, it, vi } from "vitest"
 
 import { api, internal } from "../convex/_generated/api"
+import { SERVER_LIMITS } from "../convex/limits"
 import { deleteUserData } from "../convex/users"
 import { addComment, anchor, page, setup, signIn, type T } from "./helpers"
 
@@ -1124,7 +1125,7 @@ describe("attached images", () => {
       expect(
         (await uploadImage(t, { publicId, id: fresh, secret })).status
       ).toBe(201)
-      vi.advanceTimersByTime(LIMITS.screenshotUploadWindowMs + 1)
+      vi.advanceTimersByTime(SERVER_LIMITS.uploadWindowMs + 1)
       expect(
         (await uploadImage(t, { publicId, id: late, secret })).status
       ).toBe(410)
@@ -1488,7 +1489,7 @@ describe("captured context and screenshots", () => {
     const id = await addComment(t, publicId, { secret })
     await t.run(async (ctx) => {
       await ctx.db.patch(id, {
-        createdAt: Date.now() - LIMITS.screenshotUploadWindowMs - 1000,
+        createdAt: Date.now() - SERVER_LIMITS.uploadWindowMs - 1000,
       })
     })
     const late = await uploadScreenshot(t, { publicId, id, secret })
@@ -1497,5 +1498,52 @@ describe("captured context and screenshots", () => {
       ctx.db.system.query("_storage").collect()
     )
     expect(files).toHaveLength(0)
+  })
+})
+
+describe("anchors", () => {
+  it("keeps as much of the anchor as @nuni/anchor captures, and no more", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const host = (i: number) => ({ ...anchor, tag: `host-${i}` })
+    const deepest = Array.from(
+      { length: LIMITS.anchorScopeMaxDepth },
+      (_, i) => ({ kind: "shadow" as const, host: host(i) })
+    )
+    const ancestor = { tag: "div", classes: [], text: "y".repeat(500) }
+    const id = await addComment(t, publicId, {
+      anchor: {
+        scope: [{ kind: "frame", host: host(-1) }, ...deepest],
+        ancestors: Array.from({ length: 9 }, () => ancestor),
+      },
+    })
+    const comment = await t.run((ctx) => ctx.db.get(id))
+    // The innermost hosts, like the anchor engine keeps on a deeper chain.
+    expect(comment?.anchor.scope?.map((s) => s.host.tag)).toEqual(
+      deepest.map((s) => s.host.tag)
+    )
+    expect(comment?.anchor.ancestors).toHaveLength(LIMITS.anchorAncestorsMax)
+    expect(comment?.anchor.ancestors[0]?.text).toHaveLength(
+      LIMITS.anchorAncestorTextMaxLength
+    )
+  })
+})
+
+describe("comment and reply ids", () => {
+  it("are plain strings: one that is no id is simply not found", async () => {
+    const t = setup()
+    await expect(
+      t.mutation(api.comments.resolve, { id: "nope" })
+    ).rejects.toThrow(/Comment not found/)
+    await expect(
+      t.mutation(api.replies.editOwn, {
+        id: "nope",
+        authorSecret: generateSecret(),
+        body: "Hi",
+      })
+    ).rejects.toThrow(/Reply not found/)
+    await expect(
+      t.mutation(api.comments.remove, { id: "nope" })
+    ).resolves.toBeNull()
   })
 })

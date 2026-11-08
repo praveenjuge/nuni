@@ -1,4 +1,4 @@
-import { LIMITS, randomBase58 } from "@nuni/shared"
+import { LIMITS, randomBase58, TOKEN_PREFIX } from "@nuni/shared"
 import { v } from "convex/values"
 
 import { internal } from "./_generated/api"
@@ -14,6 +14,7 @@ import {
   sha256Hex,
   currentUser,
 } from "./lib"
+import { SERVER_LIMITS } from "./limits"
 import { rateLimiter } from "./rateLimits"
 
 /**
@@ -48,13 +49,13 @@ export const create = mutation({
     })
     if (!ok) fail("rate_limited", "Too many sign-ins, try again later")
 
-    const token = `nuni_s_${randomBase58(40)}`
+    const token = `${TOKEN_PREFIX.session}${randomBase58(40)}`
     await ctx.db.insert("widgetSessions", {
       tokenHash: await sha256Hex(token),
       userId: user._id,
       projectId: project._id,
       origin: cleanOrigin,
-      userAgent: userAgent?.slice(0, 400),
+      userAgent: userAgent?.slice(0, SERVER_LIMITS.userAgentMaxLength),
       expiresAt: Date.now() + LIMITS.sessionTtlMs,
     })
     return { token, expiresAt: Date.now() + LIMITS.sessionTtlMs }
@@ -133,8 +134,6 @@ export const revokeOwn = mutation({
   },
 })
 
-const CLEANUP_BATCH = 500
-
 /** Daily cron: delete expired widget sessions, continuing until none are left. */
 export const cleanupExpired = internalMutation({
   args: {},
@@ -142,9 +141,9 @@ export const cleanupExpired = internalMutation({
     const expired = await ctx.db
       .query("widgetSessions")
       .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
-      .take(CLEANUP_BATCH)
+      .take(SERVER_LIMITS.cleanupBatch)
     for (const session of expired) await ctx.db.delete(session._id)
-    if (expired.length === CLEANUP_BATCH) {
+    if (expired.length === SERVER_LIMITS.cleanupBatch) {
       await ctx.scheduler.runAfter(0, internal.sessions.cleanupExpired, {})
     }
     return expired.length

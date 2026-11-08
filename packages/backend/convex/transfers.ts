@@ -1,4 +1,4 @@
-import { LIMITS, randomBase58 } from "@nuni/shared"
+import { LIMITS, randomBase58, TOKEN_PREFIX } from "@nuni/shared"
 import { v } from "convex/values"
 
 import { internal } from "./_generated/api"
@@ -18,14 +18,18 @@ import {
   revokeSessions,
   sha256Hex,
 } from "./lib"
-
-const TOKEN_PREFIX = "nuni_t_"
+import { SERVER_LIMITS } from "./limits"
 
 async function transferByToken(
   ctx: QueryCtx | MutationCtx,
   token: string
 ): Promise<Doc<"transfers"> | null> {
-  if (!token.startsWith(TOKEN_PREFIX) || token.length > 200) return null
+  if (
+    !token.startsWith(TOKEN_PREFIX.transfer) ||
+    token.length > SERVER_LIMITS.tokenMaxLength
+  ) {
+    return null
+  }
   const tokenHash = await sha256Hex(token)
   const transfer = await ctx.db
     .query("transfers")
@@ -51,7 +55,7 @@ export const create = mutation({
   handler: async (ctx, { projectId }) => {
     const { user, project } = await requireDashboardOwner(ctx, projectId)
     await clearTransfers(ctx, project)
-    const token = `${TOKEN_PREFIX}${randomBase58(32)}`
+    const token = `${TOKEN_PREFIX.transfer}${randomBase58(32)}`
     const expiresAt = Date.now() + LIMITS.transferTtlMs
     await ctx.db.insert("transfers", {
       projectId,
@@ -150,8 +154,6 @@ export const accept = mutation({
   },
 })
 
-const CLEANUP_BATCH = 500
-
 /** Daily cron: delete expired transfer links. */
 export const cleanupExpired = internalMutation({
   args: {},
@@ -159,9 +161,9 @@ export const cleanupExpired = internalMutation({
     const expired = await ctx.db
       .query("transfers")
       .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
-      .take(CLEANUP_BATCH)
+      .take(SERVER_LIMITS.cleanupBatch)
     for (const transfer of expired) await ctx.db.delete(transfer._id)
-    if (expired.length === CLEANUP_BATCH) {
+    if (expired.length === SERVER_LIMITS.cleanupBatch) {
       await ctx.scheduler.runAfter(0, internal.transfers.cleanupExpired, {})
     }
     return expired.length

@@ -1,3 +1,4 @@
+import { dashboardPath, projectRoute } from "@nuni/shared"
 import { withAuth } from "@workos-inc/authkit-nextjs"
 import type { Metadata } from "next"
 
@@ -17,7 +18,7 @@ export default async function Page(props: PageProps<"/p/[publicId]">) {
         {user ? (
           <ProjectView publicId={publicId} />
         ) : (
-          <SignedOut returnTo={`/dashboard/p/${publicId}`} />
+          <SignedOut returnTo={dashboardPath(projectRoute(publicId))} />
         )}
       </main>
     </>

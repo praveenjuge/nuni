@@ -1,5 +1,6 @@
 "use client"
 
+import { DASHBOARD_ROUTES, dashboardPath } from "@nuni/shared"
 import { LogOutIcon } from "vadivam-react"
 import { useTheme } from "next-themes"
 
@@ -64,7 +65,9 @@ export function UserMenu({
           </DropdownMenuRadioGroup>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem render={<a href="/dashboard/sign-out" />}>
+        <DropdownMenuItem
+          render={<a href={dashboardPath(DASHBOARD_ROUTES.signOut)} />}
+        >
           <LogOutIcon /> Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>

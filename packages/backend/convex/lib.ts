@@ -1,8 +1,14 @@
-import { isProjectId, LIMITS } from "@nuni/shared"
+import {
+  isProjectId,
+  LIMITS,
+  type ErrorCode,
+  type WidgetAuthor,
+} from "@nuni/shared"
 import { ConvexError } from "convex/values"
 
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
+import { SERVER_LIMITS } from "./limits"
 
 type Ctx = QueryCtx | MutationCtx
 
@@ -14,7 +20,7 @@ export async function sha256Hex(value: string): Promise<string> {
   ).join("")
 }
 
-export function fail(code: string, message: string): never {
+export function fail(code: ErrorCode, message: string): never {
   throw new ConvexError({ code, message })
 }
 
@@ -120,7 +126,7 @@ export async function ensureProject(
     if (
       !existing.ownerId &&
       !existing.origins.includes(origin) &&
-      existing.origins.length < LIMITS.maxOriginsPerProject
+      existing.origins.length < SERVER_LIMITS.maxOriginsPerProject
     ) {
       await ctx.db.patch(existing._id, {
         origins: [...existing.origins, origin],
@@ -176,7 +182,7 @@ export async function sessionFromToken(
   ctx: Ctx,
   token: string
 ): Promise<Doc<"widgetSessions"> | null> {
-  if (!token || token.length > 200) return null
+  if (!token || token.length > SERVER_LIMITS.tokenMaxLength) return null
   const tokenHash = await sha256Hex(token)
   const session = await ctx.db
     .query("widgetSessions")
@@ -192,7 +198,7 @@ export async function commenterFromToken(
   projectId: Id<"projects">,
   token: string
 ): Promise<Doc<"users"> | null> {
-  if (!token || token.length > 200) return null
+  if (!token || token.length > SERVER_LIMITS.tokenMaxLength) return null
   const tokenHash = await sha256Hex(token)
   const session = await ctx.db
     .query("commenterSessions")
@@ -214,13 +220,13 @@ export function userAuthorKey(userId: Id<"users">) {
 }
 
 export function checkSecret(authorSecret: string) {
-  if (authorSecret.length < 16 || authorSecret.length > 128) {
+  if (
+    authorSecret.length < SERVER_LIMITS.authorSecretMinLength ||
+    authorSecret.length > SERVER_LIMITS.authorSecretMaxLength
+  ) {
     fail("invalid_author", "Invalid author key")
   }
 }
-
-/** What the widget sends to say who is writing. */
-export type WidgetAuthor = { authorSecret: string; commenterToken?: string }
 
 /**
  * Who is writing from the widget: the signed-in commenter when there is a
@@ -352,6 +358,16 @@ export async function imageUrls(
     (c.images ?? []).map((id) => ctx.storage.getUrl(id))
   )
   return urls.filter((url): url is string => url !== null)
+}
+
+/** A row by the id a client sent, or null when it isn't one of that table. */
+export async function rowById<T extends "comments" | "replies">(
+  ctx: Ctx,
+  table: T,
+  id: string
+): Promise<Doc<T> | null> {
+  const rowId = ctx.db.normalizeId(table, id)
+  return rowId ? await ctx.db.get(rowId) : null
 }
 
 /** Every stored file of a comment: the screenshot and attached images. */

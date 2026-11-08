@@ -1,4 +1,4 @@
-import { LIMITS, randomBase58 } from "@nuni/shared"
+import { LIMITS, randomBase58, TOKEN_PREFIX } from "@nuni/shared"
 import { v } from "convex/values"
 
 import { internalMutation, internalQuery } from "./_generated/server"
@@ -32,7 +32,7 @@ export const seedOwner = internalMutation({
     })
     const project = await ensureProject(ctx, publicId, cleanOrigin)
     await ctx.db.patch(project._id, { ownerId: userId, claimedAt: Date.now() })
-    const token = `nuni_s_${randomBase58(40)}`
+    const token = `${TOKEN_PREFIX.session}${randomBase58(40)}`
     await ctx.db.insert("widgetSessions", {
       tokenHash: await sha256Hex(token),
       userId,

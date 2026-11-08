@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 
+import { urlDefines } from "@nuni/shared/build"
 import { defineConfig } from "tsdown"
 
 const pkg = JSON.parse(
@@ -8,24 +9,8 @@ const pkg = JSON.parse(
   version: string
 }
 
-const release = process.env.NUNI_RELEASE === "1"
-function env(name: string, fallback: string): string {
-  const value = process.env[name]
-  if (value) return value
-  if (release) throw new Error(`${name} must be set for a release build`)
-  return fallback
-}
-
 const define = {
-  __NUNI_CONVEX_URL__: JSON.stringify(
-    env("NUNI_CONVEX_URL", "http://127.0.0.1:3210")
-  ),
-  __NUNI_CONVEX_SITE_URL__: JSON.stringify(
-    env("NUNI_CONVEX_SITE_URL", "http://127.0.0.1:3211")
-  ),
-  __NUNI_APP_URL__: JSON.stringify(
-    env("NUNI_APP_URL", "http://localhost:3000")
-  ),
+  ...urlDefines(process.env),
   __NUNI_VERSION__: JSON.stringify(pkg.version),
 }
 

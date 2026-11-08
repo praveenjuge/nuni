@@ -1,11 +1,33 @@
 import {
+  IMAGE_TYPES_TEXT,
+  isImageType,
   LIMITS,
-  type AnchorQuote,
-  type CommentStatus,
   stripHtmlUrlQueries,
   stripUrlQueries,
   withoutQuery,
+  type Anchor,
+  type AnchorAncestor,
+  type AnchorQuote,
+  type CommentContext,
+  type CommentStatus,
+  type OwnerComment,
+  type Rect,
+  type Resolution,
+  type TextSuggestion,
+  type UploadKind,
+  type WidgetAuthor,
+  type WidgetComment,
 } from "@nuni/shared"
+import {
+  anchorValidator,
+  contextValidator,
+  pageValidator,
+  resolutionValidator,
+  statusValidator,
+  suggestionValidator,
+  viewportValidator,
+  widgetAuthorArgs,
+} from "@nuni/shared/validators"
 import { paginationOptsValidator } from "convex/server"
 import { v } from "convex/values"
 
@@ -33,25 +55,19 @@ import {
   projectByPublicId,
   requireOwner,
   requireUser,
+  rowById,
   currentUser,
   widgetAuthor,
   type AuthorLookup,
-  type WidgetAuthor,
 } from "./lib"
+import { SERVER_LIMITS } from "./limits"
 import { ipKey, rateLimiter } from "./rateLimits"
 import { deleteThread, repliesFor } from "./replies"
-import {
-  anchorValidator,
-  contextValidator,
-  pageValidator,
-  resolutionValidator,
-  statusValidator,
-  suggestionValidator,
-  viewportValidator,
-  widgetAuthorArgs,
-} from "./validators"
 
-async function toPublic(c: Doc<"comments">, author: AuthorLookup) {
+async function toPublic(
+  c: Doc<"comments">,
+  author: AuthorLookup
+): Promise<WidgetComment> {
   return {
     _id: c._id,
     _creationTime: c._creationTime,
@@ -68,12 +84,9 @@ async function toPublic(c: Doc<"comments">, author: AuthorLookup) {
     editedAt: c.editedAt,
     resolvedAt: c.resolvedAt,
     resolution: c.resolution,
-    /** Attached images; their links come with the thread. */
     imageCount: c.images?.length ?? 0,
-    /** Visitors' widgets couldn't find the element, last they looked. */
     pinLost: c.pinLostAt !== undefined,
     replyCount: c.replyCount ?? 0,
-    // The name, and the account's avatar when signed in.
     ...(await author(c)),
   }
 }
@@ -83,7 +96,7 @@ async function toOwner(
   ctx: QueryCtx,
   c: Doc<"comments">,
   author: AuthorLookup = authorLookup(ctx)
-) {
+): Promise<OwnerComment> {
   return {
     ...(await toPublic(c, author)),
     page: c.page,
@@ -97,8 +110,6 @@ async function toOwner(
     replies: c.replyCount ? await repliesFor(ctx, c._id, author) : [],
   }
 }
-
-type CommentContext = NonNullable<Doc<"comments">["context"]>
 
 /**
  * Clamp everything the commenter's browser sent, entry by entry. Query
@@ -120,7 +131,10 @@ function cleanContext(context: CommentContext | undefined) {
   }
   if (context.network?.length) {
     out.network = context.network.slice(-max).map((e) => ({
-      method: clampString(e.method.toUpperCase(), 10),
+      method: clampString(
+        e.method.toUpperCase(),
+        SERVER_LIMITS.methodMaxLength
+      ),
       url: text(withoutQuery(e.url)),
       status: Math.trunc(e.status),
       at: e.at,
@@ -130,9 +144,12 @@ function cleanContext(context: CommentContext | undefined) {
     const styles: Record<string, string> = {}
     for (const [name, value] of Object.entries(context.dom.styles).slice(
       0,
-      30
+      SERVER_LIMITS.stylesMax
     )) {
-      styles[clampString(name, 40)] = clampString(stripUrlQueries(value), 200)
+      styles[clampString(name, SERVER_LIMITS.styleNameMaxLength)] = clampString(
+        stripUrlQueries(value),
+        SERVER_LIMITS.styleValueMaxLength
+      )
     }
     out.dom = {
       html: clampString(
@@ -156,8 +173,8 @@ export function searchTextFor(
  * selected words, or the whole text of a small element like a button.
  */
 function cleanSuggestion(
-  suggestion: { before: string; after: string } | undefined,
-  anchor: { text: string; quote?: AnchorQuote; region?: unknown }
+  suggestion: TextSuggestion | undefined,
+  anchor: Pick<Anchor, "text" | "quote" | "region">
 ) {
   if (!suggestion) return undefined
   const before = suggestion.before.trim()
@@ -205,7 +222,7 @@ export const listForPage = query({
   handler: async (ctx, { publicId, path }) => {
     const project = await projectByPublicId(ctx, publicId)
     if (!project) return []
-    const byStatus = (status: "open" | "resolved", limit: number) =>
+    const byStatus = (status: CommentStatus, limit: number) =>
       ctx.db
         .query("comments")
         .withIndex("by_project_path_status", (q) =>
@@ -217,8 +234,8 @@ export const listForPage = query({
         .order("desc")
         .take(limit)
     const [open, resolved] = await Promise.all([
-      byStatus("open", LIMITS.pageOpenLimit),
-      byStatus("resolved", LIMITS.pageResolvedLimit),
+      byStatus("open", SERVER_LIMITS.pageOpenLimit),
+      byStatus("resolved", SERVER_LIMITS.pageResolvedLimit),
     ])
     const author = authorLookup(ctx)
     return Promise.all([...open, ...resolved].map((c) => toPublic(c, author)))
@@ -231,11 +248,7 @@ export const listForPage = query({
  * hash: hashes are public in every listing.
  */
 export const listMine = query({
-  args: {
-    publicId: v.string(),
-    authorSecret: v.string(),
-    commenterToken: v.optional(v.string()),
-  },
+  args: { publicId: v.string(), ...widgetAuthorArgs },
   handler: async (ctx, { publicId, ...auth }) => {
     const project = await projectByPublicId(ctx, publicId)
     if (!project) return []
@@ -249,7 +262,7 @@ export const listMine = query({
         q.eq("projectId", project._id).eq("authorKeyHash", key)
       )
       .order("desc")
-      .take(LIMITS.yoursLimit)
+      .take(SERVER_LIMITS.yoursLimit)
     const author = authorLookup(ctx)
     return Promise.all(mine.map((c) => toPublic(c, author)))
   },
@@ -264,7 +277,7 @@ export const listForSite = query({
   handler: async (ctx, { publicId }) => {
     const project = await projectByPublicId(ctx, publicId)
     if (!project) return []
-    const byStatus = (status: "open" | "resolved", limit: number) =>
+    const byStatus = (status: CommentStatus, limit: number) =>
       ctx.db
         .query("comments")
         .withIndex("by_project_status", (q) =>
@@ -273,8 +286,8 @@ export const listForSite = query({
         .order("desc")
         .take(limit)
     const [open, resolved] = await Promise.all([
-      byStatus("open", LIMITS.siteOpenLimit),
-      byStatus("resolved", LIMITS.siteResolvedLimit),
+      byStatus("open", SERVER_LIMITS.siteOpenLimit),
+      byStatus("resolved", SERVER_LIMITS.siteResolvedLimit),
     ])
     const author = authorLookup(ctx)
     return Promise.all([...open, ...resolved].map((c) => toPublic(c, author)))
@@ -293,7 +306,7 @@ export const pagesWithComments = query({
         q.eq("projectId", project._id).gt("openCount", 0)
       )
       .order("desc")
-      .take(200)
+      .take(SERVER_LIMITS.pagesListMax)
     return pages.map((p) => ({ path: p.path, count: p.openCount }))
   },
 })
@@ -310,7 +323,7 @@ function cleanQuote(quote: AnchorQuote | undefined): AnchorQuote | undefined {
 }
 
 /** An area inside the element, kept to 0..1 of its box. */
-function cleanRegion(r: { x: number; y: number; w: number; h: number }) {
+function cleanRegion(r: Rect): Rect {
   const unit = (n: number) =>
     Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0
   const x = unit(r.x)
@@ -318,23 +331,36 @@ function cleanRegion(r: { x: number; y: number; w: number; h: number }) {
   return { x, y, w: Math.min(unit(r.w), 1 - x), h: Math.min(unit(r.h), 1 - y) }
 }
 
-function cleanAnchor<A extends { text: string; ancestors: unknown[] }>(
+function cleanAncestor(ancestor: AnchorAncestor): AnchorAncestor {
+  return ancestor.text === undefined
+    ? ancestor
+    : {
+        ...ancestor,
+        text: clampString(ancestor.text, LIMITS.anchorAncestorTextMaxLength),
+      }
+}
+
+/** The text and ancestors of one element, as long as `@nuni/anchor` keeps them. */
+function cleanAnchor<A extends Pick<Anchor, "text" | "ancestors">>(
   anchor: A
 ): A {
   return {
     ...anchor,
     text: clampString(anchor.text, LIMITS.anchorTextMaxLength),
-    ancestors: anchor.ancestors.slice(0, 6),
+    ancestors: anchor.ancestors
+      .slice(0, LIMITS.anchorAncestorsMax)
+      .map(cleanAncestor),
   }
 }
 
-type AnchorArg = Doc<"comments">["anchor"]
-
-/** A whole anchor from the widget, with every part within its limits. */
-function cleanCommentAnchor(anchor: AnchorArg): AnchorArg {
+/**
+ * A whole anchor from the widget, with every part within its limits. Like
+ * `@nuni/anchor`, a scope chain that is too deep keeps its innermost steps.
+ */
+function cleanCommentAnchor(anchor: Anchor): Anchor {
   return {
     ...cleanAnchor(anchor),
-    scope: anchor.scope?.slice(0, 6).map((step) => ({
+    scope: anchor.scope?.slice(-LIMITS.anchorScopeMaxDepth).map((step) => ({
       kind: step.kind,
       host: cleanAnchor(step.host),
     })),
@@ -421,16 +447,16 @@ export const createFromWidget = internalMutation({
       page: {
         ...args.page,
         origin,
-        title: clampString(args.page.title, 300),
-        url: clampString(args.page.url, 2000),
-        search: clampString(args.page.search, 1000),
-        hash: clampString(args.page.hash, 1000),
-        path: clampString(args.page.path, 1000),
+        title: clampString(args.page.title, SERVER_LIMITS.pageTitleMaxLength),
+        url: clampString(args.page.url, SERVER_LIMITS.pageUrlMaxLength),
+        search: clampString(args.page.search, SERVER_LIMITS.pagePartMaxLength),
+        hash: clampString(args.page.hash, SERVER_LIMITS.pagePartMaxLength),
+        path: clampString(args.page.path, SERVER_LIMITS.pagePartMaxLength),
       },
       anchor,
       viewport: args.viewport,
       context: cleanContext(args.context),
-      userAgent: clampString(args.userAgent, 400),
+      userAgent: clampString(args.userAgent, SERVER_LIMITS.userAgentMaxLength),
       createdAt: now,
     })
     await ctx.db.patch(project._id, {
@@ -438,17 +464,22 @@ export const createFromWidget = internalMutation({
       openCount: project.openCount + 1,
       lastActivityAt: now,
     })
-    await bumpPageOpen(ctx, project._id, clampString(args.page.path, 1000), 1)
+    await bumpPageOpen(
+      ctx,
+      project._id,
+      clampString(args.page.path, SERVER_LIMITS.pagePartMaxLength),
+      1
+    )
     return id
   },
 })
 
 async function loadOwnComment(
   ctx: MutationCtx,
-  id: Id<"comments">,
+  id: string,
   auth: WidgetAuthor
 ) {
-  const comment = await ctx.db.get(id)
+  const comment = await rowById(ctx, "comments", id)
   if (!comment) fail("not_found", "Comment not found")
   const { keys } = await widgetAuthor(ctx, comment.projectId, auth)
   if (!keys.includes(comment.authorKeyHash)) {
@@ -463,7 +494,7 @@ async function loadOwnComment(
 
 export const editOwn = mutation({
   args: {
-    id: v.id("comments"),
+    id: v.string(),
     ...widgetAuthorArgs,
     body: v.string(),
     /** New words for a comment that suggests a text change. */
@@ -479,7 +510,7 @@ export const editOwn = mutation({
           )
         : comment.suggestion
     const clean = cleanCommentBody(body, Boolean(suggestion))
-    await ctx.db.patch(id, {
+    await ctx.db.patch(comment._id, {
       body: clean,
       suggestion,
       searchText: searchTextFor({ ...comment, body: clean, suggestion }),
@@ -512,7 +543,7 @@ export async function removeComment(
 }
 
 export const deleteOwn = mutation({
-  args: { id: v.id("comments"), ...widgetAuthorArgs },
+  args: { id: v.string(), ...widgetAuthorArgs },
   handler: async (ctx, { id, ...auth }) => {
     const comment = await loadOwnComment(ctx, id, auth)
     await removeComment(ctx, comment)
@@ -525,18 +556,18 @@ const widgetAuthArgs = { sessionToken: v.optional(v.string()) }
 
 async function setStatus(
   ctx: MutationCtx,
-  id: Id<"comments">,
-  status: "open" | "resolved",
+  id: string,
+  status: CommentStatus,
   widget: WidgetAuth,
-  resolution?: "outdated"
+  resolution?: Resolution
 ) {
-  const comment = await ctx.db.get(id)
+  const comment = await rowById(ctx, "comments", id)
   if (!comment) fail("not_found", "Comment not found")
   const userId = await requireOwner(ctx, comment.projectId, widget)
   if (comment.status === status) {
     // Already resolved: closing it as outdated only changes the reason.
     if (status === "resolved" && comment.resolution !== resolution) {
-      await ctx.db.patch(id, { resolution })
+      await ctx.db.patch(comment._id, { resolution })
     }
     return
   }
@@ -546,7 +577,7 @@ async function setStatus(
     comment.page.path,
     status === "open" ? 1 : -1
   )
-  await ctx.db.patch(id, {
+  await ctx.db.patch(comment._id, {
     status,
     resolvedAt: status === "resolved" ? Date.now() : undefined,
     resolvedBy: status === "resolved" ? userId : undefined,
@@ -563,7 +594,7 @@ async function setStatus(
 
 export const resolve = mutation({
   args: {
-    id: v.id("comments"),
+    id: v.string(),
     /** "outdated": closed because what it was about is gone. */
     resolution: v.optional(resolutionValidator),
     ...widgetAuthArgs,
@@ -573,33 +604,35 @@ export const resolve = mutation({
 })
 
 export const reopen = mutation({
-  args: { id: v.id("comments"), ...widgetAuthArgs },
+  args: { id: v.string(), ...widgetAuthArgs },
   handler: (ctx, { id, ...widget }) => setStatus(ctx, id, "open", widget),
 })
 
 export const remove = mutation({
-  args: { id: v.id("comments"), ...widgetAuthArgs },
+  args: { id: v.string(), ...widgetAuthArgs },
   handler: async (ctx, { id, ...widget }) => {
-    const comment = await ctx.db.get(id)
+    const comment = await rowById(ctx, "comments", id)
     if (!comment) return
     await requireOwner(ctx, comment.projectId, widget)
     await removeComment(ctx, comment)
   },
 })
 
-const bulkArgs = { ids: v.array(v.id("comments")) }
+const bulkArgs = { ids: v.array(v.string()) }
 
 /**
  * Comments picked in the dashboard: all in one project the signed-in user
  * owns. Missing ids (deleted meanwhile) are skipped.
  */
-async function loadBulk(ctx: MutationCtx, ids: Id<"comments">[]) {
+async function loadBulk(ctx: MutationCtx, ids: string[]) {
   if (ids.length > LIMITS.bulkMax) {
     fail("too_many", `Pick up to ${LIMITS.bulkMax} comments at a time`)
   }
   const user = await requireUser(ctx)
   const comments = (
-    await Promise.all([...new Set(ids)].map((id) => ctx.db.get(id)))
+    await Promise.all(
+      [...new Set(ids)].map((id) => rowById(ctx, "comments", id))
+    )
   ).filter((c): c is Doc<"comments"> => c !== null)
   const projectIds = new Set(comments.map((c) => c.projectId))
   if (projectIds.size > 1) fail("invalid", "Comments from several projects")
@@ -801,7 +834,7 @@ export const pagesForAgent = query({
         q.eq("projectId", project._id).gt("openCount", 0)
       )
       .order("desc")
-      .take(200)
+      .take(SERVER_LIMITS.pagesListMax)
     return pages.map((p) => ({ path: p.path, openCount: p.openCount }))
   },
 })
@@ -824,7 +857,10 @@ export const listForAgent = query({
   },
   handler: async (ctx, args) => {
     const project = await agentProject(ctx, args.publicId, args.sessionToken)
-    const numItems = Math.min(50, Math.max(1, Math.trunc(args.limit ?? 20)))
+    const numItems = Math.min(
+      LIMITS.agentListMax,
+      Math.max(1, Math.trunc(args.limit ?? LIMITS.agentListDefault))
+    )
     const result = await ownerComments(ctx, project._id, {
       status: args.status ?? "open",
       path: args.path,
@@ -912,12 +948,12 @@ export const reportPins = internalMutation({
  * after a redesign moved it. The new anchor replaces the old one.
  */
 export const repin = mutation({
-  args: { id: v.id("comments"), anchor: anchorValidator, ...widgetAuthArgs },
+  args: { id: v.string(), anchor: anchorValidator, ...widgetAuthArgs },
   handler: async (ctx, { id, anchor, ...widget }) => {
-    const comment = await ctx.db.get(id)
+    const comment = await rowById(ctx, "comments", id)
     if (!comment) fail("not_found", "Comment not found")
     await requireOwner(ctx, comment.projectId, widget)
-    await ctx.db.patch(id, {
+    await ctx.db.patch(comment._id, {
       anchor: cleanCommentAnchor(anchor),
       pinLostAt: undefined,
     })
@@ -936,7 +972,7 @@ export const ownerFilters = query({
     const stats = await ctx.db
       .query("pageStats")
       .withIndex("by_project_path", (q) => q.eq("projectId", project._id))
-      .take(1000)
+      .take(SERVER_LIMITS.pageFiltersMax)
     return { paths: stats.map((p) => p.path), origins: project.origins }
   },
 })
@@ -978,15 +1014,12 @@ export const getForOwner = query({
   },
 })
 
-const UPLOAD_TYPES = new Set(["image/webp", "image/jpeg", "image/png"])
-
 /**
  * What the author uploads right after posting: the element's screenshot
  * (owner-only context) or an image for everyone (their own, or the
  * screenshot they marked up).
  */
 const uploadKindValidator = v.union(v.literal("screenshot"), v.literal("image"))
-type UploadKind = "screenshot" | "image"
 
 const UPLOAD_RULES = {
   screenshot: {
@@ -999,7 +1032,7 @@ const UPLOAD_RULES = {
     limit: "imagePerIp",
     noun: "Images",
   },
-} as const
+} as const satisfies Record<UploadKind, unknown>
 
 const uploadArgs = {
   kind: uploadKindValidator,
@@ -1021,8 +1054,8 @@ export const checkUpload = internalMutation({
   },
   handler: async (ctx, args) => {
     const rules = UPLOAD_RULES[args.kind]
-    if (!UPLOAD_TYPES.has(args.contentType)) {
-      fail("invalid_type", `${rules.noun} must be WebP, JPEG or PNG`)
+    if (!isImageType(args.contentType)) {
+      fail("invalid_type", `${rules.noun} must be ${IMAGE_TYPES_TEXT}`)
     }
     if (args.size <= 0 || args.size > rules.maxBytes) {
       fail("too_large", "The image is too large")
@@ -1084,7 +1117,7 @@ async function uploadTarget(
       )
     }
   }
-  if (Date.now() - comment.createdAt > LIMITS.screenshotUploadWindowMs) {
+  if (Date.now() - comment.createdAt > SERVER_LIMITS.uploadWindowMs) {
     fail("expired", "Too late to add an image")
   }
   return comment

@@ -1,10 +1,10 @@
-import { isProjectId } from "@nuni/shared"
+import { DASHBOARD_ROUTES, dashboardPath, isProjectId } from "@nuni/shared"
 import { withAuth } from "@workos-inc/authkit-nextjs"
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 
 import { CommentSignIn } from "@/components/comment-sign-in"
-import { APP_URL } from "@/lib/config"
+import { signInUrl } from "@/lib/config"
 import { cleanOrigin } from "@/lib/format"
 
 export const metadata: Metadata = { title: "Sign in to comment" }
@@ -30,9 +30,10 @@ export default async function Page(props: PageProps<"/comment-sign-in">) {
 
   const { user } = await withAuth()
   if (!user) {
-    const returnTo = `/dashboard/comment-sign-in?project=${encodeURIComponent(project)}&origin=${encodeURIComponent(origin)}`
     redirect(
-      `${APP_URL}/dashboard/sign-in?returnTo=${encodeURIComponent(returnTo)}`
+      signInUrl(
+        dashboardPath(DASHBOARD_ROUTES.commentSignIn, { project, origin })
+      )
     )
   }
 

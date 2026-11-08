@@ -2,7 +2,8 @@ const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 const ID_LENGTH = 22
 const PREFIX = "nuni_"
 
-const PROJECT_ID_PATTERN = new RegExp(`^${PREFIX}[${ALPHABET}]{${ID_LENGTH}}$`)
+const PROJECT_ID = `${PREFIX}[${ALPHABET}]{${ID_LENGTH}}`
+const PROJECT_ID_PATTERN = new RegExp(`^${PROJECT_ID}$`)
 
 /** Random base58 string using the platform CSPRNG (browser, Node, Convex). */
 export function randomBase58(length: number): string {
@@ -31,6 +32,11 @@ export function isProjectId(value: unknown): value is string {
   return typeof value === "string" && PROJECT_ID_PATTERN.test(value)
 }
 
+/** Every project ID written in a piece of text (source code), in order. */
+export function projectIdsIn(text: string): string[] {
+  return Array.from(text.matchAll(new RegExp(PROJECT_ID, "g")), ([id]) => id)
+}
+
 /** Secret used by anonymous commenters to edit/delete their own comments. */
 export function generateSecret(): string {
   return randomBase58(32)
@@ -57,9 +63,15 @@ export function generateUserCode(): string {
   return out
 }
 
+const USER_CODE_PATTERN = new RegExp(
+  `^[${CODE_ALPHABET}]{4}-[${CODE_ALPHABET}]{4}$`
+)
+
 export function isUserCode(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/.test(value)
-  )
+  return typeof value === "string" && USER_CODE_PATTERN.test(value)
+}
+
+/** A code as people type or paste it: extra spaces, lower case. */
+export function normalizeUserCode(value: string): string {
+  return value.trim().toUpperCase()
 }

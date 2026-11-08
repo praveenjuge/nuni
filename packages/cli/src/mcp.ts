@@ -1,6 +1,12 @@
 import { createInterface } from "node:readline"
 
-import { buildCommentPrompt, PACKAGES } from "@nuni/shared"
+import {
+  buildCommentPrompt,
+  cliCommand,
+  LIMITS,
+  MCP_SERVER_NAME,
+  MCP_TOOLS,
+} from "@nuni/shared"
 
 import { credentialFor } from "./credentials"
 import { formatCommentList, formatPageList } from "./format"
@@ -64,7 +70,7 @@ export interface McpOptions {
   ) => Promise<{ data: string; mimeType: string } | null>
 }
 
-const LOGIN = `npx ${PACKAGES.cli}@latest login`
+const LOGIN = cliCommand("login")
 const MAX_RESOLVE = 50
 
 class ToolError extends Error {}
@@ -135,7 +141,7 @@ export function createMcpServer(options: McpOptions) {
       description:
         "Put related comments together: by page, or by the element they are on (several comments about the same button, heading or text).",
     },
-    limit: { type: "integer", minimum: 1, maximum: 50 },
+    limit: { type: "integer", minimum: 1, maximum: LIMITS.agentListMax },
   }
 
   async function list(args: Json, search?: string): Promise<ToolResult> {
@@ -145,7 +151,8 @@ export function createMcpServer(options: McpOptions) {
       status,
       path: typeof args.page === "string" ? args.page : undefined,
       search,
-      limit: typeof args.limit === "number" ? args.limit : 20,
+      limit:
+        typeof args.limit === "number" ? args.limit : LIMITS.agentListDefault,
     })
     return text(
       formatCommentList(page.comments, {
@@ -265,7 +272,7 @@ export function createMcpServer(options: McpOptions) {
       },
     },
     {
-      name: "resolve_comment",
+      name: MCP_TOOLS.resolveComment,
       title: "Resolve a Nuni comment",
       description:
         "Mark a comment as resolved once the change it asks for is made. Visitors see it as resolved on the site. Add a note to say what changed; it is posted as a reply.",
@@ -390,7 +397,7 @@ export function createMcpServer(options: McpOptions) {
               : PROTOCOL_VERSIONS[0],
             capabilities: { tools: {} },
             serverInfo: {
-              name: "nuni",
+              name: MCP_SERVER_NAME,
               title: "Nuni",
               version: options.version,
             },

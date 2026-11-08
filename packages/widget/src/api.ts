@@ -1,51 +1,33 @@
 import { api } from "@nuni/backend/api"
-import type {
-  Anchor,
-  CommentContext,
-  TextSuggestion,
-  OwnerComment,
-  Thread,
-  WidgetComment,
+import {
+  errorMessage,
+  HTTP_ROUTES,
+  UPLOAD_HEADERS,
+  UPLOAD_ROUTES,
+  type Anchor,
+  type NewCommentPayload,
+  type NewReplyPayload,
+  type OwnerComment,
+  type PinReportPayload,
+  type Resolution,
+  type Thread,
+  type UploadKind,
+  type WidgetAuthor,
+  type WidgetComment,
 } from "@nuni/shared"
 import { ConvexClient } from "convex/browser"
+import type { FunctionReturnType } from "convex/server"
 
 import type { ResolvedConfig } from "./config"
 
-export interface ProjectStatus {
-  exists: boolean
-  claimed: boolean
-  ownerName: string | null
-  openCount: number
-}
-
-export interface PageSummary {
-  path: string
-  count: number
-}
-
-/**
- * Who is writing: this browser's key, and the commenter's sign-in when they
- * signed in. The browser key is sent either way.
- */
-export interface Author {
-  authorSecret: string
-  commenterToken?: string
-}
-
+export type ProjectStatus = FunctionReturnType<typeof api.projects.status>
+export type PageSummary = FunctionReturnType<
+  typeof api.comments.pagesWithComments
+>[number]
 /** The signed-in commenter, as the widget shows them. */
-export type Commenter =
-  | { valid: false }
-  | { valid: true; name: string; avatarUrl?: string; authorKey: string }
+export type Commenter = FunctionReturnType<typeof api.commenters.validate>
 
-export interface NewComment extends Author {
-  body: string
-  suggestion?: TextSuggestion
-  authorName: string
-  page: WidgetComment["page"]
-  anchor: Anchor
-  viewport: WidgetComment["viewport"]
-  context?: CommentContext
-}
+export type NewComment = Omit<NewCommentPayload, "publicId">
 
 export class NuniApiError extends Error {
   constructor(
@@ -54,12 +36,6 @@ export class NuniApiError extends Error {
   ) {
     super(message)
   }
-}
-
-function errorMessage(error: unknown): string {
-  const data = (error as { data?: { message?: string } })?.data
-  if (data?.message) return data.message
-  return error instanceof Error ? error.message : "Something went wrong"
 }
 
 /** Thin wrapper over the Convex client, scoped to one project. */
@@ -102,17 +78,17 @@ export class NuniApi {
     return this.client.onUpdate(
       api.comments.listForPage,
       { publicId: this.config.project, path },
-      (comments) => cb(comments as WidgetComment[]),
+      cb,
       onError
     )
   }
 
   /** The visitor's own comments on every page, live. */
-  onMine(author: Author, cb: (comments: WidgetComment[]) => void) {
+  onMine(author: WidgetAuthor, cb: (comments: WidgetComment[]) => void) {
     return this.client.onUpdate(
       api.comments.listMine,
       { publicId: this.config.project, ...author },
-      (comments) => cb(comments as WidgetComment[]),
+      cb,
       () => {}
     )
   }
@@ -122,7 +98,7 @@ export class NuniApi {
     return this.client.onUpdate(
       api.comments.listForSite,
       { publicId: this.config.project },
-      (comments) => cb(comments as WidgetComment[]),
+      cb,
       () => {}
     )
   }
@@ -184,7 +160,7 @@ export class NuniApi {
     return this.client.onUpdate(
       api.comments.getForOwner,
       { publicId: this.config.project, id, sessionToken },
-      (comment) => cb(comment as OwnerComment | null),
+      cb,
       () => {}
     )
   }
@@ -194,7 +170,7 @@ export class NuniApi {
     return this.client.onUpdate(
       api.replies.listForComment,
       { publicId: this.config.project, commentId },
-      (thread) => cb(thread as Thread),
+      cb,
       () => {}
     )
   }
@@ -203,17 +179,20 @@ export class NuniApi {
   getComment(id: string): Promise<WidgetComment | null> {
     return this.client
       .query(api.comments.getById, { publicId: this.config.project, id })
-      .then((c) => c as WidgetComment | null)
       .catch(() => null)
   }
 
   async createComment(comment: NewComment): Promise<string> {
+    const payload: NewCommentPayload = {
+      publicId: this.config.project,
+      ...comment,
+    }
     let response: Response
     try {
-      response = await fetch(`${this.config.convexSiteUrl}/widget/comments`, {
+      response = await fetch(this.config.convexSiteUrl + HTTP_ROUTES.comments, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ publicId: this.config.project, ...comment }),
+        body: JSON.stringify(payload),
       })
     } catch {
       throw new NuniApiError(
@@ -236,20 +215,14 @@ export class NuniApi {
   }
 
   /** Through the HTTP action, so replies are rate limited per IP. */
-  async createReply(
-    reply: {
-      commentId: string
-      body: string
-      authorName: string
-      sessionToken?: string
-    } & Author
-  ): Promise<string> {
+  async createReply(reply: Omit<NewReplyPayload, "publicId">): Promise<string> {
+    const payload: NewReplyPayload = { publicId: this.config.project, ...reply }
     let response: Response
     try {
-      response = await fetch(`${this.config.convexSiteUrl}/widget/replies`, {
+      response = await fetch(this.config.convexSiteUrl + HTTP_ROUTES.replies, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ publicId: this.config.project, ...reply }),
+        body: JSON.stringify(payload),
       })
     } catch {
       throw new NuniApiError(
@@ -272,32 +245,32 @@ export class NuniApi {
   }
 
   /** Attach the element's screenshot (for the owner) to a just-posted comment. */
-  uploadScreenshot(id: string, author: Author, image: Blob) {
+  uploadScreenshot(id: string, author: WidgetAuthor, image: Blob) {
     return this.upload("screenshot", id, author, image)
   }
 
   /** An image for everyone: picked, pasted or a marked-up screenshot. */
-  uploadImage(id: string, author: Author, image: Blob) {
+  uploadImage(id: string, author: WidgetAuthor, image: Blob) {
     return this.upload("image", id, author, image)
   }
 
   private async upload(
-    kind: "screenshot" | "image",
+    kind: UploadKind,
     id: string,
-    author: Author,
+    author: WidgetAuthor,
     image: Blob
   ) {
     const response = await fetch(
-      `${this.config.convexSiteUrl}/widget/${kind}`,
+      this.config.convexSiteUrl + UPLOAD_ROUTES[kind],
       {
         method: "POST",
         headers: {
           "Content-Type": image.type,
-          "X-Nuni-Project": this.config.project,
-          "X-Nuni-Comment": id,
-          "X-Nuni-Author": author.authorSecret,
+          [UPLOAD_HEADERS.project]: this.config.project,
+          [UPLOAD_HEADERS.comment]: id,
+          [UPLOAD_HEADERS.author]: author.authorSecret,
           ...(author.commenterToken
-            ? { "X-Nuni-Commenter": author.commenterToken }
+            ? { [UPLOAD_HEADERS.commenter]: author.commenterToken }
             : {}),
         },
         body: image,
@@ -319,14 +292,17 @@ export class NuniApi {
     try {
       return await promise
     } catch (error) {
-      throw new NuniApiError(errorMessage(error), "error")
+      throw new NuniApiError(
+        errorMessage(error, "Something went wrong"),
+        "error"
+      )
     }
   }
 
-  editOwn(id: string, author: Author, body: string, suggestion?: string) {
+  editOwn(id: string, author: WidgetAuthor, body: string, suggestion?: string) {
     return this.run(
       this.client.mutation(api.comments.editOwn, {
-        id: id as never,
+        id,
         ...author,
         body,
         suggestion,
@@ -334,19 +310,19 @@ export class NuniApi {
     )
   }
 
-  deleteOwn(id: string, author: Author) {
+  deleteOwn(id: string, author: WidgetAuthor) {
     return this.run(
       this.client.mutation(api.comments.deleteOwn, {
-        id: id as never,
+        id,
         ...author,
       })
     )
   }
 
-  resolve(id: string, sessionToken: string, resolution?: "outdated") {
+  resolve(id: string, sessionToken: string, resolution?: Resolution) {
     return this.run(
       this.client.mutation(api.comments.resolve, {
-        id: id as never,
+        id,
         resolution,
         sessionToken,
       })
@@ -357,7 +333,7 @@ export class NuniApi {
   repin(id: string, anchor: Anchor, sessionToken: string) {
     return this.run(
       this.client.mutation(api.comments.repin, {
-        id: id as never,
+        id,
         anchor,
         sessionToken,
       })
@@ -369,16 +345,17 @@ export class NuniApi {
    * found again, so the owner can see them. Best effort.
    */
   async reportPins(path: string, lost: string[], found: string[]) {
+    const payload: PinReportPayload = {
+      publicId: this.config.project,
+      path,
+      lost,
+      found,
+    }
     try {
-      await fetch(`${this.config.convexSiteUrl}/widget/pins`, {
+      await fetch(this.config.convexSiteUrl + HTTP_ROUTES.pins, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          publicId: this.config.project,
-          path,
-          lost,
-          found,
-        }),
+        body: JSON.stringify(payload),
         keepalive: true,
       })
     } catch {
@@ -389,26 +366,26 @@ export class NuniApi {
   reopen(id: string, sessionToken: string) {
     return this.run(
       this.client.mutation(api.comments.reopen, {
-        id: id as never,
+        id,
         sessionToken,
       })
     )
   }
 
-  editReply(id: string, author: Author, body: string) {
+  editReply(id: string, author: WidgetAuthor, body: string) {
     return this.run(
       this.client.mutation(api.replies.editOwn, {
-        id: id as never,
+        id,
         ...author,
         body,
       })
     )
   }
 
-  deleteReply(id: string, author: Author) {
+  deleteReply(id: string, author: WidgetAuthor) {
     return this.run(
       this.client.mutation(api.replies.deleteOwn, {
-        id: id as never,
+        id,
         ...author,
       })
     )
@@ -417,7 +394,7 @@ export class NuniApi {
   removeReply(id: string, sessionToken: string) {
     return this.run(
       this.client.mutation(api.replies.remove, {
-        id: id as never,
+        id,
         sessionToken,
       })
     )
@@ -427,7 +404,7 @@ export class NuniApi {
     commentId: string,
     targetId: string,
     emoji: string,
-    author: Author
+    author: WidgetAuthor
   ) {
     return this.run(
       this.client.mutation(api.reactions.toggle, {
@@ -443,7 +420,7 @@ export class NuniApi {
   remove(id: string, sessionToken: string) {
     return this.run(
       this.client.mutation(api.comments.remove, {
-        id: id as never,
+        id,
         sessionToken,
       })
     )

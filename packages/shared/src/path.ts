@@ -61,20 +61,36 @@ export function isLocalOrigin(origin: string): boolean {
   }
 }
 
-/** URL that opens the page with the comment focused by the widget. */
-export function commentUrl(
+/** The query parameter the widget opens a comment from: `?nuni=<id>`. */
+export const COMMENT_PARAM = "nuni"
+
+/**
+ * A link to a page of the site, opening the comment `commentId` when given.
+ * `search` is the query to keep (the comment's, or the current page's): a
+ * stored path with its own query keeps that one instead. Null when the link
+ * would leave the site.
+ *
+ * Stored paths come from anonymous comment submissions, so the path is
+ * appended to the origin as text, never resolved against it: one that
+ * doesn't start with "/" (".evil.com/x", "@evil.com/") would extend or
+ * replace the host and send the visitor, with the query, to another site.
+ */
+export function pageLink(
   page: { origin: string; path: string; search?: string },
-  id: string
-): string {
-  const [pathname, hashRoute] = page.path.split("#")
-  const origin = new URL(page.origin).origin
-  let url = new URL(pathname ?? "/", origin)
-  // Paths come from visitors: "//other.host/x" must not leave the page's origin.
-  if (url.origin !== origin) url = new URL("/", origin)
-  const params = new URLSearchParams(page.search ?? "")
-  params.set("nuni", id)
-  url.search = params.toString()
-  if (hashRoute) url.hash = hashRoute
+  commentId?: string
+): string | null {
+  let url: URL
+  let origin: string
+  try {
+    origin = new URL(page.origin).origin
+    url = new URL(origin + page.path)
+  } catch {
+    return null
+  }
+  if (url.origin !== origin) return null
+  const [ownPath = ""] = page.path.split("#")
+  if (!ownPath.includes("?")) url.search = page.search ?? ""
+  if (commentId) url.searchParams.set(COMMENT_PARAM, commentId)
   return url.toString()
 }
 

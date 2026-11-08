@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 
-import { isProjectId } from "@nuni/shared"
+import { isProjectId, projectIdsIn } from "@nuni/shared"
 
 const SKIP_DIRS = new Set([
   "node_modules",
@@ -24,7 +24,6 @@ const SKIP_DIRS = new Set([
 
 const SOURCE_FILE =
   /\.(?:[cm]?[jt]sx?|vue|svelte|astro|html?|php|erb|liquid|hbs|njk|mdx?)$/i
-const ID_IN_TEXT = /nuni_[1-9A-HJ-NP-Za-km-z]{22}/g
 const MAX_FILES = 5000
 const MAX_FILE_BYTES = 512 * 1024
 
@@ -70,8 +69,8 @@ export function findProjectIds(cwd: string): FoundProject[] {
       } catch {
         continue
       }
-      for (const [id] of text.matchAll(ID_IN_TEXT)) {
-        if (isProjectId(id) && !found.has(id)) {
+      for (const id of projectIdsIn(text)) {
+        if (!found.has(id)) {
           found.set(id, relative(cwd, path))
         }
       }

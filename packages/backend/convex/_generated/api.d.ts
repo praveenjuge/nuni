@@ -15,6 +15,7 @@ import type * as comments from "../comments.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as lib from "../lib.js";
+import type * as limits from "../limits.js";
 import type * as projects from "../projects.js";
 import type * as rateLimits from "../rateLimits.js";
 import type * as reactions from "../reactions.js";
@@ -23,7 +24,6 @@ import type * as sessions from "../sessions.js";
 import type * as testing from "../testing.js";
 import type * as transfers from "../transfers.js";
 import type * as users from "../users.js";
-import type * as validators from "../validators.js";
 
 import type {
   ApiFromModules,
@@ -39,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   http: typeof http;
   lib: typeof lib;
+  limits: typeof limits;
   projects: typeof projects;
   rateLimits: typeof rateLimits;
   reactions: typeof reactions;
@@ -47,7 +48,6 @@ declare const fullApi: ApiFromModules<{
   testing: typeof testing;
   transfers: typeof transfers;
   users: typeof users;
-  validators: typeof validators;
 }>;
 
 /**

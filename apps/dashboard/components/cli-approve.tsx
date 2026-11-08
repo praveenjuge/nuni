@@ -1,6 +1,7 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
+import { cliCommand, dashboardPath, projectRoute } from "@nuni/shared"
 import { useMutation, useQuery } from "convex/react"
 import {
   CircleCheckIcon,
@@ -20,6 +21,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { useStoreUser } from "@/components/use-store-user"
+import { errorMessage } from "@/lib/format"
 
 type Done =
   | { step: "approved"; publicId: string }
@@ -72,7 +74,7 @@ export function CliApprove({ code }: { code: string }) {
             <CardContent>
               <a
                 className={buttonVariants({ variant: "outline" })}
-                href={`/dashboard/p/${done.publicId}`}
+                href={dashboardPath(projectRoute(done.publicId))}
               >
                 Open dashboard
               </a>
@@ -106,7 +108,7 @@ export function CliApprove({ code }: { code: string }) {
                 ? "It was already approved."
                 : login.state === "denied"
                   ? "It was denied."
-                  : "It has expired or does not exist. Run nuni login again for a new one."}
+                  : `It has expired or does not exist. Run ${cliCommand("login")} again for a new one.`}
             </CardDescription>
           </CardHeader>
         ) : login.access === "other" ? (
@@ -169,13 +171,5 @@ export function CliApprove({ code }: { code: string }) {
         )}
       </Card>
     </FlowShell>
-  )
-}
-
-function errorMessage(error: unknown): string {
-  const data = (error as { data?: { message?: string } })?.data
-  return (
-    data?.message ??
-    (error instanceof Error ? error.message : "Please try again.")
   )
 }

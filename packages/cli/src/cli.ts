@@ -5,10 +5,12 @@ import packageJson from "../package.json"
 
 import {
   buildAgentPrompt,
+  CLI_NPX,
+  cliCommand,
   DOCS_URL,
   generateProjectId,
   isProjectId,
-  PACKAGES,
+  MCP_ADD_COMMAND,
 } from "@nuni/shared"
 
 import {
@@ -35,20 +37,20 @@ const VERSION = packageJson.version
 const HELP = `nuni ${VERSION}: pinned comments on your live site
 
 Usage
-  npx @nuniapp/cli@latest init [--id <project-id>] [--cwd <dir>] [--json]
-  npx @nuniapp/cli@latest prompt [--id <project-id>]
-  npx @nuniapp/cli@latest id
+  ${CLI_NPX} init [--id <project-id>] [--cwd <dir>] [--json]
+  ${CLI_NPX} prompt [--id <project-id>]
+  ${CLI_NPX} id
 
-  npx @nuniapp/cli@latest login              sign in to this project's comments
-  npx @nuniapp/cli@latest comments [--status open|resolved] [--page /path] [--limit 20]
+  ${CLI_NPX} login              sign in to this project's comments
+  ${CLI_NPX} comments [--status open|resolved] [--page /path] [--limit 20]
                                    [--search "words"] [--group page|element]
-  npx @nuniapp/cli@latest pages
-  npx @nuniapp/cli@latest comment <id> [--save-screenshot <dir>]
-  npx @nuniapp/cli@latest reply <id> "message"
-  npx @nuniapp/cli@latest resolve <id...> [--note "what changed"]
-  npx @nuniapp/cli@latest reopen <id>
-  npx @nuniapp/cli@latest whoami | logout
-  npx @nuniapp/cli@latest mcp                MCP server for coding agents (stdio)
+  ${CLI_NPX} pages
+  ${CLI_NPX} comment <id> [--save-screenshot <dir>]
+  ${CLI_NPX} reply <id> "message"
+  ${CLI_NPX} resolve <id...> [--note "what changed"]
+  ${CLI_NPX} reopen <id>
+  ${CLI_NPX} whoami | logout
+  ${CLI_NPX} mcp                MCP server for coding agents (stdio)
 
 Commands
   init      Generate a project ID and print the install steps for this project
@@ -60,7 +62,7 @@ Commands
   comment   One comment with the element, DOM, styles, console and screenshot
   reply     Reply in a comment's thread, as the owner
   resolve   Mark comments resolved (with an optional note); reopen does the opposite
-  mcp       Run the MCP server: claude mcp add nuni -- npx -y @nuniapp/cli@latest mcp
+  mcp       Run the MCP server: ${MCP_ADD_COMMAND}
 
 The project comes from --project, $NUNI_PROJECT, or the nuni_ ID in your code.
 Add --json to any command for machine-readable output.
@@ -270,7 +272,7 @@ async function runAccountCommand(
     ) {
       const hint =
         error instanceof RemoteError && error.code === "unauthenticated"
-          ? ` Run \`npx ${PACKAGES.cli}@latest login\`.`
+          ? ` Run \`${cliCommand("login")}\`.`
           : ""
       ctx.err(`${error.message.replace(/\.$/, "")}.${hint}`)
       return 1

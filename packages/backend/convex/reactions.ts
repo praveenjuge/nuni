@@ -1,11 +1,12 @@
-import { LIMITS, REACTIONS } from "@nuni/shared"
+import { REACTIONS } from "@nuni/shared"
+import { widgetAuthorArgs } from "@nuni/shared/validators"
 import { v } from "convex/values"
 
 import { mutation } from "./_generated/server"
 import { fail, widgetAuthor } from "./lib"
+import { SERVER_LIMITS } from "./limits"
 import { rateLimiter } from "./rateLimits"
 import { commentInProject } from "./replies"
-import { widgetAuthorArgs } from "./validators"
 
 /**
  * Add or remove one emoji on a comment or one of its replies. Each author
@@ -61,7 +62,7 @@ export const toggle = mutation({
       await ctx.db.patch(comment._id, { reactionCount: Math.max(0, count - 1) })
       return { added: false }
     }
-    if (count >= LIMITS.reactionsPerComment) {
+    if (count >= SERVER_LIMITS.reactionsPerComment) {
       fail("cap_reached", "This thread has reached its reaction limit")
     }
     await ctx.db.insert("reactions", {

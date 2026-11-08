@@ -1,4 +1,4 @@
-import { isProjectId } from "@nuni/shared"
+import { cliCommand, isProjectId } from "@nuni/shared"
 
 import { resolveConfig, type NuniOptions, type ResolvedConfig } from "./config"
 import { startCollectors, type Collectors } from "./context"
@@ -49,7 +49,7 @@ export function mount(options: NuniOptions, runtime: Runtime): NuniInstance {
     return noop
   if (!isProjectId(options.project)) {
     console.warn(
-      `[nuni] "${options.project}" is not a valid project ID. Run \`npx @nuniapp/cli@latest init\` to get one.`
+      `[nuni] "${options.project}" is not a valid project ID. Run \`${cliCommand("init")}\` to get one.`
     )
     return noop
   }

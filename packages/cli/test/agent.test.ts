@@ -68,6 +68,7 @@ const comment: OwnerComment = {
   context: { console: [{ level: "error", message: "Boom", at: 1 }] },
   screenshotUrl: "https://files.example.com/shot",
   imageUrls: ["https://files.example.com/drawn"],
+  replies: [],
 }
 
 /** A second comment on the same button, and so in the same group. */

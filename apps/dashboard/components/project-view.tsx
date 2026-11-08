@@ -1,7 +1,7 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
-import { LIMITS } from "@nuni/shared"
+import { LIMITS, type OwnerComment } from "@nuni/shared"
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react"
 import {
   ArchiveIcon,
@@ -24,7 +24,7 @@ import {
 } from "react"
 import { toast } from "sonner"
 
-import { CommentDetail, type OwnerComment } from "@/components/comment-detail"
+import { CommentDetail } from "@/components/comment-detail"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ProjectHeader } from "@/components/project-header"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"

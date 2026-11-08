@@ -2,7 +2,14 @@ import { spawn } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
-import { buildCommentPrompt, PACKAGES, type CommentStatus } from "@nuni/shared"
+import {
+  buildCommentPrompt,
+  cliCommand,
+  DASHBOARD_ROUTES,
+  dashboardUrl,
+  LIMITS,
+  type CommentStatus,
+} from "@nuni/shared"
 
 import {
   credentialFor,
@@ -30,7 +37,7 @@ export interface CommandContext {
   openBrowser?: (url: string) => void
 }
 
-const LOGIN = `npx ${PACKAGES.cli}@latest login`
+const LOGIN = cliCommand("login")
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export class CommandError extends Error {}
@@ -70,7 +77,9 @@ export async function login(ctx: CommandContext): Promise<number> {
   const project = resolveProject(ctx.project, ctx.cwd)
   const client = `nuni-cli ${ctx.version} (${process.platform}; node ${process.versions.node})`
   const start = await ctx.remote.startLogin(project.id, client)
-  const url = `${APP_URL}/dashboard/cli?code=${start.userCode}`
+  const url = dashboardUrl(APP_URL, DASHBOARD_ROUTES.cli, {
+    code: start.userCode,
+  })
 
   if (ctx.json) {
     ctx.out(JSON.stringify({ status: "waiting", url, code: start.userCode }))
@@ -187,7 +196,7 @@ export async function listComments(
     throw new CommandError(`--group must be page or element`)
   }
   const status = (options.status ?? "open") as CommentStatus
-  const limit = options.limit ? Number(options.limit) : 20
+  const limit = options.limit ? Number(options.limit) : LIMITS.agentListDefault
   if (!Number.isInteger(limit) || limit < 1) {
     throw new CommandError(`--limit must be a positive number`)
   }
@@ -208,7 +217,7 @@ export async function listComments(
       more: Boolean(page.cursor),
       order: search ? "best match first" : undefined,
       groupBy: options.group as GroupBy | undefined,
-      detailHint: `Full context: npx ${PACKAGES.cli}@latest comment <id>`,
+      detailHint: `Full context: ${cliCommand("comment <id>")}`,
     })
   )
   return 0

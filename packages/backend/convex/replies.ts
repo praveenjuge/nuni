@@ -1,4 +1,5 @@
-import { LIMITS } from "@nuni/shared"
+import type { ReplyView, Thread, WidgetAuthor } from "@nuni/shared"
+import { widgetAuthorArgs } from "@nuni/shared/validators"
 import { v } from "convex/values"
 
 import type { Doc, Id } from "./_generated/dataModel"
@@ -18,12 +19,12 @@ import {
   imageUrls,
   projectByPublicId,
   requireOwner,
+  rowById,
   widgetAuthor,
   type AuthorLookup,
-  type WidgetAuthor,
 } from "./lib"
+import { SERVER_LIMITS } from "./limits"
 import { ipKey, rateLimiter } from "./rateLimits"
-import { widgetAuthorArgs } from "./validators"
 
 /**
  * Replies in a comment's thread. Public like comments: anyone with the
@@ -32,7 +33,10 @@ import { widgetAuthorArgs } from "./validators"
  * remove any.
  */
 
-export async function toReplyView(r: Doc<"replies">, author: AuthorLookup) {
+export async function toReplyView(
+  r: Doc<"replies">,
+  author: AuthorLookup
+): Promise<ReplyView> {
   return {
     _id: r._id,
     commentId: r.commentId,
@@ -53,7 +57,7 @@ export async function repliesFor(
   const replies = await ctx.db
     .query("replies")
     .withIndex("by_comment", (q) => q.eq("commentId", commentId))
-    .take(LIMITS.repliesPerComment)
+    .take(SERVER_LIMITS.repliesPerComment)
   return Promise.all(replies.map((r) => toReplyView(r, author)))
 }
 
@@ -84,7 +88,7 @@ async function insertReply(
   }
 ) {
   const count = comment.replyCount ?? 0
-  if (count >= LIMITS.repliesPerComment) {
+  if (count >= SERVER_LIMITS.repliesPerComment) {
     fail("cap_reached", "This thread has reached its reply limit")
   }
   const now = Date.now()
@@ -178,7 +182,7 @@ export const replyAsOwner = mutation({
 /** The thread for an open card in the widget: replies and reactions. */
 export const listForComment = query({
   args: { publicId: v.string(), commentId: v.string() },
-  handler: async (ctx, { publicId, commentId }) => {
+  handler: async (ctx, { publicId, commentId }): Promise<Thread> => {
     const project = await projectByPublicId(ctx, publicId)
     const id = ctx.db.normalizeId("comments", commentId)
     const comment = id ? await ctx.db.get(id) : null
@@ -190,7 +194,7 @@ export const listForComment = query({
       ctx.db
         .query("reactions")
         .withIndex("by_comment", (q) => q.eq("commentId", comment._id))
-        .take(LIMITS.reactionsPerComment),
+        .take(SERVER_LIMITS.reactionsPerComment),
       imageUrls(ctx, comment),
     ])
     const groups = new Map<
@@ -218,12 +222,8 @@ export const listForComment = query({
   },
 })
 
-async function loadOwnReply(
-  ctx: MutationCtx,
-  id: Id<"replies">,
-  auth: WidgetAuthor
-) {
-  const reply = await ctx.db.get(id)
+async function loadOwnReply(ctx: MutationCtx, id: string, auth: WidgetAuthor) {
+  const reply = await rowById(ctx, "replies", id)
   if (!reply) fail("not_found", "Reply not found")
   const { keys } = await widgetAuthor(ctx, reply.projectId, auth)
   if (!keys.includes(reply.authorKeyHash)) {
@@ -274,15 +274,18 @@ export async function deleteThread(
 }
 
 export const editOwn = mutation({
-  args: { id: v.id("replies"), ...widgetAuthorArgs, body: v.string() },
+  args: { id: v.string(), ...widgetAuthorArgs, body: v.string() },
   handler: async (ctx, { id, body, ...auth }) => {
-    await loadOwnReply(ctx, id, auth)
-    await ctx.db.patch(id, { body: cleanBody(body), editedAt: Date.now() })
+    const reply = await loadOwnReply(ctx, id, auth)
+    await ctx.db.patch(reply._id, {
+      body: cleanBody(body),
+      editedAt: Date.now(),
+    })
   },
 })
 
 export const deleteOwn = mutation({
-  args: { id: v.id("replies"), ...widgetAuthorArgs },
+  args: { id: v.string(), ...widgetAuthorArgs },
   handler: async (ctx, { id, ...auth }) => {
     await removeReply(ctx, await loadOwnReply(ctx, id, auth))
   },
@@ -290,9 +293,9 @@ export const deleteOwn = mutation({
 
 /** The owner removes any reply (dashboard JWT or widget session). */
 export const remove = mutation({
-  args: { id: v.id("replies"), sessionToken: v.optional(v.string()) },
+  args: { id: v.string(), sessionToken: v.optional(v.string()) },
   handler: async (ctx, { id, sessionToken }) => {
-    const reply = await ctx.db.get(id)
+    const reply = await rowById(ctx, "replies", id)
     if (!reply) return
     await requireOwner(ctx, reply.projectId, { sessionToken })
     await removeReply(ctx, reply)

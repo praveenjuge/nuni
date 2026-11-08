@@ -1,7 +1,6 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
-import type { Id } from "@nuni/backend/dataModel"
 import { LIMITS, type ReplyView } from "@nuni/shared"
 import { useMutation } from "convex/react"
 import { ArrowUpIcon, TrashIcon } from "vadivam-react"
@@ -127,9 +126,7 @@ export function CommentThread({
         onConfirm={() => {
           if (!deleting) return
           setError(null)
-          remove({ id: deleting as Id<"replies"> }).catch((err) =>
-            setError(errorMessage(err))
-          )
+          remove({ id: deleting }).catch((err) => setError(errorMessage(err)))
         }}
       />
     </div>

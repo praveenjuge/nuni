@@ -18,29 +18,36 @@ import {
 } from "@nuni/anchor"
 import {
   buildCommentPrompt,
+  COMMENT_PARAM,
+  DASHBOARD_ROUTES,
+  dashboardUrl,
   describeLocation,
   generateSecret,
+  IMAGE_TYPES,
+  isImageType,
   LIMITS,
+  pageLink,
   REACTIONS,
+  readHandoff,
   type Anchor,
   type CommentContext,
   type DomContext,
   type OwnerComment,
   type ReplyView,
   type Thread,
+  type WidgetAuthor,
   type WidgetComment,
 } from "@nuni/shared"
 
 import {
   NuniApi,
   NuniApiError,
-  type Author,
   type PageSummary,
   type ProjectStatus,
 } from "./api"
 import { oneOf, POSITIONS, type Position, type ResolvedConfig } from "./config"
 import { domContext, type Collectors } from "./context"
-import { IMAGE_TYPES, imageFromFile } from "./image"
+import { imageFromFile } from "./image"
 import {
   colorFor,
   copyText,
@@ -227,39 +234,15 @@ function describeElement(el: Element): string {
 }
 
 /**
- * A link to one comment on another page of this site: the page, opened
- * with that comment focused. Null when the page can't be linked to.
+ * A link to another page of this site, on this origin and with this page's
+ * query (comments are shared across origins, and sites often keep state in
+ * the query), opening one comment when given.
  */
-export function commentHref(
-  c: Pick<WidgetComment, "_id" | "page">,
-  loc: { origin: string; search: string }
-): string | null {
-  const page = otherPageHref(c.page.path, loc)
-  if (page === null) return null
-  const url = new URL(page)
-  url.searchParams.set("nuni", c._id)
-  return url.toString()
-}
-
-/**
- * Build an "Other pages" link target, or null when it would leave the
- * current origin. The stored path comes from anonymous comment submissions;
- * one that does not start with "/" (".evil.com/x", "@evil.com/") would
- * extend or replace the host once the concatenated string is parsed as a
- * URL, sending the visitor - and the page's query string - to another site.
- */
-export function otherPageHref(
-  path: string,
-  loc: { origin: string; search: string }
-): string | null {
-  const candidate = /[?#]/.test(path)
-    ? loc.origin + path
-    : loc.origin + path + loc.search
-  try {
-    return new URL(candidate).origin === loc.origin ? candidate : null
-  } catch {
-    return null
-  }
+function siteLink(path: string, commentId?: string): string | null {
+  return pageLink(
+    { origin: location.origin, path, search: location.search },
+    commentId
+  )
 }
 
 /** A press on the toolbar: the pointer, where it started and how far it went. */
@@ -701,7 +684,7 @@ export class NuniWidget {
   }
 
   /** Who is writing, for every comment, reply, reaction and upload. */
-  private get author(): Author {
+  private get author(): WidgetAuthor {
     return {
       authorSecret: this.secret,
       commenterToken: this.commenterToken ?? undefined,
@@ -956,7 +939,7 @@ export class NuniWidget {
     const roots = new Set<Node>()
     for (const { element } of this.placements.values()) {
       let node: Element | null = element
-      for (let depth = 0; node && depth < 8; depth++) {
+      for (let depth = 0; node && depth < LIMITS.anchorScopeMaxDepth; depth++) {
         const root = scopeRootOf(node)
         if (root === document) break
         roots.add(root)
@@ -1798,29 +1781,17 @@ export class NuniWidget {
 
   // --------------------------------------------------------------- claim
 
-  private openClaim() {
-    const url = new URL(`${this.config.appUrl}/dashboard/claim`)
-    url.searchParams.set("project", this.config.project)
-    url.searchParams.set("origin", location.origin)
-    const popup = window.open(
-      url.toString(),
-      "nuni-claim",
-      "popup,width=480,height=680"
-    )
-    if (!popup) location.href = url.toString()
-  }
-
-  /** Sign in to comment under an account, in a popup on the dashboard. */
-  private openCommenterSignIn() {
-    const url = new URL(`${this.config.appUrl}/dashboard/comment-sign-in`)
-    url.searchParams.set("project", this.config.project)
-    url.searchParams.set("origin", location.origin)
-    const popup = window.open(
-      url.toString(),
-      "nuni-comment-sign-in",
-      "popup,width=480,height=680"
-    )
-    if (!popup) location.href = url.toString()
+  /**
+   * Claim the site, or sign in to comment under an account, in a dashboard
+   * popup that posts the token back (see `onMessage`).
+   */
+  private openDashboard(route: "claim" | "commentSignIn", name: string) {
+    const url = dashboardUrl(this.config.appUrl, DASHBOARD_ROUTES[route], {
+      project: this.config.project,
+      origin: location.origin,
+    })
+    const popup = window.open(url, name, "popup,width=480,height=680")
+    if (!popup) location.href = url
   }
 
   private async onCommenterSignedIn(token: string) {
@@ -1850,26 +1821,15 @@ export class NuniWidget {
       return
     }
     if (e.origin !== appOrigin) return
-    const data = e.data as {
-      type?: string
-      project?: string
-      token?: string
-    } | null
-    if (!data || data.project !== this.config.project) return
-    if (
-      data.type === "nuni:commenter" &&
-      typeof data.token === "string" &&
-      data.token.startsWith("nuni_c_")
-    ) {
-      void this.onCommenterSignedIn(data.token)
+    const handoff = readHandoff(e.data, this.config.project)
+    if (handoff?.kind === "commenter") {
+      void this.onCommenterSignedIn(handoff.token)
       return
     }
-    if (data.type !== "nuni:session") return
-    if (typeof data.token !== "string" || !data.token.startsWith("nuni_s_"))
-      return
-    this.ownerToken = data.token
-    write(KEYS.session(this.config.project), data.token)
-    this.watchSession(data.token)
+    if (handoff?.kind !== "session") return
+    this.ownerToken = handoff.token
+    write(KEYS.session(this.config.project), handoff.token)
+    this.watchSession(handoff.token)
     this.showToast(this.t("signedIn"))
   }
 
@@ -1877,10 +1837,10 @@ export class NuniWidget {
 
   private readDeepLink() {
     const url = new URL(location.href)
-    const id = url.searchParams.get("nuni")
+    const id = url.searchParams.get(COMMENT_PARAM)
     if (!id) return
     this.deepLinkId = id
-    url.searchParams.delete("nuni")
+    url.searchParams.delete(COMMENT_PARAM)
     history.replaceState(history.state, "", url.toString())
   }
 
@@ -2682,7 +2642,7 @@ export class NuniWidget {
     // Your own comments: where each one is and whether it was resolved.
     const mineItem = (c: WidgetComment) => {
       const here = c.page.path === this.pageKey
-      const href = here ? null : commentHref(c, location)
+      const href = here ? null : siteLink(c.page.path, c._id)
       const resolvedBadge = c.status === "resolved"
       return h(
         here ? "button" : href === null ? "div" : "a",
@@ -2808,7 +2768,9 @@ export class NuniWidget {
       }
       for (const [path, comments] of groups) {
         children.push(h("div", { class: "section-label section-path" }, path))
-        children.push(...comments.map((c) => item(c, commentHref(c, location))))
+        children.push(
+          ...comments.map((c) => item(c, siteLink(c.page.path, c._id)))
+        )
       }
       if (!children.length && !otherPages.length) {
         children.push(
@@ -2823,7 +2785,7 @@ export class NuniWidget {
     if (otherPages.length && this.tab !== "mine") {
       children.push(h("div", { class: "section-label" }, this.t("otherPages")))
       for (const p of otherPages.slice(0, 20)) {
-        const href = otherPageHref(p.path, location)
+        const href = siteLink(p.path)
         children.push(
           h(
             href === null ? "div" : "a",
@@ -2993,7 +2955,11 @@ export class NuniWidget {
             h("span", { class: "spacer" }),
             h(
               "button",
-              { class: "btn", type: "button", onclick: () => this.openClaim() },
+              {
+                class: "btn",
+                type: "button",
+                onclick: () => this.openDashboard("claim", "nuni-claim"),
+              },
               icon(ICONS.github),
               this.t("claim")
             )
@@ -3143,7 +3109,7 @@ export class NuniWidget {
     if (attach) {
       textarea.addEventListener("paste", (e) => {
         const files = [...(e.clipboardData?.files ?? [])].filter((f) =>
-          IMAGE_TYPES.includes(f.type)
+          isImageType(f.type)
         )
         if (!files.length) return
         e.preventDefault()
@@ -3344,7 +3310,8 @@ export class NuniWidget {
               class: "cmp-link cmp-sign-in",
               type: "button",
               title: this.t("signInGithub"),
-              onclick: () => this.openCommenterSignIn(),
+              onclick: () =>
+                this.openDashboard("commentSignIn", "nuni-comment-sign-in"),
             },
             icon(ICONS.github),
             this.t("signIn")

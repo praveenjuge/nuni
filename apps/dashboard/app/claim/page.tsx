@@ -1,10 +1,10 @@
-import { isProjectId } from "@nuni/shared"
+import { DASHBOARD_ROUTES, dashboardPath, isProjectId } from "@nuni/shared"
 import { withAuth } from "@workos-inc/authkit-nextjs"
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 
 import { ClaimFlow } from "@/components/claim-flow"
-import { APP_URL } from "@/lib/config"
+import { signInUrl } from "@/lib/config"
 import { cleanOrigin } from "@/lib/format"
 
 export const metadata: Metadata = { title: "Claim this site" }
@@ -29,9 +29,8 @@ export default async function Page(props: PageProps<"/claim">) {
 
   const { user } = await withAuth()
   if (!user) {
-    const returnTo = `/dashboard/claim?project=${encodeURIComponent(project)}&origin=${encodeURIComponent(origin)}`
     redirect(
-      `${APP_URL}/dashboard/sign-in?returnTo=${encodeURIComponent(returnTo)}`
+      signInUrl(dashboardPath(DASHBOARD_ROUTES.claim, { project, origin }))
     )
   }
 

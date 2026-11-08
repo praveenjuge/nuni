@@ -1,3 +1,5 @@
+import { LIMITS } from "@nuni/shared"
+
 /**
  * Elements inside open shadow roots and same-origin iframes. A "scope" is
  * the root an element lives in: the page's document, a shadow root, or an
@@ -51,7 +53,7 @@ export interface ScopeStep {
 export function scopeChain(el: Element, top: Document): ScopeStep[] {
   const chain: ScopeStep[] = []
   let node = el
-  for (let depth = 0; depth < 8; depth++) {
+  for (let depth = 0; depth < LIMITS.anchorScopeMaxDepth; depth++) {
     const root = node.getRootNode()
     if (isShadowRoot(root)) {
       chain.unshift({ kind: "shadow", host: root.host })
@@ -86,7 +88,11 @@ export function viewportRect(el: Element, top?: Document): ViewportRect {
   let topPx = r.top
   let clipped = false
   let doc = el.ownerDocument
-  for (let depth = 0; depth < 8 && doc !== top; depth++) {
+  for (
+    let depth = 0;
+    depth < LIMITS.anchorScopeMaxDepth && doc !== top;
+    depth++
+  ) {
     const frame = frameElementOf(doc)
     if (!frame) break
     const view = doc.defaultView

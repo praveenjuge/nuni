@@ -1,6 +1,15 @@
 import { api } from "@nuni/backend/api"
-import type { CommentStatus, OwnerComment } from "@nuni/shared"
+import {
+  errorData,
+  errorMessage,
+  HTTP_ROUTES,
+  type CommentStatus,
+  type LoginPoll as ServerLoginPoll,
+  type LoginStart,
+  type OwnerComment,
+} from "@nuni/shared"
 import { ConvexHttpClient } from "convex/browser"
+import type { FunctionReturnType } from "convex/server"
 
 import { CONVEX_SITE_URL, CONVEX_URL } from "./env"
 
@@ -13,32 +22,16 @@ export class RemoteError extends Error {
   }
 }
 
-export interface LoginStart {
-  deviceSecret: string
-  userCode: string
-  expiresAt: number
-}
+export type { LoginStart }
 
-export type LoginPoll =
-  | { status: "pending" | "denied" | "expired" }
-  | {
-      status: "approved"
-      token: string
-      expiresAt: number
-      ownerName: string
-      projectName: string
-    }
-  | { status: "slow_down" }
+/** The server's answer, or `slow_down` when it asks the CLI to poll less. */
+export type LoginPoll = ServerLoginPoll | { status: "slow_down" }
 
-export interface CommentPage {
-  comments: OwnerComment[]
-  cursor: string | null
-}
+export type CommentPage = FunctionReturnType<typeof api.comments.listForAgent>
 
-export interface PageCount {
-  path: string
-  openCount: number
-}
+export type PageCount = FunctionReturnType<
+  typeof api.comments.pagesForAgent
+>[number]
 
 /** Everything the CLI and MCP server ask the backend. */
 export interface Remote {
@@ -76,15 +69,10 @@ export interface Remote {
   ): Promise<void>
 }
 
-/** The message from a Convex error, with a stable code. */
 function wrap(error: unknown): RemoteError {
-  const data = (error as { data?: { code?: string; message?: string } })?.data
-  if (data?.message) return new RemoteError(data.message, data.code ?? "error")
-  const message = error instanceof Error ? error.message : String(error)
-  if (/ArgumentValidationError|Value does not match/.test(message)) {
-    return new RemoteError("That is not a valid comment ID", "invalid")
-  }
-  return new RemoteError(message, "network")
+  const { code, message } = errorData(error)
+  if (message) return new RemoteError(message, code ?? "error")
+  return new RemoteError(errorMessage(error, String(error)), "network")
 }
 
 async function call<T>(fn: () => Promise<T>): Promise<T> {
@@ -121,7 +109,7 @@ export function createRemote(): Remote {
 
   return {
     async startLogin(publicId, clientName) {
-      const { status, data } = await postJson("/cli/login/start", {
+      const { status, data } = await postJson(HTTP_ROUTES.cliLoginStart, {
         publicId,
         client: clientName,
       })
@@ -135,7 +123,7 @@ export function createRemote(): Remote {
     },
 
     async pollLogin(deviceSecret) {
-      const { status, data } = await postJson("/cli/login/poll", {
+      const { status, data } = await postJson(HTTP_ROUTES.cliLoginPoll, {
         deviceSecret,
       })
       if (status === 429) return { status: "slow_down" }
@@ -159,14 +147,13 @@ export function createRemote(): Remote {
       }),
 
     listComments: (publicId, token, options = {}) =>
-      call(async () => {
-        const page = await client.query(api.comments.listForAgent, {
+      call(() =>
+        client.query(api.comments.listForAgent, {
           publicId,
           sessionToken: token,
           ...options,
         })
-        return page as unknown as CommentPage
-      }),
+      ),
 
     listPages: (publicId, token) =>
       call(() =>
@@ -177,20 +164,19 @@ export function createRemote(): Remote {
       ),
 
     getComment: (publicId, token, id) =>
-      call(async () => {
-        const comment = await client.query(api.comments.getForOwner, {
+      call(() =>
+        client.query(api.comments.getForOwner, {
           publicId,
           id,
           sessionToken: token,
         })
-        return comment as unknown as OwnerComment | null
-      }),
+      ),
 
     setStatus: (token, id, status) =>
       call(async () => {
         const fn =
           status === "resolved" ? api.comments.resolve : api.comments.reopen
-        await client.mutation(fn, { id: id as never, sessionToken: token })
+        await client.mutation(fn, { id, sessionToken: token })
       }),
 
     reply: (publicId, token, id, body) =>

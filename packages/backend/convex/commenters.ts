@@ -1,4 +1,4 @@
-import { LIMITS, randomBase58 } from "@nuni/shared"
+import { LIMITS, randomBase58, TOKEN_PREFIX } from "@nuni/shared"
 import { v } from "convex/values"
 
 import { internal } from "./_generated/api"
@@ -15,6 +15,7 @@ import {
   sha256Hex,
   userAuthorKey,
 } from "./lib"
+import { SERVER_LIMITS } from "./limits"
 import { rateLimiter } from "./rateLimits"
 
 /**
@@ -45,7 +46,7 @@ export const create = mutation({
     })
     if (!ok) fail("rate_limited", "Too many sign-ins, try again later")
 
-    const token = `nuni_c_${randomBase58(40)}`
+    const token = `${TOKEN_PREFIX.commenter}${randomBase58(40)}`
     const expiresAt = Date.now() + LIMITS.sessionTtlMs
     await ctx.db.insert("commenterSessions", {
       tokenHash: await sha256Hex(token),
@@ -77,9 +78,6 @@ export const validate = query({
   },
 })
 
-/** Most of a browser's guest comments, replies and reactions moved at once. */
-const LINK_LIMIT = 200
-
 /**
  * Right after signing in: this browser's guest comments, replies and
  * reactions on the project become the account's. Proven by holding both
@@ -109,19 +107,19 @@ export const linkBrowser = mutation({
         .withIndex("by_project_author", (q) =>
           q.eq("projectId", project._id).eq("authorKeyHash", from)
         )
-        .take(LINK_LIMIT),
+        .take(SERVER_LIMITS.linkBrowserMax),
       ctx.db
         .query("replies")
         .withIndex("by_project_author", (q) =>
           q.eq("projectId", project._id).eq("authorKeyHash", from)
         )
-        .take(LINK_LIMIT),
+        .take(SERVER_LIMITS.linkBrowserMax),
       ctx.db
         .query("reactions")
         .withIndex("by_project_author", (q) =>
           q.eq("projectId", project._id).eq("authorKeyHash", from)
         )
-        .take(LINK_LIMIT),
+        .take(SERVER_LIMITS.linkBrowserMax),
     ])
 
     for (const comment of comments) {
@@ -170,7 +168,12 @@ export const linkBrowser = mutation({
 export const signOut = mutation({
   args: { commenterToken: v.string() },
   handler: async (ctx, { commenterToken }) => {
-    if (!commenterToken || commenterToken.length > 200) return
+    if (
+      !commenterToken ||
+      commenterToken.length > SERVER_LIMITS.tokenMaxLength
+    ) {
+      return
+    }
     const tokenHash = await sha256Hex(commenterToken)
     const session = await ctx.db
       .query("commenterSessions")
@@ -180,8 +183,6 @@ export const signOut = mutation({
   },
 })
 
-const CLEANUP_BATCH = 500
-
 /** Daily cron: delete expired commenter sessions. */
 export const cleanupExpired = internalMutation({
   args: {},
@@ -189,9 +190,9 @@ export const cleanupExpired = internalMutation({
     const expired = await ctx.db
       .query("commenterSessions")
       .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
-      .take(CLEANUP_BATCH)
+      .take(SERVER_LIMITS.cleanupBatch)
     for (const session of expired) await ctx.db.delete(session._id)
-    if (expired.length === CLEANUP_BATCH) {
+    if (expired.length === SERVER_LIMITS.cleanupBatch) {
       await ctx.scheduler.runAfter(0, internal.commenters.cleanupExpired, {})
     }
     return expired.length

@@ -1,4 +1,4 @@
-import { MASK_ATTRIBUTE, MASK_SELECTOR } from "@nuni/shared"
+import { LIMITS, MASK_ATTRIBUTE, MASK_SELECTOR } from "@nuni/shared"
 
 const SKIP_TEXT_TAGS = new Set([
   "SCRIPT",
@@ -18,7 +18,10 @@ export function normalizeText(value: string): string {
  * resolving, so their (private) text is never stored and matching stays
  * consistent.
  */
-export function elementText(el: Element, max = 120): string {
+export function elementText(
+  el: Element,
+  max: number = LIMITS.anchorTextMaxLength
+): string {
   if (el.closest(MASK_SELECTOR)) return ""
   // Tag names, not instanceof: elements in iframes come from another realm.
   if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {

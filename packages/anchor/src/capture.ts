@@ -37,7 +37,7 @@ function ancestorsOf(el: Element): AnchorAncestor[] {
   let node = el.parentElement
   while (
     node &&
-    out.length < 5 &&
+    out.length < LIMITS.anchorAncestorsMax &&
     node !== node.ownerDocument.documentElement
   ) {
     const id = stableIdOf(node)
@@ -49,7 +49,7 @@ function ancestorsOf(el: Element): AnchorAncestor[] {
     // Short context text (e.g. the card title) for the closest ancestors,
     // used to tell identical-looking siblings apart.
     if (out.length < 3 && node !== node.ownerDocument.body) {
-      const text = elementText(node, 80)
+      const text = elementText(node, LIMITS.anchorAncestorTextMaxLength)
       if (text) entry.text = text
     }
     out.push(entry)

@@ -1,4 +1,4 @@
-import type { Anchor } from "@nuni/shared"
+import { LIMITS, type Anchor } from "@nuni/shared"
 
 import { reactComponentName } from "./component"
 import { attributeAllowed, type AnchorOptions } from "./options"
@@ -281,7 +281,7 @@ function scoreCandidate(
     add(0.5, reactComponentName(el) === anchor.componentName ? 1 : 0)
   }
 
-  const text = textOf(el, 120, cache)
+  const text = textOf(el, LIMITS.anchorTextMaxLength, cache)
   const textSim = anchor.text
     ? textSimilarity(text, anchor.text)
     : text
@@ -313,7 +313,10 @@ function scoreCandidate(
     s += 0.25 * jaccard(stableClasses(node), expected.classes)
     ancTotal += weight * s
     if (context === null && expected.text && expected.text !== anchor.text) {
-      context = textSimilarity(textOf(node, 80, cache), expected.text)
+      context = textSimilarity(
+        textOf(node, LIMITS.anchorAncestorTextMaxLength, cache),
+        expected.text
+      )
     }
     node = node.parentElement
   })
@@ -425,7 +428,11 @@ function collectCandidates(
       if (el.tagName.toLowerCase() === anchor.tag) continue
       const content = contentOf(el, cache)
       if (!content || content.length > exact.length * 3 + 20) continue
-      if (textOf(el, 120, cache).toLowerCase() === exact) add(el)
+      if (
+        textOf(el, LIMITS.anchorTextMaxLength, cache).toLowerCase() === exact
+      ) {
+        add(el)
+      }
     }
   }
   return { candidates, pathMatch }

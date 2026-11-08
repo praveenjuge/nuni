@@ -1,7 +1,8 @@
-import { generateProjectId, generateSecret, LIMITS } from "@nuni/shared"
+import { generateProjectId, generateSecret } from "@nuni/shared"
 import { describe, expect, it } from "vitest"
 
 import { api } from "../convex/_generated/api"
+import { SERVER_LIMITS } from "../convex/limits"
 import { addComment, setup, signIn, type T } from "./helpers"
 
 function postReply(t: T, body: Record<string, unknown>, ip = "5.5.5.5") {
@@ -171,7 +172,7 @@ describe("replies", () => {
     const publicId = generateProjectId()
     const id = await addComment(t, publicId)
     await t.run(async (ctx) => {
-      await ctx.db.patch(id, { replyCount: LIMITS.repliesPerComment })
+      await ctx.db.patch(id, { replyCount: SERVER_LIMITS.repliesPerComment })
     })
     const res = await postReply(t, {
       publicId,
