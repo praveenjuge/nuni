@@ -3,7 +3,7 @@ import type { Metadata } from "next"
 
 import { IncompleteLink } from "@/components/flow"
 import { TransferAccept } from "@/components/transfer-accept"
-import { queryParam, signedInFlow } from "@/lib/auth"
+import { queryParam, signedInFlow } from "@/lib/flow-page"
 
 export const metadata: Metadata = { title: "Accept a project" }
 

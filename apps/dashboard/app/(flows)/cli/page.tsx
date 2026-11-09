@@ -8,7 +8,7 @@ import type { Metadata } from "next"
 
 import { CliApprove } from "@/components/cli-approve"
 import { IncompleteLink } from "@/components/flow"
-import { queryParam, signedInFlow } from "@/lib/auth"
+import { queryParam, signedInFlow } from "@/lib/flow-page"
 
 export const metadata: Metadata = { title: "Sign in the Nuni CLI" }
 
