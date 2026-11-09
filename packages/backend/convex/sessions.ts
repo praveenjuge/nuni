@@ -7,7 +7,6 @@ import {
   dashboardProject,
   ensureProject,
   ownerOf,
-  projectRef,
   requireDashboardProject,
   claimFor,
   revokeSessions,
@@ -18,29 +17,6 @@ import { createSiteSession, findByToken } from "./tokens"
  * Owner sessions: the widget's owner tools on one of the project's sites,
  * and the CLI and MCP server (see cliAuth.ts).
  */
-
-/**
- * Create a widget owner session for one origin. The raw token is returned
- * once and handed to the widget via postMessage.
- */
-export const create = mutation({
-  args: {
-    publicId: v.string(),
-    origin: v.string(),
-    userAgent: v.optional(v.string()),
-  },
-  handler: async (ctx, { publicId, origin, userAgent }) => {
-    const { userId, project } = await requireDashboardProject(ctx, {
-      publicId,
-    })
-    return createSiteSession(ctx, "owner", {
-      userId,
-      project,
-      origin,
-      userAgent,
-    })
-  },
-})
 
 /**
  * The claim page's one step: claim the project if nobody owns it, then
@@ -83,7 +59,7 @@ export const validate = query({
 export const listMine = query({
   args: { publicId: v.string() },
   handler: async (ctx, { publicId }) => {
-    const project = await dashboardProject(ctx, { publicId })
+    const project = await dashboardProject(ctx, publicId)
     if (!project) return []
     const sessions = await ctx.db
       .query("widgetSessions")
@@ -115,9 +91,9 @@ export const revoke = mutation({
 })
 
 export const revokeAll = mutation({
-  args: projectRef,
-  handler: async (ctx, ref) => {
-    const { project } = await requireDashboardProject(ctx, ref)
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     return await revokeSessions(ctx, project._id)
   },
 })

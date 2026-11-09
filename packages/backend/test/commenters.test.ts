@@ -1,9 +1,10 @@
 import { generateProjectId, generateSecret } from "@nuni/shared"
 import { describe, expect, it, vi } from "vitest"
 
-import { api } from "../convex/_generated/api"
+import { api, internal } from "../convex/_generated/api"
 import {
   addComment,
+  claim,
   ORIGIN,
   postJson,
   setup,
@@ -184,7 +185,7 @@ describe("commenter sign-in", () => {
     const publicId = generateProjectId()
     const id = await addComment(t, publicId)
     const user = t.withIdentity({ subject: "user_ada", name: "Ada" })
-    await user.mutation(api.users.store, {})
+    await user.mutation(internal.users.storeProfile, {})
     await expect(
       user.mutation(api.commenters.create, {
         publicId,
@@ -196,7 +197,7 @@ describe("commenter sign-in", () => {
     ).rejects.toThrow(/Sign in/)
 
     // Even the project's owner gets no owner tools from a commenter token.
-    await user.mutation(api.projects.claim, { publicId })
+    await claim(user, publicId)
     const token = await signInToComment(t, publicId)
     expect(
       await t.query(api.sessions.validate, { publicId, sessionToken: token })

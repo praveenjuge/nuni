@@ -9,6 +9,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+import { plural } from "@/lib/format"
 
 /** The page context captured with one comment (owner only), folded away until needed. */
 export function CommentContext({
@@ -30,8 +31,7 @@ export function CommentContext({
 
   const counts = [
     logs.length > 0 && `${logs.length} console`,
-    requests.length > 0 &&
-      `${requests.length} failed request${requests.length === 1 ? "" : "s"}`,
+    requests.length > 0 && plural(requests.length, "failed request"),
   ].filter(Boolean)
 
   return (

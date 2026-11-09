@@ -6,6 +6,7 @@ import { SERVER_LIMITS } from "../convex/limits"
 import { RATE_LIMITS } from "../convex/rateLimits"
 import {
   addComment,
+  claim,
   ownedProject,
   ownerToken,
   postJson,
@@ -75,10 +76,9 @@ describe("nuni login (device code)", () => {
 
     // It shows up as a CLI session and can be revoked like any other.
     const sessions = await alice.query(api.sessions.listMine, { publicId })
-    expect(sessions).toEqual([
-      expect.objectContaining({ kind: "cli", origin: "cli" }),
-    ])
-    await alice.mutation(api.sessions.revoke, { id: sessions[0]!._id })
+    const cli = sessions.find((s) => s.kind === "cli")
+    expect(cli).toMatchObject({ origin: "cli" })
+    await alice.mutation(api.sessions.revoke, { id: cli!._id })
     await expect(
       t.query(api.comments.listForAgent, { publicId, sessionToken: token })
     ).rejects.toThrow(/Not signed in/)
@@ -319,7 +319,7 @@ describe("agent functions", () => {
     await addComment(t, publicId, { body: "Make this bigger" })
     await addComment(t, publicId, { path: "/", body: "Another typo here" })
     const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
+    await claim(alice, publicId)
     const token = await ownerToken(alice, publicId)
 
     const found = await t.query(api.comments.listForAgent, {

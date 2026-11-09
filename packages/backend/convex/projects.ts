@@ -4,16 +4,14 @@ import { v } from "convex/values"
 import { internal } from "./_generated/api"
 import type { Doc } from "./_generated/dataModel"
 import { internalMutation, mutation, query } from "./_generated/server"
-import { currentUser, requireUser } from "./accounts"
+import { currentUser } from "./accounts"
 import { deleteCommentRows } from "./lifecycle"
 import { assertProjectId, fail, parseOrigin, projectByPublicId } from "./lib"
 import { SERVER_LIMITS } from "./limits"
 import {
   dashboardProject,
   ensureProject,
-  projectRef,
   requireDashboardProject,
-  claimFor,
   revokeSessions,
   setOwner,
 } from "./ownership"
@@ -79,23 +77,6 @@ export const claimStatus = query({
   },
 })
 
-/** Claim an unclaimed project. First come, first served. */
-export const claim = mutation({
-  args: { publicId: v.string(), origin: v.optional(v.string()) },
-  handler: async (ctx, { publicId, origin }) => {
-    const user = await requireUser(ctx)
-    const cleanOrigin = origin ? parseOrigin(origin) : undefined
-    const project = cleanOrigin
-      ? await ensureProject(ctx, publicId, cleanOrigin)
-      : ((await projectByPublicId(ctx, publicId)) ??
-        fail("not_found", "This project has not been used yet"))
-    const claim = await claimFor(ctx, project, user._id, cleanOrigin)
-    return claim.status === "claimed_by_other"
-      ? claim
-      : { ...claim, projectId: project._id }
-  },
-})
-
 export const listMine = query({
   args: {},
   handler: async (ctx) => {
@@ -113,7 +94,7 @@ export const listMine = query({
 export const getMine = query({
   args: { publicId: v.string() },
   handler: async (ctx, { publicId }) => {
-    const project = await dashboardProject(ctx, { publicId })
+    const project = await dashboardProject(ctx, publicId)
     return project && forOwner(project)
   },
 })
@@ -124,9 +105,9 @@ export const getMine = query({
  * ones only grow here, because widget owner sessions are bound to this list.
  */
 export const addOrigin = mutation({
-  args: { ...projectRef, origin: v.string() },
-  handler: async (ctx, { origin, ...ref }) => {
-    const { project } = await requireDashboardProject(ctx, ref)
+  args: { publicId: v.string(), origin: v.string() },
+  handler: async (ctx, { origin, publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     const clean = parseOrigin(origin)
     if (project.origins.includes(clean)) return
     if (project.origins.length >= SERVER_LIMITS.maxOriginsPerProject) {
@@ -145,9 +126,9 @@ export const addOrigin = mutation({
  * but owner tools need the site added again.
  */
 export const removeOrigin = mutation({
-  args: { ...projectRef, origin: v.string() },
-  handler: async (ctx, { origin, ...ref }) => {
-    const { project } = await requireDashboardProject(ctx, ref)
+  args: { publicId: v.string(), origin: v.string() },
+  handler: async (ctx, { origin, publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     const clean = parseOrigin(origin)
     if (!project.origins.includes(clean)) return
     await ctx.db.patch(project._id, {
@@ -166,9 +147,9 @@ export const removeOrigin = mutation({
 })
 
 export const rename = mutation({
-  args: { ...projectRef, name: v.string() },
-  handler: async (ctx, { name, ...ref }) => {
-    const { project } = await requireDashboardProject(ctx, ref)
+  args: { publicId: v.string(), name: v.string() },
+  handler: async (ctx, { name, publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     const clean = name.trim().slice(0, LIMITS.projectNameMaxLength)
     if (!clean) fail("invalid_name", "Name cannot be empty")
     await ctx.db.patch(project._id, { name: clean })
@@ -180,9 +161,9 @@ export const rename = mutation({
  * from the widget. Comments stay; every owner session is signed out.
  */
 export const release = mutation({
-  args: projectRef,
-  handler: async (ctx, ref) => {
-    const { project } = await requireDashboardProject(ctx, ref)
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     await setOwner(ctx, project, null)
   },
 })
@@ -193,9 +174,9 @@ export const release = mutation({
  * is hidden and takes no new comments.
  */
 export const remove = mutation({
-  args: { ...projectRef, confirmName: v.string() },
-  handler: async (ctx, { confirmName, ...ref }) => {
-    const { project } = await requireDashboardProject(ctx, ref)
+  args: { publicId: v.string(), confirmName: v.string() },
+  handler: async (ctx, { confirmName, publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     if (confirmName.trim() !== project.name.trim()) {
       fail("invalid_name", "Type the project name to confirm")
     }

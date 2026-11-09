@@ -1,7 +1,7 @@
 import { signOut } from "@workos-inc/authkit-nextjs"
 
-import { APP_URL, BASE_PATH } from "@/lib/config"
+import { appUrl } from "@/lib/config"
 
 export async function GET() {
-  await signOut({ returnTo: `${APP_URL}${BASE_PATH}` })
+  await signOut({ returnTo: appUrl() })
 }

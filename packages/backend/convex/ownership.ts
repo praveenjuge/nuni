@@ -1,5 +1,3 @@
-import { v } from "convex/values"
-
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx } from "./_generated/server"
 import { currentUser } from "./accounts"
@@ -199,32 +197,16 @@ export async function requireOwner(
 }
 
 /**
- * How dashboard-only functions name a project. `projectId` is the older
- * form; the dashboard sends `publicId`.
- */
-export const projectRef = {
-  publicId: v.optional(v.string()),
-  projectId: v.optional(v.id("projects")),
-}
-
-type ProjectRef = { publicId?: string; projectId?: Id<"projects"> }
-
-function projectByRef(ctx: Ctx, ref: ProjectRef) {
-  if (ref.publicId !== undefined) return projectByPublicId(ctx, ref.publicId)
-  return ref.projectId ? ctx.db.get(ref.projectId) : null
-}
-
-/**
  * The project, for its signed-in owner in the dashboard; null for anyone
  * else. Never with a session token: managing a project needs the dashboard.
  */
-export async function dashboardProject(ctx: Ctx, ref: ProjectRef) {
-  const project = await projectByRef(ctx, ref)
+export async function dashboardProject(ctx: Ctx, publicId: string) {
+  const project = await projectByPublicId(ctx, publicId)
   return (await ownerOf(ctx, project)) ? project : null
 }
 
-export async function requireDashboardProject(ctx: Ctx, ref: ProjectRef) {
-  const project = await projectByRef(ctx, ref)
+export async function requireDashboardProject(ctx: Ctx, publicId: string) {
+  const project = await projectByPublicId(ctx, publicId)
   const userId = await requireOwner(ctx, project)
   return { userId, project: project! }
 }

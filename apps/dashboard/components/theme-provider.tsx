@@ -3,6 +3,9 @@
 import * as React from "react"
 import { ThemeProvider as NextThemesProvider, useTheme } from "next-themes"
 
+/** Toggles light and dark from anywhere but a text field. */
+export const THEME_HOTKEY = "d"
+
 function ThemeProvider({
   children,
   ...props
@@ -47,7 +50,7 @@ function ThemeHotkey() {
         return
       }
 
-      if (event.key.toLowerCase() !== "d") {
+      if (event.key.toLowerCase() !== THEME_HOTKEY) {
         return
       }
 

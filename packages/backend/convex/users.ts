@@ -2,15 +2,8 @@ import { v } from "convex/values"
 
 import { internal } from "./_generated/api"
 import type { Id } from "./_generated/dataModel"
-import {
-  action,
-  internalMutation,
-  mutation,
-  query,
-  type ActionCtx,
-  type MutationCtx,
-} from "./_generated/server"
-import { currentUser, upsertUser, type Profile } from "./accounts"
+import { action, internalMutation, type MutationCtx } from "./_generated/server"
+import { upsertUser, type Profile } from "./accounts"
 import { authKit } from "./auth"
 import { workosApiUrl } from "./auth.config"
 import { fail } from "./lib"
@@ -35,12 +28,6 @@ async function storeSignedIn(
     avatarUrl: authUser?.profilePictureUrl ?? identity.pictureUrl,
   })
 }
-
-/** Called by the dashboard after sign-in. */
-export const store = mutation({
-  args: {},
-  handler: (ctx) => storeSignedIn(ctx),
-})
 
 const profileValidator = v.object({
   firstName: v.optional(v.union(v.string(), v.null())),
@@ -79,45 +66,22 @@ async function fetchProfile(workosId: string): Promise<Profile | null> {
 }
 
 /**
- * `store`, with the name and photo read fresh from WorkOS: someone who signs
- * in to comment has their real name on their comments from the first
- * sign-in, before the user.created webhook arrives. When WorkOS can't be
- * reached, it is `store`.
+ * The dashboard calls this once per page load: the signed-in user's row,
+ * with the name and photo read fresh from WorkOS. Someone who signs in to
+ * comment has their real name on their comments from the first sign-in,
+ * before the user.created webhook arrives. When WorkOS can't be reached,
+ * the webhook's copy or the sign-in token is used.
  */
-async function sync(ctx: ActionCtx) {
-  const identity = await ctx.auth.getUserIdentity()
-  if (!identity) fail("unauthenticated", "Sign in first")
-  const profile = await fetchProfile(identity.subject)
-  return ctx.runMutation(internal.users.storeProfile, {
-    profile: profile ?? undefined,
-  })
-}
-
-/** One call for the dashboard: the user's row, up to date. Returns `me`. */
 export const storeFresh = action({
   args: {},
-  handler: (
+  handler: async (
     ctx
-  ): Promise<{
-    _id: Id<"users">
-    name: string
-    avatarUrl?: string
-  }> => sync(ctx),
-})
-
-/** The older form of `storeFresh`, called after `store`. */
-export const refreshProfile = action({
-  args: {},
-  handler: async (ctx) => {
-    await sync(ctx)
-  },
-})
-
-export const me = query({
-  args: {},
-  handler: async (ctx) => {
-    const user = await currentUser(ctx)
-    if (!user) return null
-    return { _id: user._id, name: user.name, avatarUrl: user.avatarUrl }
+  ): Promise<{ _id: Id<"users">; name: string; avatarUrl?: string }> => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) fail("unauthenticated", "Sign in first")
+    const profile = await fetchProfile(identity.subject)
+    return ctx.runMutation(internal.users.storeProfile, {
+      profile: profile ?? undefined,
+    })
   },
 })
