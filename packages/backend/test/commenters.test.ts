@@ -213,7 +213,7 @@ describe("commenter sign-in", () => {
     ).toEqual({ valid: false })
     await expect(
       t.mutation(api.comments.resolve, { id, sessionToken: token })
-    ).rejects.toThrow(/owner/)
+    ).rejects.toThrow(/Not signed in to this project/)
     // The token is for this project only.
     const elsewhere = generateProjectId()
     await addComment(t, elsewhere)

@@ -3,15 +3,17 @@ import { widgetAuthorArgs } from "@nuni/shared/validators"
 import { v } from "convex/values"
 
 import { mutation } from "./_generated/server"
-import { fail, widgetAuthor } from "./lib"
+import { widgetAuthor } from "./authors"
+import { adjustThread } from "./lifecycle"
+import { fail, requireComment, rowById } from "./lib"
 import { SERVER_LIMITS } from "./limits"
 import { rateLimiter } from "./rateLimits"
-import { commentInProject } from "./replies"
 
 /**
  * Add or remove one emoji on a comment or one of its replies. Each author
  * (signed-in commenter, or browser secret) has at most one of each emoji per
- * message.
+ * message. A signed-in commenter also removes the one this browser added
+ * as a guest.
  */
 export const toggle = mutation({
   args: {
@@ -25,44 +27,36 @@ export const toggle = mutation({
     if (!(REACTIONS as readonly string[]).includes(args.emoji)) {
       fail("invalid_reaction", "Unknown reaction")
     }
-    const { comment } = await commentInProject(
-      ctx,
-      args.publicId,
-      args.commentId
-    )
+    const { comment } = await requireComment(ctx, args.publicId, args.commentId)
     if (args.targetId !== comment._id) {
-      const replyId = ctx.db.normalizeId("replies", args.targetId)
-      const reply = replyId ? await ctx.db.get(replyId) : null
-      if (!reply || reply.commentId !== comment._id) {
+      const reply = await rowById(ctx, "replies", args.targetId)
+      if (reply?.commentId !== comment._id) {
         fail("not_found", "Reply not found")
       }
     }
-    const { key: authorKeyHash } = await widgetAuthor(
-      ctx,
-      comment.projectId,
-      args
-    )
+    const author = await widgetAuthor(ctx, comment.projectId, args)
     const { ok } = await rateLimiter.limit(ctx, "reactPerAuthor", {
-      key: authorKeyHash,
+      key: author.key,
     })
     if (!ok) fail("rate_limited", "Slow down a little")
 
-    const existing = await ctx.db
-      .query("reactions")
-      .withIndex("by_target_author_emoji", (q) =>
-        q
-          .eq("targetId", args.targetId)
-          .eq("authorKeyHash", authorKeyHash)
-          .eq("emoji", args.emoji)
-      )
-      .unique()
-    const count = comment.reactionCount ?? 0
-    if (existing) {
-      await ctx.db.delete(existing._id)
-      await ctx.db.patch(comment._id, { reactionCount: Math.max(0, count - 1) })
-      return { added: false }
+    for (const key of author.keys) {
+      const existing = await ctx.db
+        .query("reactions")
+        .withIndex("by_target_author_emoji", (q) =>
+          q
+            .eq("targetId", args.targetId)
+            .eq("authorKeyHash", key)
+            .eq("emoji", args.emoji)
+        )
+        .unique()
+      if (existing) {
+        await ctx.db.delete(existing._id)
+        await adjustThread(ctx, comment._id, { reactions: -1 })
+        return { added: false }
+      }
     }
-    if (count >= SERVER_LIMITS.reactionsPerComment) {
+    if ((comment.reactionCount ?? 0) >= SERVER_LIMITS.reactionsPerComment) {
       fail("cap_reached", "This thread has reached its reaction limit")
     }
     await ctx.db.insert("reactions", {
@@ -70,9 +64,9 @@ export const toggle = mutation({
       projectId: comment.projectId,
       targetId: args.targetId,
       emoji: args.emoji,
-      authorKeyHash,
+      authorKeyHash: author.key,
     })
-    await ctx.db.patch(comment._id, { reactionCount: count + 1 })
+    await adjustThread(ctx, comment._id, { reactions: 1 })
     return { added: true }
   },
 })

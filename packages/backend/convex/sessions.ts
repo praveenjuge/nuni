@@ -1,25 +1,27 @@
-import { LIMITS, randomBase58, TOKEN_PREFIX } from "@nuni/shared"
 import { v } from "convex/values"
 
-import { internal } from "./_generated/api"
-import { internalMutation, mutation, query } from "./_generated/server"
+import { mutation, query } from "./_generated/server"
+import { nameOf, requireUser } from "./accounts"
+import { fail, parseOrigin, projectByPublicId } from "./lib"
 import {
-  fail,
-  parseOrigin,
-  projectByPublicId,
-  requireDashboardOwner,
-  requireUser,
+  dashboardProject,
+  ensureProject,
+  ownerOf,
+  projectRef,
+  requireDashboardProject,
   revokeSessions,
-  sessionFromToken,
-  sha256Hex,
-  currentUser,
-} from "./lib"
-import { SERVER_LIMITS } from "./limits"
-import { rateLimiter } from "./rateLimits"
+  setOwner,
+} from "./ownership"
+import { createSiteSession, findByToken } from "./tokens"
+
+/**
+ * Owner sessions: the widget's owner tools on one of the project's sites,
+ * and the CLI and MCP server (see cliAuth.ts).
+ */
 
 /**
  * Create a widget owner session for one origin. The raw token is returned
- * once and handed to the widget via postMessage; only its hash is stored.
+ * once and handed to the widget via postMessage.
  */
 export const create = mutation({
   args: {
@@ -28,37 +30,51 @@ export const create = mutation({
     userAgent: v.optional(v.string()),
   },
   handler: async (ctx, { publicId, origin, userAgent }) => {
-    const user = await requireUser(ctx)
-    const project = await projectByPublicId(ctx, publicId)
-    if (!project || project.deletingAt) fail("not_found", "Project not found")
-    if (project.ownerId !== user._id) {
-      fail("forbidden", "Only the project owner can do this")
-    }
-    // The token is postMessage'd to this origin verbatim, so it must be one
-    // of the project's registered origins - otherwise a crafted claim link
-    // could deliver an owner session to any host.
-    const cleanOrigin = parseOrigin(origin)
-    if (!project.origins.includes(cleanOrigin)) {
-      fail(
-        "unknown_origin",
-        "This origin is not registered for the project. Add it from the dashboard first."
-      )
-    }
-    const { ok } = await rateLimiter.limit(ctx, "sessionPerUser", {
-      key: user._id,
+    const { userId, project } = await requireDashboardProject(ctx, {
+      publicId,
     })
-    if (!ok) fail("rate_limited", "Too many sign-ins, try again later")
+    return createSiteSession(ctx, "owner", {
+      userId,
+      project,
+      origin,
+      userAgent,
+    })
+  },
+})
 
-    const token = `${TOKEN_PREFIX.session}${randomBase58(40)}`
-    await ctx.db.insert("widgetSessions", {
-      tokenHash: await sha256Hex(token),
+/**
+ * The claim page's one step: claim the project if nobody owns it, then
+ * create a widget owner session for `origin`, which the widget registers
+ * while the project is unclaimed.
+ */
+export const allowOwnerTools = mutation({
+  args: {
+    publicId: v.string(),
+    origin: v.string(),
+    userAgent: v.optional(v.string()),
+  },
+  handler: async (ctx, { publicId, origin, userAgent }) => {
+    const user = await requireUser(ctx)
+    const cleanOrigin = parseOrigin(origin)
+    const project = await ensureProject(ctx, publicId, cleanOrigin)
+    if (project.ownerId && project.ownerId !== user._id) {
+      return {
+        status: "claimed_by_other" as const,
+        ownerName: await nameOf(ctx, project.ownerId),
+      }
+    }
+    const claimed = !project.ownerId
+    if (claimed) await setOwner(ctx, project, user._id, cleanOrigin)
+    const session = await createSiteSession(ctx, "owner", {
       userId: user._id,
-      projectId: project._id,
+      project,
       origin: cleanOrigin,
-      userAgent: userAgent?.slice(0, SERVER_LIMITS.userAgentMaxLength),
-      expiresAt: Date.now() + LIMITS.sessionTtlMs,
+      userAgent,
     })
-    return { token, expiresAt: Date.now() + LIMITS.sessionTtlMs }
+    return {
+      status: claimed ? ("claimed" as const) : ("already_owner" as const),
+      ...session,
+    }
   },
 })
 
@@ -67,26 +83,17 @@ export const validate = query({
   args: { publicId: v.string(), sessionToken: v.string() },
   handler: async (ctx, { publicId, sessionToken }) => {
     const project = await projectByPublicId(ctx, publicId)
-    if (!project) return { valid: false as const }
-    const session = await sessionFromToken(ctx, sessionToken)
-    if (
-      !session ||
-      session.projectId !== project._id ||
-      project.ownerId !== session.userId
-    ) {
-      return { valid: false as const }
-    }
-    const user = await ctx.db.get(session.userId)
-    return { valid: true as const, ownerName: user?.name ?? "Owner" }
+    const ownerId = await ownerOf(ctx, project, sessionToken)
+    if (!ownerId) return { valid: false as const }
+    return { valid: true as const, ownerName: await nameOf(ctx, ownerId) }
   },
 })
 
 export const listMine = query({
   args: { publicId: v.string() },
   handler: async (ctx, { publicId }) => {
-    const user = await currentUser(ctx)
-    const project = await projectByPublicId(ctx, publicId)
-    if (!user || !project || project.ownerId !== user._id) return []
+    const project = await dashboardProject(ctx, { publicId })
+    if (!project) return []
     const sessions = await ctx.db
       .query("widgetSessions")
       .withIndex("by_project", (q) => q.eq("projectId", project._id))
@@ -116,36 +123,19 @@ export const revoke = mutation({
   },
 })
 
-/** Sign out every widget and CLI session of a project. */
 export const revokeAll = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, { projectId }) => {
-    await requireDashboardOwner(ctx, projectId)
-    return await revokeSessions(ctx, projectId)
+  args: projectRef,
+  handler: async (ctx, ref) => {
+    const { project } = await requireDashboardProject(ctx, ref)
+    return await revokeSessions(ctx, project._id)
   },
 })
 
-/** Widget sign-out: the widget revokes its own token. */
+/** Widget and CLI sign-out: revoke this token. */
 export const revokeOwn = mutation({
   args: { sessionToken: v.string() },
   handler: async (ctx, { sessionToken }) => {
-    const session = await sessionFromToken(ctx, sessionToken)
+    const session = await findByToken(ctx, "widgetSessions", sessionToken)
     if (session) await ctx.db.delete(session._id)
-  },
-})
-
-/** Daily cron: delete expired widget sessions, continuing until none are left. */
-export const cleanupExpired = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const expired = await ctx.db
-      .query("widgetSessions")
-      .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
-      .take(SERVER_LIMITS.cleanupBatch)
-    for (const session of expired) await ctx.db.delete(session._id)
-    if (expired.length === SERVER_LIMITS.cleanupBatch) {
-      await ctx.scheduler.runAfter(0, internal.sessions.cleanupExpired, {})
-    }
-    return expired.length
   },
 })

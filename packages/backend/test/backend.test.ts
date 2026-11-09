@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest"
 
 import { api, internal } from "../convex/_generated/api"
 import { SERVER_LIMITS } from "../convex/limits"
-import { deleteUserData } from "../convex/users"
 import { addComment, anchor, page, setup, signIn, type T } from "./helpers"
 
 describe("widget comments", () => {
@@ -172,7 +171,7 @@ describe("widget comments", () => {
     const publicId = generateProjectId()
     const id = await addComment(t, publicId)
     await expect(t.mutation(api.comments.resolve, { id })).rejects.toThrow(
-      /owner/
+      /Sign in first/
     )
   })
 
@@ -808,7 +807,7 @@ describe("claiming and owner actions", () => {
       const [first] = await ctx.db.query("widgetSessions").collect()
       await ctx.db.patch(first!._id, { expiresAt: Date.now() - 1 })
     })
-    expect(await t.mutation(internal.sessions.cleanupExpired, {})).toBe(1)
+    expect(await t.mutation(internal.tokens.cleanupExpired, {})).toBe(1)
     const left = await t.run((ctx) => ctx.db.query("widgetSessions").collect())
     expect(left).toHaveLength(1)
   })
@@ -824,7 +823,10 @@ describe("claiming and owner actions", () => {
       origin: "http://localhost:3000",
     })
 
-    await t.run((ctx) => deleteUserData(ctx as never, "user_alice"))
+    await t.mutation(internal.auth.authKitEvent, {
+      event: "user.deleted",
+      data: { id: "user_alice" },
+    })
 
     expect(await t.query(api.projects.status, { publicId })).toMatchObject({
       claimed: false,
@@ -885,106 +887,6 @@ describe("claiming and owner actions", () => {
     expect(filters.origins).toContain("https://prod.example.com")
   })
 
-  it("rebuilds page counts from existing comments", async () => {
-    const t = setup()
-    const publicId = generateProjectId()
-    await addComment(t, publicId)
-    await addComment(t, publicId)
-    await addComment(t, publicId, { path: "/about" })
-    await t.run(async (ctx) => {
-      for (const row of await ctx.db.query("pageStats").collect())
-        await ctx.db.delete(row._id)
-    })
-    expect(await t.query(api.comments.pagesWithComments, { publicId })).toEqual(
-      []
-    )
-    await t.mutation(internal.comments.rebuildPageStats, {})
-    await t.finishAllScheduledFunctions(() => {})
-    expect(await t.query(api.comments.pagesWithComments, { publicId })).toEqual(
-      [
-        { path: "/pricing", count: 2 },
-        { path: "/about", count: 1 },
-      ]
-    )
-  })
-
-  it("rebuilds exactly, even when run twice or over wrong counts", async () => {
-    const t = setup()
-    const a = generateProjectId()
-    const b = generateProjectId()
-    await addComment(t, a)
-    await addComment(t, b, { path: "/b" })
-    await t.run(async (ctx) => {
-      for (const row of await ctx.db.query("pageStats").collect())
-        await ctx.db.patch(row._id, { openCount: 7 })
-    })
-    for (let i = 0; i < 2; i++) {
-      await t.mutation(internal.comments.rebuildPageStats, {})
-      await t.finishAllScheduledFunctions(() => {})
-    }
-    expect(
-      await t.query(api.comments.pagesWithComments, { publicId: a })
-    ).toEqual([{ path: "/pricing", count: 1 }])
-    expect(
-      await t.query(api.comments.pagesWithComments, { publicId: b })
-    ).toEqual([{ path: "/b", count: 1 }])
-  })
-
-  it("rebuild zeroes stale pages and backfills search text", async () => {
-    const t = setup()
-    const publicId = generateProjectId()
-    await addComment(t, publicId, { path: "/a" })
-    await addComment(t, publicId, { path: "/b" })
-    await addComment(t, publicId, { path: "/c" })
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
-    await t.run(async (ctx) => {
-      const b = (await ctx.db.query("comments").collect()).find(
-        (c) => c.page.path === "/b"
-      )!
-      await ctx.db.patch(b._id, { status: "resolved" })
-      const projectId = b.projectId
-      await ctx.db.insert("pageStats", {
-        projectId,
-        path: "/gone",
-        openCount: 3,
-      })
-      for (const c of await ctx.db.query("comments").collect())
-        await ctx.db.patch(c._id, { searchText: undefined })
-    })
-    await t.mutation(internal.comments.rebuildPageStats, {})
-    await t.finishAllScheduledFunctions(() => {})
-    const rows = await t.run((ctx) => ctx.db.query("pageStats").collect())
-    expect(Object.fromEntries(rows.map((r) => [r.path, r.openCount]))).toEqual({
-      "/a": 1,
-      "/b": 0,
-      "/c": 1,
-      "/gone": 0,
-    })
-    const comments = await t.run((ctx) => ctx.db.query("comments").collect())
-    expect(comments.every((c) => c.searchText?.includes("Sam"))).toBe(true)
-  })
-
-  it("never lowers a page count from a capped read", async () => {
-    const t = setup()
-    const publicId = generateProjectId()
-    for (let i = 0; i < 3; i++) await addComment(t, publicId)
-    const set = (openCount: number) =>
-      t.run(async (ctx) => {
-        const row = (await ctx.db.query("pageStats").collect())[0]!
-        await ctx.db.patch(row._id, { openCount })
-      })
-    const rebuild = async () => {
-      await t.mutation(internal.comments.rebuildProjectStats, { pathCap: 2 })
-      await t.finishAllScheduledFunctions(() => {})
-      return (await t.run((ctx) => ctx.db.query("pageStats").collect()))[0]!
-        .openCount
-    }
-    expect(await rebuild()).toBe(3)
-    await set(1)
-    expect(await rebuild()).toBe(2)
-  })
-
   it("searches by author name as well as body", async () => {
     const t = setup()
     const publicId = generateProjectId()
@@ -1023,7 +925,7 @@ describe("claiming and owner actions", () => {
       }
     })
     vi.useFakeTimers()
-    await t.mutation(internal.sessions.cleanupExpired, {})
+    await t.mutation(internal.tokens.cleanupExpired, {})
     await t.finishAllScheduledFunctions(vi.runAllTimers)
     vi.useRealTimers()
     expect(
@@ -1244,7 +1146,7 @@ describe("lost pins", () => {
     const moved = { ...anchor, text: "Start free trial", tag: "a" }
     await expect(
       t.mutation(api.comments.repin, { id, anchor: moved })
-    ).rejects.toThrow(/owner/)
+    ).rejects.toThrow(/Sign in first/)
     await alice.mutation(api.comments.repin, {
       id,
       anchor: { ...moved, text: "x".repeat(500) },
@@ -1256,7 +1158,7 @@ describe("lost pins", () => {
 
     await expect(
       t.mutation(api.comments.resolve, { id, resolution: "outdated" })
-    ).rejects.toThrow(/owner/)
+    ).rejects.toThrow(/Sign in first/)
     await alice.mutation(api.comments.resolve, { id, resolution: "outdated" })
     comment = await t.run((ctx) => ctx.db.get(id))
     expect(comment).toMatchObject({

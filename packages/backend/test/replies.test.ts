@@ -111,7 +111,7 @@ describe("replies", () => {
         commentId: id,
         body: "Not mine",
       })
-    ).rejects.toThrow(/owner/)
+    ).rejects.toThrow(/Sign in first/)
 
     // The owner's agent sees the thread.
     const detail = await alice.query(api.comments.getForOwner, {

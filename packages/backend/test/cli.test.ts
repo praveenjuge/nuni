@@ -159,7 +159,7 @@ describe("nuni login (device code)", () => {
       alice.mutation(api.cliAuth.approve, { userCode })
     ).rejects.toThrow(/expired/)
     expect((await poll(t, deviceSecret)).status).toBe(410)
-    expect(await t.mutation(internal.cliAuth.cleanupExpired, {})).toBe(1)
+    expect(await t.mutation(internal.tokens.cleanupExpired, {})).toBe(1)
     expect(
       await t.run((ctx) => ctx.db.query("cliLogins").collect())
     ).toHaveLength(0)

@@ -185,7 +185,7 @@ describe("transfer", () => {
       expect(
         await bob.query(api.transfers.get, { token: third.token })
       ).toBeNull()
-      expect(await t.mutation(internal.transfers.cleanupExpired, {})).toBe(1)
+      expect(await t.mutation(internal.tokens.cleanupExpired, {})).toBe(1)
     } finally {
       vi.useRealTimers()
     }
