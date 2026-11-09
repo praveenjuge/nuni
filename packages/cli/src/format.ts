@@ -1,5 +1,7 @@
 import type { OwnerComment } from "@nuni/shared"
 
+import type { CommentList, GroupBy, StatusChange } from "./ops"
+
 export function timeAgo(at: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - at) / 1000))
   if (seconds < 60) return "just now"
@@ -25,8 +27,6 @@ function oneLine(text: string, max = 120): string {
   const clean = text.replace(/\s+/g, " ").trim()
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean
 }
-
-export type GroupBy = "page" | "element"
 
 /**
  * What a comment is about, for grouping: the page plus the element's
@@ -67,18 +67,12 @@ function describe(c: OwnerComment, n: number): string[] {
  * be fixed in one go.
  */
 export function formatCommentList(
-  comments: OwnerComment[],
-  options: {
-    status: string
-    more: boolean
-    detailHint: string
-    order?: string
-    groupBy?: GroupBy
-  }
+  { comments, cursor, status, search }: CommentList,
+  options: { detailHint: string; groupBy?: GroupBy }
 ): string {
-  if (!comments.length) return `No ${options.status} comments.`
+  if (!comments.length) return `No ${status} comments.`
   const lines = [
-    `${comments.length}${options.more ? "+" : ""} ${options.status} comment${comments.length === 1 ? "" : "s"}, ${options.order ?? "newest first"}${options.groupBy ? `, grouped by ${options.groupBy}` : ""}:`,
+    `${comments.length}${cursor ? "+" : ""} ${status} comment${comments.length === 1 ? "" : "s"}, ${search ? "best match first" : "newest first"}${options.groupBy ? `, grouped by ${options.groupBy}` : ""}:`,
     "",
   ]
   if (!options.groupBy) {
@@ -103,7 +97,6 @@ export function formatCommentList(
   return lines.join("\n")
 }
 
-/** Pages with open comments, most first. */
 export function formatPageList(
   pages: { path: string; openCount: number }[]
 ): string {
@@ -116,4 +109,22 @@ export function formatPageList(
       (p) => `${String(p.openCount).padStart(width)} open  ${p.path}`
     ),
   ].join("\n")
+}
+
+/** The command (and MCP verb) for each status, and what it did. */
+export const STATUS_WORDS = {
+  resolved: { verb: "resolve", done: "Resolved" },
+  open: { verb: "reopen", done: "Reopened" },
+} as const satisfies Record<StatusChange["status"], unknown>
+
+/** What changed (if anything), and one line for each comment that didn't. */
+export function formatStatusChange({ status, done, failed }: StatusChange): {
+  text?: string
+  problems: string[]
+} {
+  const words = STATUS_WORDS[status]
+  return {
+    text: done.length ? `${words.done} ${done.join(", ")}.` : undefined,
+    problems: failed.map((f) => `Couldn't ${words.verb} ${f.id}: ${f.error}`),
+  }
 }
