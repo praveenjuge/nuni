@@ -40,8 +40,9 @@ import {
 } from "@nuni/shared"
 
 import {
+  api,
+  failureCode,
   NuniApi,
-  NuniApiError,
   type PageSummary,
   type ProjectStatus,
 } from "./api"
@@ -58,6 +59,7 @@ import {
   readableOn,
 } from "./dom"
 import { createI18n, type I18n, type MessageKey } from "./i18n"
+import type { ErrorCode } from "@nuni/shared"
 import { ICONS } from "./icons"
 import { onLocationChange } from "./navigation"
 import type { ScreenshotTools } from "./screenshot-tools"
@@ -269,8 +271,6 @@ export class NuniWidget {
   private markingUp = false
   private api: NuniApi
   private cleanups: (() => void)[] = []
-  private pageUnsub: (() => void) | null = null
-  private sessionUnsub: (() => void) | null = null
 
   private pageKey = ""
   private comments: WidgetComment[] = []
@@ -284,13 +284,13 @@ export class NuniWidget {
   /** The visitor hid the pins (Shift+C); remembered for this project. */
   private pinsHidden: boolean
   private panelOpen = false
+  /** Yours and other pages stay subscribed once the panel was opened. */
+  private panelOpened = false
   private tab: PanelTab = "open"
   /** The visitor's own comments on every page; loaded once the panel opens. */
   private mine: WidgetComment[] | null = null
-  private mineUnsub: (() => void) | null = null
   /** Comments on every page, grouped in the panel; loaded once it opens. */
   private site: WidgetComment[] | null = null
-  private siteUnsub: (() => void) | null = null
   /** The comment whose pin the owner is moving, while picking. */
   private repinId: string | null = null
   /** Lost (true) or found (false), as last reported in this page view. */
@@ -319,22 +319,15 @@ export class NuniWidget {
     /** The author key on their comments. */
     authorKey: string
   } | null = null
-  private commenterUnsub: (() => void) | null = null
-  /** The sign-in the Yours list was subscribed with. */
-  private mineToken: string | null = null
   private deepLinkId: string | null = null
   /** A deep-linked comment that is outside the page listing window. */
   private extraComment: WidgetComment | null = null
   /** The open thread with its owner-only context, while an owner is signed in. */
   private ownerDetail: OwnerComment | null = null
-  private ownerDetailId: string | null = null
   /** The subscription answered (possibly null), so the copy is complete. */
   private ownerDetailLoaded = false
-  private ownerDetailUnsub: (() => void) | null = null
   /** Replies and reactions of the open thread. */
   private thread: Thread | null = null
-  private threadId: string | null = null
-  private threadUnsub: (() => void) | null = null
 
   /** Bumped by every resolve pass, so an older sliced pass stops. */
   private resolveRun = 0
@@ -452,7 +445,18 @@ export class NuniWidget {
       true
     )
 
-    this.api = new NuniApi(config)
+    this.api = new NuniApi(config, (code) =>
+      this.showToast(this.i18n.failed(code, "failed"))
+    )
+  }
+
+  /** What to tell the visitor about an action that failed with `error`. */
+  private failed(
+    error: unknown,
+    action: MessageKey,
+    overrides?: Partial<Record<ErrorCode, MessageKey>>
+  ) {
+    return this.i18n.failed(failureCode(error), action, overrides)
   }
 
   private t(key: MessageKey, vars?: Record<string, string | number>) {
@@ -489,18 +493,26 @@ export class NuniWidget {
       this.render()
     })
 
-    void this.api.touch(location.origin)
-    this.cleanups.push(
-      this.api.onStatus((status) => {
-        this.status = status
-        this.render()
+    // Best effort: it registers this origin, and the next visit tries again.
+    void this.api
+      .mutate(api.projects.touch, {
+        publicId: this.config.project,
+        origin: location.origin,
       })
-    )
-    this.cleanups.push(
-      this.api.onPages((pages) => {
+      .catch(() => null)
+    this.api.watch("status", api.projects.status, {}, (status) => {
+      this.status = status
+      this.render()
+    })
+    this.api.watch(
+      "pages",
+      api.comments.pagesWithComments,
+      {},
+      (pages) => {
         this.pages = pages
         this.render()
-      })
+      },
+      []
     )
     if (this.ownerToken) this.watchSession(this.ownerToken)
     if (this.commenterToken) this.watchCommenter(this.commenterToken)
@@ -581,13 +593,6 @@ export class NuniWidget {
   destroy() {
     this.setPicking(false)
     this.endToolbarDrag?.()
-    this.pageUnsub?.()
-    this.sessionUnsub?.()
-    this.commenterUnsub?.()
-    this.ownerDetailUnsub?.()
-    this.threadUnsub?.()
-    this.mineUnsub?.()
-    this.siteUnsub?.()
     clearTimeout(this.pinReportTimer)
     this.resolveRun++
     for (const stop of this.scopeWatchers.values()) stop()
@@ -609,9 +614,8 @@ export class NuniWidget {
 
   private subscribePage() {
     const key = this.currentPageKey()
-    if (key === this.pageKey && this.pageUnsub) return
+    if (key === this.pageKey) return
     this.pageKey = key
-    this.pageUnsub?.()
     this.comments = []
     this.extraComment = null
     this.loaded = false
@@ -620,8 +624,10 @@ export class NuniWidget {
     clearTimeout(this.pinReportTimer)
     this.card = null
     this.activeId = null
-    this.pageUnsub = this.api.onPage(
-      key,
+    this.api.watch(
+      "page",
+      api.comments.listForPage,
+      { path: key },
       (comments) => {
         const extra = this.extraComment
         const merged =
@@ -638,45 +644,50 @@ export class NuniWidget {
         this.openDeepLink()
         this.render()
       },
-      () => {}
+      []
     )
     this.render()
   }
 
   private watchSession(token: string) {
-    this.sessionUnsub?.()
-    this.sessionUnsub = this.api.onSession(token, (result) => {
-      if (result.valid) {
-        this.ownerName = result.ownerName ?? this.t("owner")
-      } else {
-        this.ownerName = null
-        this.ownerToken = null
-        write(KEYS.session(this.config.project), null)
-        this.sessionUnsub?.()
-        this.sessionUnsub = null
+    this.api.watch(
+      "session",
+      api.sessions.validate,
+      { sessionToken: token },
+      (result) => {
+        if (result.valid) {
+          this.ownerName = result.ownerName ?? this.t("owner")
+        } else {
+          this.ownerName = null
+          this.ownerToken = null
+          write(KEYS.session(this.config.project), null)
+          this.api.watch("session", null)
+        }
+        this.render()
       }
-      this.render()
-    })
+    )
   }
 
   private watchCommenter(token: string) {
-    this.commenterUnsub?.()
-    this.commenterUnsub = this.api.onCommenter(token, (result) => {
-      if (this.commenterToken !== token) return
-      if (result.valid) {
-        const { name, avatarUrl, authorKey } = result
-        this.commenter = { name, avatarUrl, authorKey }
-      } else {
-        this.forgetCommenter()
+    this.api.watch(
+      "commenter",
+      api.commenters.validate,
+      { commenterToken: token },
+      (result) => {
+        if (result.valid) {
+          const { name, avatarUrl, authorKey } = result
+          this.commenter = { name, avatarUrl, authorKey }
+        } else {
+          this.forgetCommenter()
+        }
+        this.render()
       }
-      this.render()
-    })
+    )
   }
 
   /** Back to commenting as a guest in this browser. */
   private forgetCommenter() {
-    this.commenterUnsub?.()
-    this.commenterUnsub = null
+    this.api.watch("commenter", null)
     this.commenterToken = null
     this.commenter = null
     write(KEYS.commenter(this.config.project), null)
@@ -740,35 +751,37 @@ export class NuniWidget {
       this.card?.kind === "thread" && this.isOwner && token
         ? this.card.id
         : null
-    if (id === this.ownerDetailId) return
-    this.ownerDetailUnsub?.()
-    this.ownerDetailUnsub = null
-    this.ownerDetail = null
-    this.ownerDetailLoaded = false
-    this.ownerDetailId = id
-    if (!id || !token) return
-    this.ownerDetailUnsub = this.api.onOwnerComment(id, token, (comment) => {
-      if (this.ownerDetailId !== id) return
-      this.ownerDetail = comment
-      this.ownerDetailLoaded = true
-      this.render()
-    })
+    const changed = this.api.watch(
+      "ownerDetail",
+      api.comments.getForOwner,
+      id && token ? { id, sessionToken: token } : null,
+      (comment) => {
+        this.ownerDetail = comment
+        this.ownerDetailLoaded = true
+        this.render()
+      },
+      null
+    )
+    if (changed || !id) {
+      this.ownerDetail = null
+      this.ownerDetailLoaded = false
+    }
   }
 
   /** Keep the open thread's replies and reactions subscribed. */
   private syncThread() {
     const id = this.card?.kind === "thread" ? this.card.id : null
-    if (id === this.threadId) return
-    this.threadUnsub?.()
-    this.threadUnsub = null
-    this.thread = null
-    this.threadId = id
-    if (!id) return
-    this.threadUnsub = this.api.onThread(id, (thread) => {
-      if (this.threadId !== id) return
-      this.thread = thread
-      this.render()
-    })
+    const changed = this.api.watch(
+      "thread",
+      api.replies.listForComment,
+      id ? { commentId: id } : null,
+      (thread) => {
+        this.thread = thread
+        this.render()
+      },
+      { replies: [], reactions: [], images: [] }
+    )
+    if (changed || !id) this.thread = null
   }
 
   private get isOwner() {
@@ -1408,7 +1421,7 @@ export class NuniWidget {
     try {
       // A capture still running when Post was clicked is sent when it lands.
       const image = await shot
-      if (image) await this.api.uploadScreenshot(id, this.author, image)
+      if (image) await this.api.upload("screenshot", id, this.author, image)
     } catch {
       // The comment is posted; the screenshot is optional.
     }
@@ -1420,12 +1433,10 @@ export class NuniWidget {
     revokeImages(draft)
     try {
       for (const image of images) {
-        await this.api.uploadImage(id, this.author, image.blob)
+        await this.api.upload("image", id, this.author, image.blob)
       }
     } catch (error) {
-      this.showToast(
-        error instanceof NuniApiError ? error.message : this.t("imageFailed")
-      )
+      this.showToast(this.failed(error, "imageFailed"))
     }
   }
 
@@ -1503,8 +1514,7 @@ export class NuniWidget {
   private copyForAgent(comment: WidgetComment) {
     const detail =
       this.ownerDetail?._id === comment._id ? this.ownerDetail : null
-    const replies =
-      this.threadId === comment._id ? this.thread?.replies : undefined
+    const replies = this.thread?.replies
     const prompt = buildCommentPrompt(detail ?? { ...comment, replies }, {
       includeContext: Boolean(detail),
     })
@@ -1798,7 +1808,13 @@ export class NuniWidget {
     this.commenterToken = token
     write(KEYS.commenter(this.config.project), token)
     // Best effort: guest comments from this browser join the account.
-    await this.api.linkBrowser(this.secret, token).catch(() => null)
+    await this.api
+      .mutate(api.commenters.linkBrowser, {
+        publicId: this.config.project,
+        authorSecret: this.secret,
+        commenterToken: token,
+      })
+      .catch(() => null)
     if (this.commenterToken !== token) return
     this.watchCommenter(token)
     this.syncMine()
@@ -1809,7 +1825,10 @@ export class NuniWidget {
     const token = this.commenterToken
     if (!token) return
     this.forgetCommenter()
-    void this.api.signOutCommenter(token)
+    // Best effort: this browser has forgotten the sign-in already.
+    void this.api
+      .mutate(api.commenters.signOut, { commenterToken: token })
+      .catch(() => null)
     this.showToast(this.t("signedOut"))
   }
 
@@ -1854,19 +1873,22 @@ export class NuniWidget {
       return
     }
     // Older comments (e.g. long-resolved ones) are outside the page listing.
-    void this.api.getComment(id).then((found) => {
-      if (!found || found.page.path !== this.pageKey) {
-        this.showToast(this.t("linkGone"))
-        return
-      }
-      this.extraComment = found
-      this.comments = [
-        ...this.comments.filter((c) => c._id !== found._id),
-        found,
-      ]
-      this.resolvePlacements(false, found._id)
-      this.focusDeepLinked(found)
-    })
+    void this.api.query(api.comments.getById, { id }).then(
+      (found) => {
+        if (!found || found.page.path !== this.pageKey) {
+          this.showToast(this.t("linkGone"))
+          return
+        }
+        this.extraComment = found
+        this.comments = [
+          ...this.comments.filter((c) => c._id !== found._id),
+          found,
+        ]
+        this.resolvePlacements(false, found._id)
+        this.focusDeepLinked(found)
+      },
+      (error: unknown) => this.showToast(this.failed(error, "failed"))
+    )
   }
 
   private focusDeepLinked(comment: WidgetComment) {
@@ -1958,8 +1980,9 @@ export class NuniWidget {
       this.showToast(this.t("added"))
     } catch (error) {
       draft.sending = false
-      draft.error =
-        error instanceof NuniApiError ? error.message : this.t("postFailed")
+      draft.error = this.failed(error, "postFailed", {
+        cap_reached: "siteFull",
+      })
     }
     this.render()
   }
@@ -1993,8 +2016,7 @@ export class NuniWidget {
     } catch (error) {
       if (this.card?.kind === "thread" && this.card.id === id) {
         this.card.busy = false
-        this.card.error =
-          error instanceof Error ? error.message : this.t("failed")
+        this.card.error = this.failed(error, "failed")
       }
       this.render()
       return false
@@ -2006,7 +2028,11 @@ export class NuniWidget {
     if (!token) return
     void this.act(
       c._id,
-      () => this.api.resolve(c._id, token),
+      () =>
+        this.api.mutate(api.comments.resolve, {
+          id: c._id,
+          sessionToken: token,
+        }),
       this.t("resolved")
     ).then((ok) => {
       if (
@@ -2024,7 +2050,11 @@ export class NuniWidget {
     if (!token) return
     void this.act(
       c._id,
-      () => this.api.reopen(c._id, token),
+      () =>
+        this.api.mutate(api.comments.reopen, {
+          id: c._id,
+          sessionToken: token,
+        }),
       this.t("reopened")
     )
   }
@@ -2035,7 +2065,12 @@ export class NuniWidget {
     if (!token) return
     void this.act(
       c._id,
-      () => this.api.resolve(c._id, token, "outdated"),
+      () =>
+        this.api.mutate(api.comments.resolve, {
+          id: c._id,
+          sessionToken: token,
+          resolution: "outdated",
+        }),
       this.t("closedOutdated")
     ).then((ok) => {
       if (ok && this.card?.kind === "thread" && this.card.id === c._id) {
@@ -2063,14 +2098,16 @@ export class NuniWidget {
     })
     this.pinReported.set(id, false)
     try {
-      await this.api.repin(id, draft.anchor, token)
+      await this.api.mutate(api.comments.repin, {
+        id,
+        anchor: draft.anchor,
+        sessionToken: token,
+      })
       this.showToast(this.t("pinMoved"))
     } catch (error) {
       if (previous) this.placements.set(id, previous)
       else this.placements.delete(id)
-      this.showToast(
-        error instanceof NuniApiError ? error.message : this.t("failed")
-      )
+      this.showToast(this.failed(error, "failed"))
     }
     this.focusComment(id)
   }
@@ -2083,9 +2120,17 @@ export class NuniWidget {
     if (!sure) return
     const token = this.ownerToken
     const action = this.isMine(c)
-      ? () => this.api.deleteOwn(c._id, this.author)
+      ? () =>
+          this.api.mutate(api.comments.deleteOwn, {
+            id: c._id,
+            ...this.author,
+          })
       : token
-        ? () => this.api.remove(c._id, token)
+        ? () =>
+            this.api.mutate(api.comments.remove, {
+              id: c._id,
+              sessionToken: token,
+            })
         : null
     if (!action) return
     // Keep the thread open on failure so the error stays visible.
@@ -2144,8 +2189,7 @@ export class NuniWidget {
       )
       if (box) box.value = ""
     } catch (error) {
-      card.error =
-        error instanceof NuniApiError ? error.message : this.t("replyFailed")
+      card.error = this.failed(error, "replyFailed")
     }
     card.sendingReply = false
     this.render()
@@ -2157,11 +2201,16 @@ export class NuniWidget {
     emoji: string
   ) {
     void this.api
-      .toggleReaction(comment._id, targetId, emoji, this.author)
+      .mutate(api.reactions.toggle, {
+        publicId: this.config.project,
+        commentId: comment._id,
+        targetId,
+        emoji,
+        ...this.author,
+      })
       .catch((error: unknown) => {
         if (this.card?.kind === "thread" && this.card.id === comment._id) {
-          this.card.error =
-            error instanceof Error ? error.message : this.t("reactFailed")
+          this.card.error = this.failed(error, "reactFailed")
           this.render()
         }
       })
@@ -2172,9 +2221,17 @@ export class NuniWidget {
     if (!sure) return
     const token = this.ownerToken
     const action = this.isMyReply(reply)
-      ? () => this.api.deleteReply(reply._id, this.author)
+      ? () =>
+          this.api.mutate(api.replies.deleteOwn, {
+            id: reply._id,
+            ...this.author,
+          })
       : token
-        ? () => this.api.removeReply(reply._id, token)
+        ? () =>
+            this.api.mutate(api.replies.remove, {
+              id: reply._id,
+              sessionToken: token,
+            })
         : null
     if (action) void this.act(comment._id, action, this.t("replyDeleted"))
   }
@@ -2186,7 +2243,12 @@ export class NuniWidget {
   ) {
     void this.act(
       comment._id,
-      () => this.api.editReply(reply._id, this.author, body),
+      () =>
+        this.api.mutate(api.replies.editOwn, {
+          id: reply._id,
+          ...this.author,
+          body,
+        }),
       this.t("saved")
     ).then((ok) => {
       if (ok && this.card?.kind === "thread") {
@@ -2199,7 +2261,13 @@ export class NuniWidget {
   private saveEdit(c: WidgetComment, body: string, suggestion?: string) {
     void this.act(
       c._id,
-      () => this.api.editOwn(c._id, this.author, body, suggestion),
+      () =>
+        this.api.mutate(api.comments.editOwn, {
+          id: c._id,
+          ...this.author,
+          body,
+          suggestion,
+        }),
       this.t("saved")
     )
   }
@@ -2234,26 +2302,36 @@ export class NuniWidget {
 
   /** Keep Yours subscribed with the current sign-in, once the panel opened. */
   private syncMine() {
-    if (!this.mineUnsub && !this.panelOpen) return
-    if (this.mineUnsub && this.mineToken === this.commenterToken) return
-    this.mineUnsub?.()
-    this.mine = null
-    this.mineToken = this.commenterToken
-    this.mineUnsub = this.api.onMine(this.author, (mine) => {
-      this.mine = mine
-      this.render()
-    })
+    if (!this.panelOpened) return
+    const changed = this.api.watch(
+      "mine",
+      api.comments.listMine,
+      this.author,
+      (mine) => {
+        this.mine = mine
+        this.render()
+      },
+      []
+    )
+    if (changed) this.mine = null
   }
 
   private togglePanel(open = !this.panelOpen) {
     if (open === this.panelOpen) return
     this.panelOpen = open
-    if (open) this.syncMine()
-    if (open && !this.siteUnsub) {
-      this.siteUnsub = this.api.onSite((site) => {
-        this.site = site
-        this.render()
-      })
+    if (open) {
+      this.panelOpened = true
+      this.syncMine()
+      this.api.watch(
+        "site",
+        api.comments.listForSite,
+        {},
+        (site) => {
+          this.site = site
+          this.render()
+        },
+        []
+      )
     }
     if (open) {
       this.keepFocus()
@@ -3460,8 +3538,7 @@ export class NuniWidget {
           : null,
       ].filter((badge) => badge !== null)
       // Owners copy the full context, so wait until it has loaded.
-      const contextPending =
-        owner && !(this.ownerDetailLoaded && this.ownerDetailId === comment._id)
+      const contextPending = owner && !this.ownerDetailLoaded
       const resolved = comment.status === "resolved"
       body = h(
         "div",
@@ -3521,7 +3598,7 @@ export class NuniWidget {
           comment.body
             ? h("div", { class: "comment-body" }, comment.body)
             : null,
-          this.threadId === comment._id && this.thread?.images?.length
+          this.thread?.images?.length
             ? h(
                 "div",
                 { class: "images" },
@@ -3687,7 +3764,7 @@ export class NuniWidget {
   ) {
     const card = this.card
     if (card?.kind !== "thread") return null
-    const loaded = this.threadId === comment._id && this.thread
+    const loaded = this.thread
     const summaries = loaded
       ? this.thread!.reactions.filter((r) => r.targetId === targetId)
       : []
@@ -3765,8 +3842,7 @@ export class NuniWidget {
   private renderThread(comment: WidgetComment) {
     const card = this.card
     if (card?.kind !== "thread") return null
-    const replies =
-      this.threadId === comment._id ? (this.thread?.replies ?? []) : []
+    const replies = this.thread?.replies ?? []
     const owner = this.isOwner
 
     const items = replies.map((reply) => {
