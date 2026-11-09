@@ -1,3 +1,6 @@
+/** The default brand color (the `accentColor` option replaces it). */
+export const ACCENT = "#d6246e"
+
 export const STYLES = /* css */ `
 :host {
   all: initial;
@@ -11,7 +14,7 @@ export const STYLES = /* css */ `
   --n-fg: #1c1a1f;
   --n-fg-muted: #6c6773;
   --n-border: rgba(28, 26, 31, 0.12);
-  --n-accent: #d6246e;
+  --n-accent: ${ACCENT};
   --n-accent-fg: #ffffff;
   --n-accent-soft: rgba(214, 36, 110, 0.12);
   --n-ok: #1f9d55;

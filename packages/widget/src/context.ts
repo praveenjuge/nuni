@@ -10,6 +10,7 @@ import {
 } from "@nuni/shared"
 
 import { CAPTURE_MARK } from "./mark"
+import { isMasked, scrub } from "./privacy"
 
 export interface CaptureOptions {
   console: boolean
@@ -236,63 +237,6 @@ const STYLE_PROPS = [
   "opacity",
 ]
 
-const ATTR_MAX = 200
-const TEXT_MAX = 200
-
-/** Replace an element's contents with a short note. */
-function redact(el: Element, note: string) {
-  el.replaceChildren(el.ownerDocument.createComment(` ${note} `))
-}
-
-/**
- * Remove what should never leave the page (form values, option lists and
- * masked areas) and trim the rest.
- */
-function scrub(root: Element) {
-  const walker = root.ownerDocument.createTreeWalker(root, 1 | 4)
-  const drop: Node[] = []
-  for (let node: Node | null = root; node; node = walker.nextNode()) {
-    if (node.nodeType === 3) {
-      const text = node.textContent ?? ""
-      if (text.length > TEXT_MAX)
-        node.textContent = `${text.slice(0, TEXT_MAX)}…`
-      continue
-    }
-    const el = node as Element
-    const tag = el.tagName
-    if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") {
-      drop.push(el)
-      continue
-    }
-    if (el.hasAttribute(MASK_ATTRIBUTE)) {
-      for (const attr of Array.from(el.attributes)) {
-        if (
-          attr.name !== "id" &&
-          attr.name !== "class" &&
-          attr.name !== MASK_ATTRIBUTE
-        )
-          el.removeAttribute(attr.name)
-      }
-      redact(el, "masked")
-      continue
-    }
-    if (tag === "INPUT" || tag === "TEXTAREA") {
-      el.removeAttribute("value")
-      if (tag === "TEXTAREA") el.textContent = ""
-    }
-    // Options can be the visitor's own data (saved addresses, accounts).
-    if (tag === "SELECT" || tag === "DATALIST") {
-      const count = el.getElementsByTagName("option").length
-      redact(el, `${count} options`)
-    }
-    for (const attr of Array.from(el.attributes)) {
-      if (attr.value.length > ATTR_MAX)
-        el.setAttribute(attr.name, `${attr.value.slice(0, ATTR_MAX)}…`)
-    }
-  }
-  for (const node of drop) node.parentNode?.removeChild(node)
-}
-
 /** Clone at most `depth` levels of children. */
 function shallowClone(el: Element, depth: number): Element {
   const copy = el.cloneNode(false) as Element
@@ -317,7 +261,7 @@ export function domContext(el: Element): DomContext {
   const max = LIMITS.domSnippetMaxLength
   let html = ""
   // depth -1: inside a masked area, only the bare tag is kept.
-  const inMasked = Boolean(el.parentElement?.closest(`[${MASK_ATTRIBUTE}]`))
+  const inMasked = el.parentElement ? isMasked(el.parentElement) : false
   for (const depth of inMasked ? [-1] : [Infinity, 3, 1, 0]) {
     const copy =
       depth === Infinity

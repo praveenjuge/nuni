@@ -5,8 +5,11 @@ import { encodeCanvas } from "./image"
 
 /**
  * A small editor to draw boxes, arrows and freehand lines on a screenshot
- * before it is attached. Loaded with the screenshot code, on demand.
+ * before it is attached.
  */
+
+/** Stands out on most pages, whatever the site's accent color. */
+const COLOR = "#e5484d"
 
 export interface MarkUpLabels {
   title: string
@@ -24,7 +27,6 @@ export interface MarkUpOptions {
   /** Where the editor opens: inside the widget's shadow root. */
   container: HTMLElement
   labels: MarkUpLabels
-  color: string
 }
 
 /** Resolves with the marked-up image, or null when cancelled. */
@@ -111,7 +113,7 @@ function isDrawn(shape: Shape): boolean {
   return Math.hypot(b.x - a.x, b.y - a.y) > 6
 }
 
-export const markUp: MarkUp = async (image, { container, labels, color }) => {
+export const markUp: MarkUp = async (image, { container, labels }) => {
   let bitmap: ImageBitmap
   try {
     bitmap = await createImageBitmap(image)
@@ -143,7 +145,7 @@ export const markUp: MarkUp = async (image, { container, labels, color }) => {
 
   const draw = () => {
     ctx.drawImage(bitmap, 0, 0)
-    ctx.strokeStyle = color
+    ctx.strokeStyle = COLOR
     ctx.lineWidth = width
     ctx.lineCap = "round"
     ctx.lineJoin = "round"
