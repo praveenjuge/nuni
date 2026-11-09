@@ -1,6 +1,7 @@
 import {
   LIMITS,
   MASK_SELECTOR,
+  WIDGET_SELECTOR,
   type Anchor,
   type AnchorAncestor,
 } from "@nuni/shared"
@@ -183,7 +184,7 @@ export function areaContainer(
     [right - 1, bottom - 1],
   ]
   const ignored = (el: Element) =>
-    isIgnored(el) || el.closest("[data-nuni]") !== null
+    isIgnored(el) || el.closest(WIDGET_SELECTOR) !== null
   let common: Element | null = null
   for (const [x, y] of corners) {
     const hit = doc.elementsFromPoint(x, y).find((el) => !ignored(el))

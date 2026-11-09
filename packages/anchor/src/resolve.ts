@@ -1,4 +1,4 @@
-import { LIMITS, type Anchor } from "@nuni/shared"
+import { LIMITS, WIDGET_SELECTOR, type Anchor } from "@nuni/shared"
 
 import { reactComponentName } from "./component"
 import {
@@ -378,7 +378,10 @@ function collectCandidates(
 ): { candidates: Set<Element>; pathMatch: Element | null } {
   const doc = scopeDocument(root)
   const candidates = new Set<Element>()
-  const ignored = (el: Element) => el === doc.documentElement || isIgnored(el)
+  const ignored = (el: Element) =>
+    el === doc.documentElement ||
+    el.closest(WIDGET_SELECTOR) !== null ||
+    isIgnored(el)
   const add = (el: Element | null | undefined) => {
     if (el && !ignored(el)) candidates.add(el)
   }

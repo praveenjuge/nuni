@@ -1,13 +1,6 @@
-import {
-  LIMITS,
-  MASK_ATTRIBUTE,
-  MASK_SELECTOR,
-  type AnchorQuote,
-} from "@nuni/shared"
+import { LIMITS, MASK_SELECTOR, type AnchorQuote } from "@nuni/shared"
 
-import { textSimilarity } from "./text"
-
-const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SVG"])
+import { skipsText, textSimilarity } from "./text"
 
 /** Elements whose edges read as a space between words. */
 const BLOCK_TAGS = new Set([
@@ -133,12 +126,9 @@ export function textMap(el: Element): TextMap {
       }
       return
     }
-    if (node.nodeType !== 1) return
+    if (node.nodeType !== 1 || skipsText(node as Element)) return
     const el = node as Element
-    const tag = el.tagName.toUpperCase()
-    if (SKIP_TAGS.has(tag)) return
-    if (el.hasAttribute(MASK_ATTRIBUTE) || el.hasAttribute("data-nuni")) return
-    const block = BLOCK_TAGS.has(tag)
+    const block = BLOCK_TAGS.has(el.tagName.toUpperCase())
     if (block) gap()
     for (const child of Array.from(el.childNodes)) walk(child)
     if (block) gap()

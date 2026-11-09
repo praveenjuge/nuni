@@ -1,3 +1,4 @@
+import { WIDGET_ATTRIBUTE, WIDGET_SELECTOR } from "@nuni/shared"
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
@@ -151,6 +152,36 @@ describe("capture and resolve", () => {
     const anchor = captureAnchor(document.querySelector("div")!, { x: 0, y: 0 })
     expect(anchor.offset.x).toBeGreaterThanOrEqual(0)
     expect(anchor.offset.x).toBeLessThanOrEqual(1)
+  })
+})
+
+describe("Nuni's own UI and data-nuni test ids", () => {
+  it("reads the text of elements a site marks with data-nuni", () => {
+    document.body.innerHTML = `<section class="plan" data-nuni="plan-pro"><p>Pro</p><button data-nuni="choose-pro">Choose plan</button></section>`
+    const button = document.querySelector("button")!
+    const anchor = captureAnchor(button)
+    expect(anchor.text).toBe("Choose plan")
+    expect(anchor.selectors.testId).toBe("data-nuni=choose-pro")
+    expect(anchor.ancestors[0]!.text).toBe("Pro Choose plan")
+  })
+
+  it("still finds pins stored when data-nuni elements had no text", () => {
+    document.body.innerHTML = `<main><a class="cta" data-nuni="hero-cta" href="/start">Get started</a><a class="cta" href="/demo">Book a demo</a></main>`
+    const old = { ...captureAnchor(document.querySelector("a")!), text: "" }
+    document.body.innerHTML = `<main><a class="cta" href="/demo">Book a demo</a><a class="cta" data-nuni="hero-cta" href="/start">Start your free trial</a></main>`
+    expect(resolveAnchor(old).element?.getAttribute("data-nuni")).toBe(
+      "hero-cta"
+    )
+  })
+
+  it("never reads or matches inside the widget", () => {
+    document.body.innerHTML = `<main><p>Docs</p></main><div ${WIDGET_ATTRIBUTE}><p>Docs</p></div>`
+    const host = document.querySelector(WIDGET_SELECTOR)!
+    host.attachShadow({ mode: "open" }).innerHTML = `<button>Comment</button>`
+    expect(elementText(document.body)).toBe("Docs")
+    const anchor = captureAnchor(document.querySelector("main p")!)
+    document.querySelector("main")!.remove()
+    expect(resolveAnchor(anchor).element).toBeNull()
   })
 })
 

@@ -100,11 +100,13 @@ test("pin reliability benchmark", async ({ page }) => {
           for (let i = 0; i <= (quote.before ?? 0); i++) {
             at = map.text.indexOf(quote.text, at + 1)
           }
+          // The engine can't see the words, so no comment can be left.
+          if (at < 0) return null
           const range = document.createRange()
           const end = at + quote.text.length - 1
           range.setStart(map.nodes[map.node[at]!]!, map.offset[at]!)
           range.setEnd(map.nodes[map.node[end]!]!, map.offset[end]! + 1)
-          return api.captureSelection(range)!.anchor
+          return api.captureSelection(range)?.anchor ?? null
         }
         return api.captureAnchor(el, {
           x: r.left + r.width / 2,
@@ -126,6 +128,16 @@ test("pin reliability benchmark", async ({ page }) => {
 
     const resolved = await page.evaluate(
       ({ anchor, scrollAfter, quote }) => {
+        if (!anchor) {
+          return {
+            found: false,
+            correct: false,
+            confidence: "lost",
+            score: 0,
+            tag: null,
+            text: null,
+          }
+        }
         window.scrollTo(0, scrollAfter ?? 0)
         const api = (window as never as { NuniAnchor: Engine }).NuniAnchor
         const result = api.resolveAnchor(anchor)

@@ -267,6 +267,18 @@ export const quoteScenarios: Scenario[] = [
     expect: "found",
   },
   {
+    name: "quote, inside an element with a data-nuni test id",
+    category: "quote",
+    before: doc(
+      `<article><h1>Pricing notes</h1><p data-nuni="pricing-note"${T}>${PARAS[1]}</p><p>${PARAS[2]}</p></article>`
+    ),
+    after: doc(
+      `<article><h1>Pricing notes</h1><p>${INTRO}</p><p data-nuni="pricing-note"${T}>Last quarter we set a soft limit of 400 changed lines per pull request.</p></article>`
+    ),
+    quote: { text: "a soft limit of 400 changed lines" },
+    expect: "found",
+  },
+  {
     name: "quote, words deleted",
     category: "quote",
     before: article([INTRO, { text: PARAS[2]!, target: true }, PARAS[3]!]),
