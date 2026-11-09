@@ -1,15 +1,13 @@
 import {
   createResolveCache,
-  elementText,
-  frameElementOf,
   isRendered,
-  isShadowRoot,
   resolveAnchor,
-  scopeRootOf,
-  textSimilarity,
+  scopeChain,
+  stillMatches,
   viewportRect,
   type Box,
   type Confidence,
+  type ScopeRoot,
 } from "@nuni/anchor"
 import { LIMITS, type Anchor, type WidgetComment } from "@nuni/shared"
 
@@ -68,7 +66,7 @@ export function createPins(ctx: Ctx) {
   /** Lost (true) or found (false), as last reported in this page view. */
   const reported = new Map<string, boolean>()
   /** Shadow roots and iframes holding pins, watched for changes. */
-  const scopes = new Map<Node, () => void>()
+  const scopes = new Map<ScopeRoot, () => void>()
   /** The visitor hid the pins (Shift+C); remembered for this project. */
   let hidden = read(KEYS.hidden(config.project)) === "1"
   /** Bumped by every resolve pass, so an older sliced pass stops. */
@@ -79,8 +77,6 @@ export function createPins(ctx: Ctx) {
   /** The placements the panel and cards were last drawn with. */
   let shown = ""
   const stops: (() => void)[] = []
-
-  const isIgnored = (el: Element) => ctx.host.contains(el)
 
   /** The open thread keeps its pin while the rest are hidden. */
   const visible = () => {
@@ -111,10 +107,11 @@ export function createPins(ctx: Ctx) {
    * Changes inside a shadow root or an iframe, and its scrolling, don't
    * reach the page's own observers.
    */
-  const watch = (root: Node) => {
-    const doc = isShadowRoot(root) ? null : (root as Document)
+  const watch = (root: ScopeRoot) => {
+    const doc = root.nodeType === Node.DOCUMENT_NODE ? (root as Document) : null
     const observer = new MutationObserver((records) => {
-      if (!records.every((r) => isIgnored(r.target as Element))) {
+      // Nuni's own UI changes on every render.
+      if (!records.every((r) => ctx.host.contains(r.target))) {
         scheduleResolve()
       }
     })
@@ -135,15 +132,10 @@ export function createPins(ctx: Ctx) {
   }
 
   const watchScopes = () => {
-    const roots = new Set<Node>()
+    const roots = new Set<ScopeRoot>()
     for (const { element } of placements.values()) {
-      let node: Element | null = element
-      for (let depth = 0; node && depth < LIMITS.anchorScopeMaxDepth; depth++) {
-        const root = scopeRootOf(node)
-        if (root === document) break
-        roots.add(root)
-        node = isShadowRoot(root) ? root.host : frameElementOf(root)
-      }
+      for (const step of element ? scopeChain(element) : [])
+        roots.add(step.root)
     }
     for (const [root, stop] of scopes) {
       if (!roots.has(root)) {
@@ -154,25 +146,6 @@ export function createPins(ctx: Ctx) {
     for (const root of roots) {
       if (!scopes.has(root)) scopes.set(root, watch(root))
     }
-  }
-
-  const stillPlaced = (comment: WidgetComment) => {
-    const current = placements.get(comment._id)
-    if (!current?.element?.isConnected) return false
-    // A text comment: its words must still be where the range is (a range
-    // over removed text collapses).
-    const quote = comment.anchor.quote
-    if (quote) {
-      return (
-        current.range !== undefined &&
-        current.range.toString().replace(/\s+/g, " ").trim() === quote.exact
-      )
-    }
-    const text = elementText(current.element)
-    const expected = comment.anchor.text
-    return (
-      !expected || text === expected || textSimilarity(text, expected) > 0.8
-    )
   }
 
   /** What the panel and cards show from the placements: found, approximate or lost. */
@@ -224,19 +197,24 @@ export function createPins(ctx: Ctx) {
     for (const id of placements.keys()) {
       if (!ids.has(id)) placements.delete(id)
     }
-    const queue = comments.filter((c) => !(onlyStale && stillPlaced(c)))
+    const queue = comments.filter(
+      (c) =>
+        !(
+          onlyStale &&
+          stillMatches(c.anchor, placements.get(c._id) ?? { element: null })
+        )
+    )
     const index = first ? queue.findIndex((c) => c._id === first) : -1
     if (index > 0) queue.unshift(...queue.splice(index, 1))
     // One cache per pass: lookups are shared by every pin on the page.
-    const cache = createResolveCache()
-    const options = { isIgnored, document }
+    const options = { cache: createResolveCache() }
 
     const slice = () => {
       if (pass !== run) return
       const started = performance.now()
       while (queue.length) {
         const comment = queue.shift()!
-        const result = resolveAnchor(comment.anchor, document, options, cache)
+        const result = resolveAnchor(comment.anchor, options)
         placements.set(comment._id, {
           element: result.element,
           confidence: result.confidence,

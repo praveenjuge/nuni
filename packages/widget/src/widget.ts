@@ -1,3 +1,5 @@
+import { WIDGET_ATTRIBUTE } from "@nuni/shared"
+
 import { failureCode, NuniApi } from "./api"
 import { createComposer, type Composer, type Draft } from "./composer"
 import type { ResolvedConfig } from "./config"
@@ -95,7 +97,7 @@ export class NuniWidget {
   constructor(config: ResolvedConfig, runtime: WidgetRuntime) {
     const host = document.createElement("div")
     host.id = "nuni-root"
-    host.setAttribute("data-nuni", "")
+    host.setAttribute(WIDGET_ATTRIBUTE, "")
     const root = host.attachShadow({ mode: "open" })
     const layer = (cls: string) => h("div", { class: cls })
     const markLayer = h("div", { class: "marks", "aria-hidden": "true" })

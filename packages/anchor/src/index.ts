@@ -1,14 +1,14 @@
-export type { Box } from "./capture"
 export {
   areaContainer,
   captureAnchor,
   captureArea,
   captureSelection,
-  resolveAnchor,
-} from "./compat"
+  type Box,
+} from "./capture"
 export { isRendered } from "./geometry"
 export {
   createResolveCache,
+  resolveAnchor,
   stillMatches,
   type Confidence,
   type ResolveCache,
@@ -16,12 +16,8 @@ export {
   type ResolveResult,
 } from "./resolve"
 export {
-  frameDocument,
   frameDocuments,
-  frameElementOf,
-  isShadowRoot,
   scopeChain,
-  scopeRootOf,
   viewportRect,
   type ScopeRoot,
   type ScopeStep,

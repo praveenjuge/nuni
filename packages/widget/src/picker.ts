@@ -4,12 +4,13 @@ import {
   captureArea,
   captureSelection,
   elementText,
-  frameDocument,
+  frameDocuments,
   isRendered,
   pickTarget,
   viewportRect,
   type Box,
 } from "@nuni/anchor"
+import { WIDGET_CLASS_PREFIX } from "@nuni/shared"
 
 import { h, icon, isMobile, lineRects, placeBox, swallowClick } from "./dom"
 import { ICONS } from "./icons"
@@ -17,12 +18,10 @@ import type { PinTarget } from "./pins"
 import { isEditable } from "./privacy"
 import type { Ctx } from "./widget"
 
-const PICKING_CLASS = "nuni-picking"
+const PICKING_CLASS = `${WIDGET_CLASS_PREFIX}picking`
 const PICK_EVENTS = ["pointerdown", "mousedown", "pointerup", "mouseup"]
 /** How far the pointer moves before a press becomes an area drag. */
 const DRAG_THRESHOLD = 6
-/** Same-origin iframes nested deeper than this can't be picked in. */
-const FRAME_DEPTH = 3
 const PICK_KEYS = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"]
 
 export type Picker = ReturnType<typeof createPicker>
@@ -137,7 +136,7 @@ export function createPicker(ctx: Ctx) {
 
   /** An area drawn while picking: anchored to the element that covers it. */
   const areaTarget = (box: Box): PinTarget => {
-    const element = areaContainer(document, box, (el) => ctx.host.contains(el))
+    const element = areaContainer(document, box)
     return { anchor: captureArea(element, box), element }
   }
 
@@ -150,7 +149,7 @@ export function createPicker(ctx: Ctx) {
     const el = node.nodeType === 1 ? (node as Element) : node.parentElement
     if (!el || ctx.host.contains(el)) return null
     // Text being typed (a field, an editor) is not page content.
-    if (isEditable(el) || el.closest("[data-nuni]")) return null
+    if (isEditable(el)) return null
     return range.toString().trim() ? range : null
   }
 
@@ -291,7 +290,7 @@ export function createPicker(ctx: Ctx) {
       ctx.pins.setHidden(false, true)
       if (isMobile()) ctx.panel.toggle(false)
       // The page and its same-origin iframes: anything in them can be picked.
-      docs = [document, ...frameDocuments(document, 0)]
+      docs = [document, ...frameDocuments(document)]
       for (const doc of docs) {
         injectCursorStyle(doc)
         listen(doc, true)
@@ -424,17 +423,4 @@ function describeElement(el: Element): string {
     .join("")
   const text = elementText(el, 40)
   return `${tag}${id}${cls}${text ? ` "${text}"` : ""}`
-}
-
-/** Same-origin iframe documents on the page, nested ones too. */
-function frameDocuments(doc: Document, depth: number): Document[] {
-  if (depth > FRAME_DEPTH) return []
-  const out: Document[] = []
-  for (const frame of Array.from(doc.querySelectorAll("iframe"))) {
-    const inner = frameDocument(frame)
-    if (inner?.documentElement) {
-      out.push(inner, ...frameDocuments(inner, depth + 1))
-    }
-  }
-  return out
 }
