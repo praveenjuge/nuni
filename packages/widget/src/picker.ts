@@ -284,7 +284,7 @@ export function createPicker(ctx: Ctx) {
     active = on
     dragStart = dragBox = null
     if (on) {
-      ctx.closeCard()
+      ctx.setCard(null)
       // Adding a comment shows the others again, like Figma.
       ctx.pins.setHidden(false, true)
       if (isMobile()) ctx.panel.toggle(false)
