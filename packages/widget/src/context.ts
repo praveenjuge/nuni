@@ -9,7 +9,7 @@ import {
   type NetworkEntry,
 } from "@nuni/shared"
 
-import { CAPTURE_MARK } from "./mark"
+import { isMasked, scrub } from "./privacy"
 
 export interface CaptureOptions {
   console: boolean
@@ -64,11 +64,11 @@ class Ring<T> {
 /**
  * Keep the latest console errors and failed requests, so a comment can carry
  * what went wrong on the page. Installed once per mount, removed on destroy.
- * `ignore` skips Nuni's own traffic.
+ * `ignore` skips Nuni's own traffic (see mark.ts).
  */
 export function startCollectors(
   options: CaptureOptions,
-  ignore: (url: string) => boolean
+  ignore: (url: string, init?: RequestInit) => boolean
 ): Collectors {
   const logs = new Ring<ConsoleEntry>()
   const requests = new Ring<NetworkEntry>()
@@ -125,15 +125,13 @@ export function startCollectors(
     const originalFetch = window.fetch
     if (typeof originalFetch === "function") {
       const wrappedFetch: typeof fetch = async (input, init) => {
-        // Nuni's own screenshot requests (see mark.ts) are not the page's.
-        if (init && (init as Record<symbol, unknown>)[CAPTURE_MARK])
-          return originalFetch.call(window, input, init)
         const url =
           typeof input === "string"
             ? input
             : input instanceof URL
               ? input.href
               : input.url
+        if (ignore(url, init)) return originalFetch.call(window, input, init)
         const method =
           init?.method ??
           (typeof input === "object" && "method" in input
@@ -236,63 +234,6 @@ const STYLE_PROPS = [
   "opacity",
 ]
 
-const ATTR_MAX = 200
-const TEXT_MAX = 200
-
-/** Replace an element's contents with a short note. */
-function redact(el: Element, note: string) {
-  el.replaceChildren(el.ownerDocument.createComment(` ${note} `))
-}
-
-/**
- * Remove what should never leave the page (form values, option lists and
- * masked areas) and trim the rest.
- */
-function scrub(root: Element) {
-  const walker = root.ownerDocument.createTreeWalker(root, 1 | 4)
-  const drop: Node[] = []
-  for (let node: Node | null = root; node; node = walker.nextNode()) {
-    if (node.nodeType === 3) {
-      const text = node.textContent ?? ""
-      if (text.length > TEXT_MAX)
-        node.textContent = `${text.slice(0, TEXT_MAX)}…`
-      continue
-    }
-    const el = node as Element
-    const tag = el.tagName
-    if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") {
-      drop.push(el)
-      continue
-    }
-    if (el.hasAttribute(MASK_ATTRIBUTE)) {
-      for (const attr of Array.from(el.attributes)) {
-        if (
-          attr.name !== "id" &&
-          attr.name !== "class" &&
-          attr.name !== MASK_ATTRIBUTE
-        )
-          el.removeAttribute(attr.name)
-      }
-      redact(el, "masked")
-      continue
-    }
-    if (tag === "INPUT" || tag === "TEXTAREA") {
-      el.removeAttribute("value")
-      if (tag === "TEXTAREA") el.textContent = ""
-    }
-    // Options can be the visitor's own data (saved addresses, accounts).
-    if (tag === "SELECT" || tag === "DATALIST") {
-      const count = el.getElementsByTagName("option").length
-      redact(el, `${count} options`)
-    }
-    for (const attr of Array.from(el.attributes)) {
-      if (attr.value.length > ATTR_MAX)
-        el.setAttribute(attr.name, `${attr.value.slice(0, ATTR_MAX)}…`)
-    }
-  }
-  for (const node of drop) node.parentNode?.removeChild(node)
-}
-
 /** Clone at most `depth` levels of children. */
 function shallowClone(el: Element, depth: number): Element {
   const copy = el.cloneNode(false) as Element
@@ -317,7 +258,7 @@ export function domContext(el: Element): DomContext {
   const max = LIMITS.domSnippetMaxLength
   let html = ""
   // depth -1: inside a masked area, only the bare tag is kept.
-  const inMasked = Boolean(el.parentElement?.closest(`[${MASK_ATTRIBUTE}]`))
+  const inMasked = el.parentElement ? isMasked(el.parentElement) : false
   for (const depth of inMasked ? [-1] : [Infinity, 3, 1, 0]) {
     const copy =
       depth === Infinity

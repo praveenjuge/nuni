@@ -1,3 +1,5 @@
+import { LIMITS } from "@nuni/shared"
+
 /**
  * Every word the widget shows. Override any of them with the `messages`
  * option; `locale` sets how times and counts are written.
@@ -152,8 +154,42 @@ export const EN = {
   replyFailed: "Couldn't post the reply",
   reactFailed: "Couldn't react",
   failed: "Something went wrong",
+  offline: "Couldn't reach Nuni. Check your connection.",
+  slowDown: "Slow down a little",
+  signInAgain: "You've been signed out. Sign in again.",
+  notAllowed: "You can't change this",
+  gone: "This was deleted",
+  projectDeleting: "This project is being deleted",
+  siteFull:
+    "This site has reached the comment limit for unclaimed projects. The owner can claim it to continue.",
+  threadFull: "This thread has reached its limit",
+  imageTooLarge: "The image is too large",
+  tooLate: "Too late to add an image",
 
   justNow: "just now",
+}
+
+/**
+ * What a failed call means to a visitor, by the backend's error code (see
+ * `ERROR_STATUS` in @nuni/shared). Other codes get the message of the
+ * action that failed ("Couldn't post the comment").
+ */
+const FAILURES: Record<string, MessageKey> = {
+  network: "offline",
+  rate_limited: "slowDown",
+  signed_out: "signInAgain",
+  unauthenticated: "signInAgain",
+  forbidden: "notAllowed",
+  not_found: "gone",
+  deleting: "projectDeleting",
+  cap_reached: "threadFull",
+  conflict: "tooManyImages",
+  invalid_type: "imageUnreadable",
+  too_large: "imageTooLarge",
+  expired: "tooLate",
+  invalid_body: "writeFirst",
+  invalid_name: "enterName",
+  invalid_suggestion: "changeTextFirst",
 }
 
 export type Plural = { other: string } & Partial<
@@ -169,6 +205,16 @@ export interface I18n {
   timeAgo(ts: number, now?: number): string
   /** The modifier key for shortcuts: ⌘ on Apple devices, Ctrl elsewhere. */
   mod: string
+  /**
+   * What to tell the visitor when `action` failed with an error `code`:
+   * what the code means, else the action's own message. `overrides` are for
+   * an action where a code means something more specific.
+   */
+  failed(
+    code: string,
+    action: MessageKey,
+    overrides?: Record<string, MessageKey>
+  ): string
 }
 
 function isApple(): boolean {
@@ -230,5 +276,10 @@ export function createI18n(
     }
   }
 
-  return { locale, t, timeAgo, mod: isApple() ? "⌘" : "Ctrl" }
+  const failed: I18n["failed"] = (code, action, overrides = {}) =>
+    t(overrides[code] ?? FAILURES[code] ?? action, {
+      count: LIMITS.imagesPerComment,
+    })
+
+  return { locale, t, timeAgo, mod: isApple() ? "⌘" : "Ctrl", failed }
 }

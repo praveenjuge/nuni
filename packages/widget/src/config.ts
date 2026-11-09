@@ -126,6 +126,73 @@ export function resolveConfig(options: NuniOptions): ResolvedConfig {
   }
 }
 
+/**
+ * How each option is written as a `data-*` attribute of the script tag.
+ * The compiler checks that every option (but the ones that can't be a
+ * string) is listed.
+ */
+const ATTRIBUTES = {
+  project: "text",
+  convexUrl: "text",
+  convexSiteUrl: "text",
+  appUrl: "text",
+  pageKey: "text",
+  position: "text",
+  accentColor: "text",
+  theme: "text",
+  label: "text",
+  hotkey: "hotkey",
+  zIndex: "number",
+  locale: "text",
+  images: "flag",
+} as const satisfies Record<
+  Exclude<keyof NuniOptions, "getPageKey" | "messages" | "capture">,
+  "text" | "number" | "flag" | "hotkey"
+>
+
+/** `capture.<key>`, written `data-capture-<key>`. */
+const CAPTURE_KEYS = {
+  console: true,
+  network: true,
+  dom: true,
+  screenshot: true,
+} as const satisfies Record<keyof ResolvedConfig["capture"], true>
+
+/** "false", "0", "off" or "no" turn a flag off; anything else is on. */
+function flag(value: string): boolean {
+  return !/^(false|0|off|no)$/i.test(value.trim())
+}
+
+/**
+ * Options from strings named like a script tag's `dataset`: `project`,
+ * `accentColor`, `zIndex`, `hotkey` (a flag's "off" words turn it off),
+ * `captureScreenshot` and so on. Missing names are left out.
+ */
+export function optionsFromAttributes(
+  data: Record<string, string | undefined>
+): Partial<NuniOptions> {
+  const options: Record<string, unknown> = {}
+  for (const [name, kind] of Object.entries(ATTRIBUTES)) {
+    const value = data[name]
+    if (value === undefined) continue
+    options[name] =
+      kind === "flag"
+        ? flag(value)
+        : kind === "number"
+          ? Number(value)
+          : kind === "hotkey" && !flag(value)
+            ? false
+            : value
+  }
+  const capture: Record<string, boolean> = {}
+  for (const key of Object.keys(CAPTURE_KEYS)) {
+    const value = data[`capture${key[0]!.toUpperCase()}${key.slice(1)}`]
+    if (value !== undefined) capture[key] = flag(value)
+  }
+  options.capture = capture
+  return options
+}
+
 export const POSITIONS: readonly Position[] = [
   "bottom-right",
   "bottom-center",
