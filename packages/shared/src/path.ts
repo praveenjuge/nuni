@@ -108,17 +108,24 @@ export function withoutQuery(input: string, base?: string): string {
  * Cut a word of free text at the query or hash of the URL in it: after a
  * path ("/reset?token=1", "https://a.com/x#t") or before a key=value pair
  * ("?token=1", "#access_token=1"). One pass, so long words stay cheap.
+ * Punctuation that closes the word stays: the `)` of a CSS `url(...)` or
+ * of a URL in parentheses, a full stop after it.
  */
 function stripWord(word: string): string {
   const slash = word.indexOf("/")
   const equals = word.lastIndexOf("=")
   for (let i = 0; i < word.length - 1; i++) {
     const c = word[i]
-    if ((c === "?" || c === "#") && ((slash >= 0 && slash < i) || equals > i))
-      return word.slice(0, i)
+    if ((c === "?" || c === "#") && ((slash >= 0 && slash < i) || equals > i)) {
+      let end = word.length
+      while (end > i + 1 && CLOSING.includes(word[end - 1]!)) end--
+      return word.slice(0, i) + word.slice(end)
+    }
   }
   return word
 }
+
+const CLOSING = ")];,."
 
 /**
  * Remove query strings and hashes from every URL inside free text (log
