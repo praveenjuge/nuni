@@ -1,30 +1,46 @@
 import { MASK_SELECTOR } from "@nuni/shared"
 
-import { attributeAllowed, type AnchorOptions } from "./options"
 import { isShadowRoot, scopeRootOf, type ScopeRoot } from "./scope"
 import { isStableId, stableClasses, TEST_ID_ATTRIBUTES } from "./stable"
 
-export function cssEscape(value: string): string {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(value)
-  }
-  return value.replace(/([^\w-])/g, "\\$1").replace(/^(\d)/, "\\3$1 ")
-}
-
-function attrSelector(name: string, value: string): string {
+export function attrSelector(name: string, value: string): string {
   return `[${name}="${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`
 }
 
-export function testIdOf(
-  el: Element,
-  options: AnchorOptions
-): { attr: string; value: string } | null {
+/** Every element matching `selector` in `root`; none when it is invalid. */
+export function queryAll(
+  root: ParentNode,
+  selector: string | undefined
+): ArrayLike<Element> {
+  if (!selector) return []
+  try {
+    return root.querySelectorAll(selector)
+  } catch {
+    return []
+  }
+}
+
+export interface TestId {
+  attr: string
+  value: string
+}
+
+export function testIdOf(el: Element): TestId | null {
   for (const attr of TEST_ID_ATTRIBUTES) {
-    if (!attributeAllowed(attr, options)) continue
     const value = el.getAttribute(attr)
     if (value && value.length <= 100) return { attr, value }
   }
   return null
+}
+
+/** A test id as stored in `anchor.selectors.testId`: `attr=value`. */
+export function formatTestId({ attr, value }: TestId): string {
+  return `${attr}=${value}`
+}
+
+export function parseTestId(stored: string): TestId | null {
+  const i = stored.indexOf("=")
+  return i > 0 ? { attr: stored.slice(0, i), value: stored.slice(i + 1) } : null
 }
 
 export function stableIdOf(el: Element): string | null {
@@ -58,15 +74,11 @@ function countOfType(el: Element): number {
 }
 
 function queryCount(root: ParentNode, selector: string): number {
-  try {
-    return root.querySelectorAll(selector).length
-  } catch {
-    return Infinity
-  }
+  return queryAll(root, selector).length
 }
 
 function isUniqueId(root: ScopeRoot, id: string): boolean {
-  return queryCount(root, `#${cssEscape(id)}`) === 1
+  return queryCount(root, `#${CSS.escape(id)}`) === 1
 }
 
 /**
@@ -83,7 +95,7 @@ export function buildPath(el: Element): string {
   while (node && node !== doc.documentElement) {
     const id = stableIdOf(node)
     if (id && node !== el && isUniqueId(root, id)) {
-      parts.unshift(`#${cssEscape(id)}`)
+      parts.unshift(`#${CSS.escape(id)}`)
       return parts.join(" > ")
     }
     const tag = tagOf(node)
@@ -101,12 +113,7 @@ export function buildPath(el: Element): string {
  * the root's top-level elements, like document paths are from <html>.
  */
 export function queryPath(root: ScopeRoot, path: string): Element | null {
-  let matches: Element[]
-  try {
-    matches = Array.from(root.querySelectorAll(path)).slice(0, 50)
-  } catch {
-    return null
-  }
+  const matches = Array.from(queryAll(root, path)).slice(0, 50)
   if (!isShadowRoot(root) || path.startsWith("#")) return matches[0] ?? null
   const depth = path.split(" > ").length
   return (
@@ -118,18 +125,18 @@ export function queryPath(root: ScopeRoot, path: string): Element | null {
   )
 }
 
-function describeSegment(el: Element, options: AnchorOptions): string {
+function describeSegment(el: Element): string {
   const tag = tagOf(el)
-  const testId = testIdOf(el, options)
+  const testId = testIdOf(el)
   if (testId) return tag + attrSelector(testId.attr, testId.value)
 
   let segment = tag
   for (const cls of stableClasses(el).slice(0, 2))
-    segment += `.${cssEscape(cls)}`
+    segment += `.${CSS.escape(cls)}`
 
   for (const name of ["name", "type", "role"]) {
     const value = el.getAttribute(name)
-    if (value && value.length <= 40 && attributeAllowed(name, options)) {
+    if (value && value.length <= 40) {
       if (name === "type" && tag !== "input" && tag !== "button") continue
       segment += attrSelector(name, value)
     }
@@ -146,14 +153,11 @@ function describeSegment(el: Element, options: AnchorOptions): string {
  * stable ids, test ids, semantic classes and attributes. Returns undefined
  * when no unique selector is found within a few levels.
  */
-export function buildCssSelector(
-  el: Element,
-  options: AnchorOptions = {}
-): string | undefined {
+export function buildCssSelector(el: Element): string | undefined {
   const doc = el.ownerDocument
   const root = scopeRootOf(el)
   const id = stableIdOf(el)
-  if (id && isUniqueId(root, id)) return `#${cssEscape(id)}`
+  if (id && isUniqueId(root, id)) return `#${CSS.escape(id)}`
 
   const segments: string[] = []
   let node: Element | null = el
@@ -164,17 +168,16 @@ export function buildCssSelector(
     }
     const nodeId = stableIdOf(node)
     if (depth > 0 && nodeId && isUniqueId(root, nodeId)) {
-      segments.unshift(`#${cssEscape(nodeId)}`)
+      segments.unshift(`#${CSS.escape(nodeId)}`)
       const selector = segments.join(" > ")
       if (queryCount(root, selector) === 1) return selector
       break
     }
 
-    segments.unshift(describeSegment(node, options))
+    segments.unshift(describeSegment(node))
     let selector = segments.join(" > ")
     if (queryCount(root, selector) === 1) return selector
 
-    // Disambiguate this level among siblings.
     const parent = node.parentElement
     if (parent && queryCount(parent, `:scope > ${segments[0]}`) > 1) {
       segments[0] = `${segments[0]}:nth-of-type(${nthOfType(node)})`
