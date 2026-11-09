@@ -2,8 +2,13 @@ import { v } from "convex/values"
 
 import { internal } from "./_generated/api"
 import type { Id } from "./_generated/dataModel"
-import { action, internalMutation, type MutationCtx } from "./_generated/server"
-import { upsertUser, type Profile } from "./accounts"
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  type MutationCtx,
+} from "./_generated/server"
+import { upsertUser, userByWorkosId, type Profile } from "./accounts"
 import { authKit } from "./auth"
 import { workosApiUrl } from "./auth.config"
 import { fail } from "./lib"
@@ -44,6 +49,12 @@ export const storeProfile = internalMutation({
   },
 })
 
+export const known = internalQuery({
+  args: { workosId: v.string() },
+  handler: async (ctx, { workosId }) =>
+    (await userByWorkosId(ctx, workosId)) !== null,
+})
+
 /** The signed-in user's profile, read fresh from WorkOS; null if it can't be. */
 async function fetchProfile(workosId: string): Promise<Profile | null> {
   const response = await fetch(
@@ -66,11 +77,12 @@ async function fetchProfile(workosId: string): Promise<Profile | null> {
 }
 
 /**
- * The dashboard calls this once per page load: the signed-in user's row,
- * with the name and photo read fresh from WorkOS. Someone who signs in to
- * comment has their real name on their comments from the first sign-in,
- * before the user.created webhook arrives. When WorkOS can't be reached,
- * the webhook's copy or the sign-in token is used.
+ * The dashboard calls this once per page load: the signed-in user's row.
+ * The first time, before the user.created webhook has arrived, the name and
+ * photo are read fresh from WorkOS, so someone who signs in to comment has
+ * their real name on their comments right away. After that the webhooks keep
+ * the row current, so no WorkOS call slows the page. When WorkOS can't be
+ * reached, the sign-in token's name is used.
  */
 export const storeFresh = action({
   args: {},
@@ -79,7 +91,10 @@ export const storeFresh = action({
   ): Promise<{ _id: Id<"users">; name: string; avatarUrl?: string }> => {
     const identity = await ctx.auth.getUserIdentity()
     if (!identity) fail("unauthenticated", "Sign in first")
-    const profile = await fetchProfile(identity.subject)
+    const known = await ctx.runQuery(internal.users.known, {
+      workosId: identity.subject,
+    })
+    const profile = known ? null : await fetchProfile(identity.subject)
     return ctx.runMutation(internal.users.storeProfile, {
       profile: profile ?? undefined,
     })
