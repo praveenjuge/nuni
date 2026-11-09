@@ -1,6 +1,7 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
+import { projectRoute } from "@nuni/shared"
 import { useQuery } from "convex/react"
 import { ChevronRightIcon } from "vadivam-react"
 import Link from "next/link"
@@ -9,12 +10,10 @@ import { NewProjectDialog, SetupSteps } from "@/components/setup-steps"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useStoreUser } from "@/components/use-store-user"
 import { hostOf, plural, timeAgo } from "@/lib/format"
 
 export function ProjectsList() {
-  const { ready } = useStoreUser()
-  const projects = useQuery(api.projects.listMine, ready ? {} : "skip")
+  const projects = useQuery(api.projects.listMine)
 
   return (
     <section className="grid gap-6" aria-labelledby="projects-heading">
@@ -71,9 +70,9 @@ export function ProjectsList() {
                 `active ${timeAgo(p.lastActivityAt)}`,
               ].filter(Boolean)
               return (
-                <li key={p._id}>
+                <li key={p.publicId}>
                   <Link
-                    href={`/p/${p.publicId}`}
+                    href={projectRoute(p.publicId)}
                     className="group flex items-center gap-4 px-4 py-3.5 transition-colors outline-none hover:bg-muted/50 focus-visible:bg-muted/60"
                   >
                     <ProjectMark name={p.name} />

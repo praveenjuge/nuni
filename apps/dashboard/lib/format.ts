@@ -12,7 +12,13 @@ export function timeAgo(ts: number, now = Date.now()): string {
   return new Date(ts).toLocaleDateString()
 }
 
-/** "1 comment", "3 comments". */
+export function timeLeft(ts: number, now = Date.now()): string {
+  const h = Math.max(0, Math.round((ts - now) / 3_600_000))
+  if (h < 1) return "in less than an hour"
+  if (h < 48) return `in ${plural(h, "hour")}`
+  return `in ${Math.round(h / 24)} days`
+}
+
 export function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`
 }
@@ -26,8 +32,7 @@ export function hostOf(origin: string): string {
 }
 
 /** An http(s) origin from a link's query, or null. */
-export function cleanOrigin(value: string | undefined): string | null {
-  if (!value) return null
+export function cleanOrigin(value: string): string | null {
   try {
     const url = new URL(value)
     return url.protocol === "http:" || url.protocol === "https:"
@@ -50,18 +55,9 @@ export function errorMessage(error: unknown): string {
   return messageOf(error, "Please try again.")
 }
 
-/** "in 6 days", "in 3 hours": time left until `ts`. */
-export function timeLeft(ts: number, now = Date.now()): string {
-  const h = Math.max(0, Math.round((ts - now) / 3_600_000))
-  if (h < 1) return "in less than an hour"
-  if (h < 48) return `in ${h} hour${h === 1 ? "" : "s"}`
-  return `in ${Math.round(h / 24)} days`
-}
-
-/** A short "Chrome on macOS" from a user agent string. */
+/** A short "Chrome on macOS" from a browser's user agent string. */
 export function describeAgent(ua: string | undefined): string {
   if (!ua) return "Unknown device"
-  if (ua.startsWith("nuni-cli") || /node|bun/i.test(ua)) return ua.slice(0, 60)
   const browser = /Edg\//.test(ua)
     ? "Edge"
     : /Firefox\//.test(ua)
