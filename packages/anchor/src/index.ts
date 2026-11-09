@@ -1,36 +1,30 @@
+export type { Box } from "./capture"
 export {
   areaContainer,
   captureAnchor,
   captureArea,
   captureSelection,
-  type Box,
-} from "./capture"
-export { reactComponentName } from "./component"
-export { documentRect, isRendered } from "./geometry"
-export type { AnchorOptions } from "./options"
+  resolveAnchor,
+} from "./compat"
+export { isRendered } from "./geometry"
 export {
   createResolveCache,
-  resolveAnchor,
+  stillMatches,
   type Confidence,
   type ResolveCache,
+  type ResolveOptions,
   type ResolveResult,
 } from "./resolve"
 export {
   frameDocument,
+  frameDocuments,
   frameElementOf,
   isShadowRoot,
+  scopeChain,
   scopeRootOf,
   viewportRect,
   type ScopeRoot,
-  type ViewportRect,
+  type ScopeStep,
 } from "./scope"
-export { buildCssSelector, buildPath } from "./selector"
-export { isStableClass, isStableId } from "./stable"
 export { pickTarget } from "./target"
 export { elementText, textSimilarity } from "./text"
-export {
-  captureQuote,
-  findQuote,
-  quoteContainer,
-  type QuoteMatch,
-} from "./quote"

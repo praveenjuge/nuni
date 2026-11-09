@@ -1,5 +1,5 @@
 {
   "extends": "@nuni/tsconfig/library.json",
   "compilerOptions": { "jsx": "react-jsx" },
-  "include": ["src"]
+  "include": ["src", "test", "vitest.config.ts"]
 }

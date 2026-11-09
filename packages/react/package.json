@@ -32,7 +32,8 @@
     "build": "tsdown",
     "dev": "tsdown --watch",
     "lint": "eslint .",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "test": "vitest run"
   },
   "dependencies": {
     "@nuniapp/widget": "^0.1.13"
@@ -44,9 +45,13 @@
     "@nuni/eslint-config": "workspace:*",
     "@nuni/tsconfig": "workspace:*",
     "@types/react": "^19",
+    "@types/react-dom": "^19",
     "eslint": "^10.11.0",
+    "happy-dom": "^20.14.5",
     "react": "19.2.8",
+    "react-dom": "19.2.8",
     "tsdown": "^0.23.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2"
   }
 }
