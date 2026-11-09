@@ -26,15 +26,12 @@ export type ProjectStatus = FunctionReturnType<typeof api.projects.status>
 export type PageSummary = FunctionReturnType<
   typeof api.comments.pagesWithComments
 >[number]
-/** The signed-in commenter, as the widget shows them. */
-export type Commenter = FunctionReturnType<typeof api.commenters.validate>
-
-export type NewComment = Omit<NewCommentPayload, "publicId">
+type NewComment = Omit<NewCommentPayload, "publicId">
 
 /** Why a call failed: a backend error code, or no answer at all. */
 export type FailureCode = ErrorCode | "network" | "unknown"
 
-export class NuniApiError extends Error {
+class NuniApiError extends Error {
   constructor(public code: FailureCode) {
     super(code)
   }
