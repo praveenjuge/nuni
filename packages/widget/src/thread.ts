@@ -57,6 +57,12 @@ export function createThread(ctx: Ctx) {
     return card?.kind === "thread" && card.id === id ? card : null
   }
 
+  /** What to say about a failed action; an ended owner session is dropped. */
+  const failure = (error: unknown, action: MessageKey) => {
+    ctx.identity.ownerCallFailed(error)
+    return ctx.failed(error, action)
+  }
+
   /** Runs an action for the open comment. Resolves to true on success. */
   const act = async (
     id: string,
@@ -83,7 +89,7 @@ export function createThread(ctx: Ctx) {
       const now = openCard(id)
       if (now) {
         now.busy = false
-        now.error = ctx.failed(error, "failed")
+        now.error = failure(error, "failed")
       }
       ctx.render()
       return false
@@ -180,7 +186,7 @@ export function createThread(ctx: Ctx) {
       })
       card.reply = ""
     } catch (error) {
-      card.error = ctx.failed(error, "replyFailed")
+      card.error = failure(error, "replyFailed")
     }
     card.sendingReply = false
     ctx.render()
@@ -894,7 +900,7 @@ export function createThread(ctx: Ctx) {
         ctx.toast(t("pinMoved"))
       } catch (error) {
         undo()
-        ctx.toast(ctx.failed(error, "failed"))
+        ctx.toast(failure(error, "failed"))
       }
       ctx.page.openComment(id)
     },

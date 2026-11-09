@@ -7,7 +7,7 @@ import {
   type WidgetAuthor,
 } from "@nuni/shared"
 
-import { api } from "./api"
+import { api, failureCode } from "./api"
 import { colorFor, h, icon, initials } from "./dom"
 import { ICONS } from "./icons"
 import { sha256Hex } from "./sha256"
@@ -52,13 +52,8 @@ export function createIdentity(ctx: Ctx) {
       api.sessions.validate,
       { sessionToken: token },
       (result) => {
-        if (result.valid) {
-          ownerName = result.ownerName ?? ctx.t("owner")
-        } else {
-          ownerName = ownerToken = null
-          write(KEYS.session(config.project), null)
-          ctx.api.watch("session", null)
-        }
+        if (result.valid) ownerName = result.ownerName ?? ctx.t("owner")
+        else forgetOwner()
         ctx.render()
       }
     )
@@ -78,6 +73,13 @@ export function createIdentity(ctx: Ctx) {
         ctx.render()
       }
     )
+
+  /** The owner session expired or was revoked: no more owner tools. */
+  const forgetOwner = () => {
+    ownerName = ownerToken = null
+    write(KEYS.session(config.project), null)
+    ctx.api.watch("session", null)
+  }
 
   /** Back to commenting as a guest in this browser. */
   const forgetCommenter = () => {
@@ -131,6 +133,17 @@ export function createIdentity(ctx: Ctx) {
 
     get ownerToken() {
       return ownerName ? ownerToken : null
+    },
+
+    /**
+     * An owner tool failed: when the session has expired or was revoked,
+     * forget it, so the owner tools go away.
+     */
+    ownerCallFailed(error: unknown) {
+      if (ownerToken && failureCode(error) === "unauthenticated") {
+        forgetOwner()
+        ctx.render()
+      }
     },
 
     get isOwner() {
