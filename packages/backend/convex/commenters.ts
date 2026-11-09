@@ -132,7 +132,6 @@ export const linkBrowser = mutation({
   },
 })
 
-/** Widget sign-out: the widget revokes its own token. */
 export const signOut = mutation({
   args: { commenterToken: v.string() },
   handler: async (ctx, { commenterToken }) => {

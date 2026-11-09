@@ -13,6 +13,7 @@ import {
   ensureProject,
   projectRef,
   requireDashboardProject,
+  claimFor,
   revokeSessions,
   setOwner,
 } from "./ownership"
@@ -88,20 +89,10 @@ export const claim = mutation({
       ? await ensureProject(ctx, publicId, cleanOrigin)
       : ((await projectByPublicId(ctx, publicId)) ??
         fail("not_found", "This project has not been used yet"))
-
-    if (project.ownerId === user._id) {
-      return { status: "already_owner" as const, projectId: project._id }
-    }
-    if (project.ownerId) {
-      const owner = await ctx.db.get(project.ownerId)
-      return {
-        status: "claimed_by_other" as const,
-        ownerName: owner?.name ?? "someone else",
-      }
-    }
-
-    await setOwner(ctx, project, user._id, cleanOrigin)
-    return { status: "claimed" as const, projectId: project._id }
+    const claim = await claimFor(ctx, project, user._id, cleanOrigin)
+    return claim.status === "claimed_by_other"
+      ? claim
+      : { ...claim, projectId: project._id }
   },
 })
 

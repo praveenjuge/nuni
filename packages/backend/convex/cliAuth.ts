@@ -12,7 +12,7 @@ import { internalMutation, mutation, query } from "./_generated/server"
 import { currentUser, nameOf, requireUser } from "./accounts"
 import { assertProjectId, fail, projectByPublicId, type Ctx } from "./lib"
 import { SERVER_LIMITS } from "./limits"
-import { setOwner } from "./ownership"
+import { claimFor } from "./ownership"
 import { ipKey, rateLimiter } from "./rateLimits"
 import { hashOf, issueSession, mintToken } from "./tokens"
 
@@ -161,8 +161,8 @@ export const approve = mutation({
     }
     const project = await projectByPublicId(ctx, login.publicId)
     if (!project || project.deletingAt) fail("not_found", "Project not found")
-    if (!project.ownerId) await setOwner(ctx, project, user._id)
-    else if (project.ownerId !== user._id) {
+    const claim = await claimFor(ctx, project, user._id)
+    if (claim.status === "claimed_by_other") {
       fail("forbidden", "Only the project owner can sign in to it")
     }
     await ctx.db.patch(login._id, { status: "approved", userId: user._id })

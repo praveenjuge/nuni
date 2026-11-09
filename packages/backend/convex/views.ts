@@ -54,7 +54,6 @@ export async function toOwner(
   }
 }
 
-/** Links to the images attached to a comment, in order. */
 export async function imageUrls(
   ctx: QueryCtx,
   c: Doc<"comments">

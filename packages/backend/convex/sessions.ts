@@ -9,8 +9,8 @@ import {
   ownerOf,
   projectRef,
   requireDashboardProject,
+  claimFor,
   revokeSessions,
-  setOwner,
 } from "./ownership"
 import { createSiteSession, findByToken } from "./tokens"
 
@@ -57,24 +57,15 @@ export const allowOwnerTools = mutation({
     const user = await requireUser(ctx)
     const cleanOrigin = parseOrigin(origin)
     const project = await ensureProject(ctx, publicId, cleanOrigin)
-    if (project.ownerId && project.ownerId !== user._id) {
-      return {
-        status: "claimed_by_other" as const,
-        ownerName: await nameOf(ctx, project.ownerId),
-      }
-    }
-    const claimed = !project.ownerId
-    if (claimed) await setOwner(ctx, project, user._id, cleanOrigin)
+    const claim = await claimFor(ctx, project, user._id, cleanOrigin)
+    if (claim.status === "claimed_by_other") return claim
     const session = await createSiteSession(ctx, "owner", {
       userId: user._id,
       project,
       origin: cleanOrigin,
       userAgent,
     })
-    return {
-      status: claimed ? ("claimed" as const) : ("already_owner" as const),
-      ...session,
-    }
+    return { ...claim, ...session }
   },
 })
 

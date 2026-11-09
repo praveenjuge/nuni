@@ -106,6 +106,25 @@ export async function setOwner(
   await clearTransfers(ctx, project._id)
 }
 
+/** First come, first served: the user claims the project unless someone else owns it. */
+export async function claimFor(
+  ctx: MutationCtx,
+  project: Doc<"projects">,
+  userId: Id<"users">,
+  origin?: string
+) {
+  if (project.ownerId === userId) return { status: "already_owner" as const }
+  if (project.ownerId) {
+    const owner = await ctx.db.get(project.ownerId)
+    return {
+      status: "claimed_by_other" as const,
+      ownerName: owner?.name ?? "someone else",
+    }
+  }
+  await setOwner(ctx, project, userId, origin)
+  return { status: "claimed" as const }
+}
+
 type Denied = "not_found" | "unauthenticated" | "forbidden" | "not_signed_in"
 
 const DENIED: Record<

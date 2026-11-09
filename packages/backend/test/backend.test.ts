@@ -137,7 +137,8 @@ describe("widget comments", () => {
     } finally {
       vi.useRealTimers()
     }
-  })
+    // It posts 500 comments.
+  }, 30_000)
 
   it("lets authors edit and delete only their own comments", async () => {
     const t = setup()

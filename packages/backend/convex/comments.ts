@@ -148,7 +148,6 @@ export const listForSite = query({
   },
 })
 
-/** Pages with open comments, most first. */
 function openPages(ctx: QueryCtx, projectId: Id<"projects">) {
   return ctx.db
     .query("pageStats")

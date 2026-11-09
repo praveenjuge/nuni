@@ -22,7 +22,6 @@ export function clampString(value: string, max: number) {
   return value.length > max ? value.slice(0, max) : value
 }
 
-/** A comment or reply body: trimmed, not empty, within the limit. */
 export function cleanBody(body: string): string {
   const clean = body.replace(/\r\n/g, "\n").trim()
   if (!clean) fail("invalid_body", "Comment cannot be empty")

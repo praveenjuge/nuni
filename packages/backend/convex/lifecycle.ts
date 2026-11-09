@@ -201,12 +201,10 @@ export async function deleteCommentRows(ctx: MutationCtx, comment: Comment) {
   await ctx.db.delete(comment._id)
 }
 
-/** Every stored file of a comment: the screenshot and attached images. */
 function commentFiles(c: Comment): Id<"_storage">[] {
   return [...(c.screenshotId ? [c.screenshotId] : []), ...(c.images ?? [])]
 }
 
-/** Change a thread's reply and reaction counts. */
 export async function adjustThread(
   ctx: MutationCtx,
   commentId: Id<"comments">,
