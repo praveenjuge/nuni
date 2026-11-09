@@ -599,8 +599,9 @@ function resolveIn(
   }
   scored.sort((a, b) => b.score - a.score)
 
-  // Prefer the innermost of nested candidates with equal text (a <span> in a
-  // <button> vs the button itself are both plausible; keep the better tag).
+  // The runner-up, for the ambiguity margin. A candidate inside the best one
+  // or around it (a <span> in the <button>) points at the same spot, so it
+  // is no rival.
   const best = scored[0]!
   const second = scored.find(
     (s) =>

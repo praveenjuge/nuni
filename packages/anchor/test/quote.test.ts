@@ -1,3 +1,4 @@
+import { LIMITS } from "@nuni/shared"
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
@@ -50,14 +51,17 @@ describe("text map", () => {
     expect(textMap(document.getElementById("a")!).text).toBe("Card ends here")
   })
 
-  it("maps DOM positions to text offsets and back", () => {
-    document.body.innerHTML = `<p id="a">Pay <em>monthly</em> or yearly</p>`
+  it("maps DOM positions to offsets in the collapsed text", () => {
+    document.body.innerHTML = `<p id="a">Pay   <em>monthly</em> or yearly</p>`
     const p = document.getElementById("a")!
-    const range = select(p, "monthly or")
     const map = textMap(p)
-    expect(textOffset(map, range.startContainer, range.startOffset)).toBe(4)
-    expect(textOffset(map, range.endContainer, range.endOffset)).toBe(14)
-    expect(text(range)).toBe("monthly or")
+    const [pay, em, rest] = Array.from(p.childNodes)
+    expect(map.text).toBe("Pay monthly or yearly")
+    // The start of "monthly", after three spaces collapsed to one.
+    expect(textOffset(map, em!.firstChild!, 0)).toBe(4)
+    expect(textOffset(map, pay!, 4)).toBe(4)
+    // Just after " or".
+    expect(textOffset(map, rest!, 3)).toBe(14)
   })
 })
 
@@ -83,8 +87,8 @@ describe("capturing a selection", () => {
     const range = select(p, " target words ")
     const quote = captureQuote(range, p)!
     expect(quote.exact).toBe("target words")
-    expect(quote.prefix.length).toBe(32)
-    expect(quote.suffix.length).toBe(32)
+    expect(quote.prefix.length).toBe(LIMITS.quoteContextLength)
+    expect(quote.suffix.length).toBe(LIMITS.quoteContextLength)
   })
 
   it("returns null for a selection with no text", () => {

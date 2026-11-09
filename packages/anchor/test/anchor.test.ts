@@ -73,11 +73,19 @@ describe("selectors", () => {
       </main>`
   })
 
-  it("uses test ids and stable ids", () => {
+  it("builds selectors from test ids and names that survive reordering", () => {
     const pro = document.querySelector('[data-testid="pro"]')!
-    expect(buildCssSelector(pro)).toBe('button[data-testid="pro"]')
     const email = document.querySelector("input")!
-    expect(buildCssSelector(email)).toBe('input[name="email"]')
+    const selectors = [buildCssSelector(pro)!, buildCssSelector(email)!]
+    const plans = document.querySelector(".plans")!
+    plans.prepend(plans.lastElementChild!)
+    const form = document.querySelector("form")!
+    form.prepend(form.querySelector("button")!)
+    expect(selectors.map((s) => document.querySelectorAll(s).length)).toEqual([
+      1, 1,
+    ])
+    expect(document.querySelector(selectors[0]!)).toBe(pro)
+    expect(document.querySelector(selectors[1]!)).toBe(email)
   })
 
   it("disambiguates siblings with nth-of-type", () => {
@@ -89,9 +97,14 @@ describe("selectors", () => {
 
   it("builds a structural path from the nearest stable id", () => {
     const go = document.querySelector("#signup > button")!
-    expect(buildPath(go)).toBe("#signup > button")
+    const path = buildPath(go)
     const span = document.querySelector("span")!
     expect(document.querySelector(buildPath(span))).toBe(span)
+    // Markup added above the id doesn't break the path.
+    document.body.innerHTML = `<div class="layout"><section>${document.body.innerHTML}</section></div>`
+    expect(document.querySelector(path)).toBe(
+      document.querySelector("#signup > button")
+    )
   })
 })
 
@@ -147,11 +160,16 @@ describe("capture and resolve", () => {
     expect(result.element).toBeNull()
   })
 
-  it("stores the click offset inside the element", () => {
+  it("stores the click position as a fraction of the element", () => {
     document.body.innerHTML = `<div>box</div>`
-    const anchor = captureAnchor(document.querySelector("div")!, { x: 0, y: 0 })
-    expect(anchor.offset.x).toBeGreaterThanOrEqual(0)
-    expect(anchor.offset.x).toBeLessThanOrEqual(1)
+    const el = document.querySelector("div")!
+    el.getBoundingClientRect = () =>
+      ({ left: 100, top: 50, width: 200, height: 100 }) as DOMRect
+    expect(captureAnchor(el, { x: 150, y: 125 }).offset).toEqual({
+      x: 0.25,
+      y: 0.75,
+    })
+    expect(captureAnchor(el).offset).toEqual({ x: 0.5, y: 0.5 })
   })
 })
 
@@ -252,8 +270,10 @@ describe("shadow DOM", () => {
     expect(anchor.scope![0]!.host.tag).toBe("plan-card")
     // The host's text is what it shows: its shadow tree.
     expect(anchor.scope![0]!.host.text).toContain("Pro")
-    expect(anchor.selectors.path).toBe("button")
-    expect(buildPath(button("Pro"))).toBe("button")
+    const shadow = button("Pro").getRootNode() as ShadowRoot
+    expect(Array.from(shadow.querySelectorAll(anchor.selectors.path))).toEqual([
+      button("Pro"),
+    ])
   })
 
   it("finds the element again through its host, and not in another card", () => {
