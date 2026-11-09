@@ -5,8 +5,8 @@
  * whether the engine finds the element marked `data-bench-target` there
  * (or correctly reports it as lost when it was removed).
  *
- * The engine is configured to ignore `data-bench-*` attributes, so the
- * markers are ground truth only.
+ * The engine never reads `data-bench-*` attributes (they are in none of
+ * its attribute lists), so the markers are ground truth only.
  */
 
 export interface Scenario {
@@ -58,6 +58,8 @@ interface PageOptions {
   lang?: "en" | "es"
   stateAttrs?: boolean
   scrollBox?: boolean
+  /** Plan cards and the hero CTA carry `data-nuni` test ids. */
+  nuniIds?: boolean
 }
 
 const DEFAULT_PLANS: Plan[] = [
@@ -150,6 +152,7 @@ export function page(o: PageOptions = {}): string {
   const heroCta = o.heroCta ?? t("Get started", o)
   const heroTag = o.heroCtaTag ?? "a"
   const signupTag = o.navSignupTag ?? "button"
+  const nuniId = (id: string) => (o.nuniIds ? ` data-nuni="${id}"` : "")
   const state = (open: boolean) =>
     o.stateAttrs
       ? ` data-state="${open ? "open" : "closed"}" aria-expanded="${open}"`
@@ -158,7 +161,7 @@ export function page(o: PageOptions = {}): string {
   const planCards = plans
     .map(
       (p) => `
-      <div class="${c("plan")}"${state(p.name === "Pro")}>
+      <div class="${c("plan")}"${nuniId(`plan-${p.name.toLowerCase()}`)}${state(p.name === "Pro")}>
         <h3 class="${c("plan-name")}">${p.name}</h3>
         <p class="${c("price")}"${mark(`price:${p.name}`, o)}>${p.price}<span class="${c("per")}">/mo</span></p>
         <ul class="${c("features")}">${p.features.map((f) => `<li>${f}</li>`).join("")}</ul>
@@ -213,7 +216,7 @@ export function page(o: PageOptions = {}): string {
       <h1>${t("Build faster", o)}</h1>
       <p class="${c("lead")}">${t("The best way to ship your product.", o)}</p>
       <div class="${c("hero-actions")}">
-        <${heroTag} class="${c("btn")} ${c("btn-primary")}"${heroTag === "a" ? ' href="/start"' : ""}${mark("hero-cta", o)}>${heroCta}</${heroTag}>
+        <${heroTag} class="${c("btn")} ${c("btn-primary")}"${heroTag === "a" ? ' href="/start"' : ""}${nuniId("hero-cta")}${mark("hero-cta", o)}>${heroCta}</${heroTag}>
         <a class="${c("btn")} ${c("btn-secondary")}" href="/demo">${t("Book a demo", o)}</a>
       </div>
     </section>
@@ -498,6 +501,40 @@ export const scenarios: Scenario[] = [
       "<footer",
       '<aside class="cta"><button type="button" class="btn">Subscribe</button></aside><footer'
     ),
+    expect: "found",
+  },
+  {
+    name: "data-nuni test id, page translated",
+    category: "test ids",
+    before: page({ target: "hero-cta", nuniIds: true }),
+    after: page({ target: "hero-cta", nuniIds: true, lang: "es" }),
+    expect: "found",
+  },
+  {
+    name: "data-nuni test id, copy edited and classes regenerated",
+    category: "test ids",
+    before: page({ target: "hero-cta", nuniIds: true }),
+    after: page({
+      target: "hero-cta",
+      nuniIds: true,
+      heroCta: "Start your free trial",
+      cls: hashed("v3"),
+    }),
+    expect: "found",
+  },
+  {
+    name: "data-nuni cards, card inserted and classes regenerated",
+    category: "test ids",
+    before: page({ target: "plan:Team", nuniIds: true }),
+    after: page({
+      target: "plan:Team",
+      nuniIds: true,
+      cls: hashed("v2"),
+      plans: [
+        { name: "Free", price: "$0", features: ["Try it out"] },
+        ...DEFAULT_PLANS,
+      ],
+    }),
     expect: "found",
   },
   {

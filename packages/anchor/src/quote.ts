@@ -1,14 +1,6 @@
-import {
-  LIMITS,
-  MASK_ATTRIBUTE,
-  MASK_SELECTOR,
-  type Anchor,
-  type AnchorQuote,
-} from "@nuni/shared"
+import { LIMITS, MASK_SELECTOR, type AnchorQuote } from "@nuni/shared"
 
-import { textSimilarity } from "./text"
-
-const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SVG"])
+import { skipsText, textSimilarity } from "./text"
 
 /** Elements whose edges read as a space between words. */
 const BLOCK_TAGS = new Set([
@@ -100,12 +92,25 @@ export interface TextMap {
 }
 
 export function textMap(el: Element): TextMap {
+  return readText(el, true)
+}
+
+/**
+ * An element's words as a text comment's quote was taken from them (the
+ * text of `textMap`), for checking whether they hold a quote.
+ */
+export function quoteText(el: Element): string {
+  return readText(el, false).text
+}
+
+function readText(el: Element, positions: boolean): TextMap {
   const map: TextMap = { text: "", nodes: [], node: [], offset: [] }
   if (el.closest(MASK_SELECTOR)) return map
   const chars: string[] = []
   let space = true
   const push = (c: string, node: number, offset: number) => {
     chars.push(c)
+    if (!positions) return
     map.node.push(node)
     map.offset.push(offset)
   }
@@ -134,12 +139,9 @@ export function textMap(el: Element): TextMap {
       }
       return
     }
-    if (node.nodeType !== 1) return
+    if (node.nodeType !== 1 || skipsText(node as Element)) return
     const el = node as Element
-    const tag = el.tagName.toUpperCase()
-    if (SKIP_TAGS.has(tag)) return
-    if (el.hasAttribute(MASK_ATTRIBUTE) || el.hasAttribute("data-nuni")) return
-    const block = BLOCK_TAGS.has(tag)
+    const block = BLOCK_TAGS.has(el.tagName.toUpperCase())
     if (block) gap()
     for (const child of Array.from(el.childNodes)) walk(child)
     if (block) gap()
@@ -182,6 +184,22 @@ export function textOffset(
     return -1
   }
   return lo
+}
+
+/**
+ * The words a range covers, read like `textMap` reads them (so they compare
+ * with a quote's `exact`): a range over two list items reads "One Two",
+ * and a non-breaking space stays one.
+ */
+export function rangeText(range: Range): string {
+  const node = range.commonAncestorContainer
+  const el = node.nodeType === 1 ? (node as Element) : node.parentElement
+  if (!el) return ""
+  const map = textMap(el)
+  const start = textOffset(map, range.startContainer, range.startOffset)
+  const end = textOffset(map, range.endContainer, range.endOffset)
+  if (start < 0 || end < start) return ""
+  return map.text.slice(start, end).replace(/^ +| +$/g, "")
 }
 
 /** A Range over characters [start, end) of the element's text. */
@@ -290,7 +308,6 @@ function findIn(
   const { text } = map
   if (!text) return null
 
-  // Every copy of the words; the context around them picks one.
   let best = -1
   let bestScore = -1
   for (let i = text.indexOf(exact); i >= 0; i = text.indexOf(exact, i + 1)) {
@@ -341,7 +358,6 @@ function closestSpan(
   let best: { start: number; end: number; score: number } | null = null
   let e = 0
   for (const start of starts) {
-    // Ends around start + length, from 70% to 130% of it.
     while (e < ends.length && ends[e]! <= start) e++
     for (let j = e; j < ends.length; j++) {
       const span = ends[j]! - start
@@ -352,12 +368,4 @@ function closestSpan(
     }
   }
   return best
-}
-
-/** Shorthand for the widget: the quote's range for a resolved anchor. */
-export function resolveQuote(
-  anchor: Anchor,
-  element: Element
-): QuoteMatch | null {
-  return anchor.quote ? findQuote(element, anchor.quote) : null
 }

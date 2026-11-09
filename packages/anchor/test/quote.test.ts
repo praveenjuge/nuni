@@ -1,13 +1,20 @@
+import { LIMITS } from "@nuni/shared"
 import { beforeEach, describe, expect, it } from "vitest"
 
 import {
   captureAnchor,
   captureArea,
   captureSelection,
-  findQuote,
   resolveAnchor,
+  stillMatches,
 } from "../src"
-import { captureQuote, quoteContainer, textMap, textOffset } from "../src/quote"
+import {
+  captureQuote,
+  findQuote,
+  quoteContainer,
+  textMap,
+  textOffset,
+} from "../src/quote"
 
 /** A Range over the nth copy of `words` inside `el`. */
 function select(el: Element, words: string, nth = 0): Range {
@@ -44,14 +51,17 @@ describe("text map", () => {
     expect(textMap(document.getElementById("a")!).text).toBe("Card ends here")
   })
 
-  it("maps DOM positions to text offsets and back", () => {
-    document.body.innerHTML = `<p id="a">Pay <em>monthly</em> or yearly</p>`
+  it("maps DOM positions to offsets in the collapsed text", () => {
+    document.body.innerHTML = `<p id="a">Pay   <em>monthly</em> or yearly</p>`
     const p = document.getElementById("a")!
-    const range = select(p, "monthly or")
     const map = textMap(p)
-    expect(textOffset(map, range.startContainer, range.startOffset)).toBe(4)
-    expect(textOffset(map, range.endContainer, range.endOffset)).toBe(14)
-    expect(text(range)).toBe("monthly or")
+    const [pay, em, rest] = Array.from(p.childNodes)
+    expect(map.text).toBe("Pay monthly or yearly")
+    // The start of "monthly", after three spaces collapsed to one.
+    expect(textOffset(map, em!.firstChild!, 0)).toBe(4)
+    expect(textOffset(map, pay!, 4)).toBe(4)
+    // Just after " or".
+    expect(textOffset(map, rest!, 3)).toBe(14)
   })
 })
 
@@ -77,8 +87,8 @@ describe("capturing a selection", () => {
     const range = select(p, " target words ")
     const quote = captureQuote(range, p)!
     expect(quote.exact).toBe("target words")
-    expect(quote.prefix.length).toBe(32)
-    expect(quote.suffix.length).toBe(32)
+    expect(quote.prefix.length).toBe(LIMITS.quoteContextLength)
+    expect(quote.suffix.length).toBe(LIMITS.quoteContextLength)
   })
 
   it("returns null for a selection with no text", () => {
@@ -172,6 +182,45 @@ describe("finding a quote again", () => {
     const result = resolveAnchor(anchor)
     expect(result.element?.textContent).toContain("Beta")
     expect(text(result.range)).toBe("with a deadline")
+  })
+})
+
+describe("checking a placed pin", () => {
+  it("keeps a text pin while its words are where its range is", () => {
+    document.body.innerHTML = `<p id="a">It costs $20&nbsp;per month.</p><ol id="b"><li>Add the tag.</li><li>Deploy it.</li></ol>`
+    for (const [id, words] of [
+      ["a", "$20\u00a0per month"],
+      ["b", "tag. Deploy"],
+    ] as const) {
+      const el = document.getElementById(id)!
+      const { anchor } = captureSelection(select(el, words))!
+      const placed = resolveAnchor(anchor)
+      expect(placed.element).toBe(el)
+      expect(stillMatches(anchor, placed)).toBe(true)
+    }
+  })
+
+  it("drops a text pin whose words were removed", () => {
+    document.body.innerHTML = `<p id="a">Ship the docs by Friday.</p>`
+    const p = document.getElementById("a")!
+    const { anchor } = captureSelection(select(p, "by Friday"))!
+    const placed = resolveAnchor(anchor)
+    p.textContent = "Ship the docs."
+    expect(stillMatches(anchor, placed)).toBe(false)
+  })
+
+  it("keeps an element pin until its text changes or it is detached", () => {
+    document.body.innerHTML = `<button id="a">Choose plan</button>`
+    const button = document.getElementById("a")!
+    const anchor = captureAnchor(button)
+    expect(stillMatches(anchor, { element: button })).toBe(true)
+    button.textContent = "Choose a plan"
+    expect(stillMatches(anchor, { element: button })).toBe(true)
+    button.textContent = "Contact sales"
+    expect(stillMatches(anchor, { element: button })).toBe(false)
+    button.textContent = "Choose plan"
+    button.remove()
+    expect(stillMatches(anchor, { element: button })).toBe(false)
   })
 })
 
