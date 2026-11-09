@@ -1,22 +1,32 @@
 import { WIDGET_ATTRIBUTE } from "@nuni/shared"
 
 import { failureCode, NuniApi } from "./api"
-import { createComposer, type Composer, type Draft } from "./composer"
+import {
+  COMPOSER_CSS,
+  createComposer,
+  type Composer,
+  type Draft,
+} from "./composer"
 import type { ResolvedConfig } from "./config"
 import type { Collectors } from "./context"
-import { createDialog, type Dialog } from "./dialog"
+import { createDialog, DIALOG_CSS, type Dialog } from "./dialog"
 import { h, isMobile, parseColor, readableOn } from "./dom"
 import { createI18n, type I18n, type MessageKey } from "./i18n"
 import { createIdentity, type Identity } from "./identity"
 import type { Runtime } from "./mount"
 import { createPage, type Page } from "./page"
-import { createPanel, type Panel } from "./panel"
-import { createPicker, type Picker } from "./picker"
-import { createPins, type Pins } from "./pins"
+import { createPanel, PANEL_CSS, type Panel } from "./panel"
+import { createPicker, PICKER_CSS, type Picker } from "./picker"
+import { createPins, PIN_SIZE, PINS_CSS, type Pins } from "./pins"
 import { isEditable } from "./privacy"
-import { STYLES } from "./styles"
-import { createThread, type ThreadCard, type ThreadCards } from "./thread"
-import { createToolbar, type Toolbar } from "./toolbar"
+import { BASE_CSS, LAYOUT_CSS } from "./styles"
+import {
+  createThread,
+  THREAD_CSS,
+  type ThreadCard,
+  type ThreadCards,
+} from "./thread"
+import { createToolbar, TOOLBAR_CSS, type Toolbar } from "./toolbar"
 
 export interface WidgetRuntime extends Runtime {
   collectors: Collectors
@@ -25,9 +35,22 @@ export interface WidgetRuntime extends Runtime {
 /** The open card: a comment being written, or an open comment. */
 export type Card = { kind: "composer"; draft: Draft } | ThreadCard | null
 
-/** A card sits right of its pin (28px wide, see `.pin`), level with its top. */
-const CARD_OFFSET_X = 36
-const CARD_OFFSET_Y = -28
+/** Each part's styles, in cascade order: later ones win ties. */
+const STYLES = [
+  BASE_CSS,
+  TOOLBAR_CSS,
+  PICKER_CSS,
+  DIALOG_CSS,
+  PINS_CSS,
+  COMPOSER_CSS,
+  THREAD_CSS,
+  PANEL_CSS,
+  LAYOUT_CSS,
+]
+
+/** A card sits right of its pin, level with its top. */
+const CARD_OFFSET_X = PIN_SIZE + 8
+const CARD_OFFSET_Y = -PIN_SIZE
 /** Without a pin, a card sits next to the toolbar in its corner. */
 const TOOLBAR_EDGE = 16
 const TOOLBAR_CLEARANCE = 72
@@ -200,7 +223,7 @@ export class NuniWidget {
 
     applyAppearance(host, config)
     root.append(
-      h("style", {}, STYLES),
+      h("style", {}, STYLES.join("")),
       markLayer,
       pinLayer,
       overlayLayer,

@@ -39,7 +39,7 @@ type Tool = "box" | "arrow" | "pen"
 type Point = { x: number; y: number }
 type Shape = { tool: Tool; points: Point[] }
 
-const STYLES = `
+const STYLES = /* css */ `
 .mk {
   position: fixed;
   inset: 0;

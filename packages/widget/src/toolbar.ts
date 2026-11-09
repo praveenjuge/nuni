@@ -208,3 +208,61 @@ function nearestPosition(x: number, y: number): Position {
     x < width / 3 ? "left" : x > (width * 2) / 3 ? "right" : "center"
   return `${y < window.innerHeight / 2 ? "top" : "bottom"}-${across}`
 }
+
+export const TOOLBAR_CSS = /* css */ `
+.toolbar {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--n-bg);
+  color: var(--n-fg);
+  border: 1px solid var(--n-border);
+  box-shadow: var(--n-shadow);
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.toolbar[data-dragging] {
+  cursor: grabbing;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08), 0 16px 40px rgba(0,0,0,0.2);
+}
+/* While dragging, the host covers the page so no move is lost to it. */
+:host([data-dragging]) { pointer-events: auto; cursor: grabbing; }
+:host([data-dragging]) .tb-btn { pointer-events: none; }
+.tb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.tb-btn:hover { background: var(--n-bg-subtle); }
+.tb-btn[aria-pressed="true"] { background: var(--n-accent); color: var(--n-accent-fg); }
+.tb-count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--n-bg-subtle);
+  color: var(--n-fg-muted);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tb-btn[aria-pressed="true"] .tb-count { background: rgba(255,255,255,0.25); color: inherit; }
+.tb-icon { width: 36px; padding: 0; justify-content: center; }
+/* Pins hidden: the count stays, dimmed, so the comments aren't lost. */
+.toolbar[data-pins-hidden] .tb-count { opacity: 0.55; }
+`

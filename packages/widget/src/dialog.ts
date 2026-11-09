@@ -207,3 +207,40 @@ export function createDialog(ctx: Ctx) {
     )
   }
 }
+
+export const DIALOG_CSS = /* css */ `
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.32);
+  pointer-events: auto;
+}
+.confirm {
+  width: min(360px, calc(100vw - 32px));
+  padding: 16px;
+  border-radius: var(--n-radius);
+  background: var(--n-bg);
+  color: var(--n-fg);
+  border: 1px solid var(--n-border);
+  box-shadow: var(--n-shadow);
+  display: grid;
+  gap: 12px;
+}
+.confirm p { margin: 0; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 72px;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--n-fg);
+  color: var(--n-bg);
+  font-size: 13px;
+  box-shadow: var(--n-shadow);
+  pointer-events: none;
+}
+`

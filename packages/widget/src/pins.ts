@@ -33,8 +33,10 @@ export interface PinTarget {
 
 type Point = { x: number; y: number }
 
-/** A pin is 28px wide (see `.pin` in the styles): closer ones fan out. */
-const PIN_OVERLAP = 14
+/** A pin's width and height on large screens. */
+export const PIN_SIZE = 28
+/** Pins closer than half a pin fan out, overlapping a little. */
+const PIN_OVERLAP = PIN_SIZE / 2
 const PIN_FAN_STEP = 18
 /** DOM changes come in bursts; pins are found again once they pause. */
 const RESOLVE_DELAY_MS = 200
@@ -503,3 +505,66 @@ export function regionBox(anchor: Anchor, el: Element): Box | null {
     height: region.h * r.height,
   }
 }
+
+export const PINS_CSS = /* css */ `
+.pin {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: ${PIN_SIZE}px;
+  height: ${PIN_SIZE}px;
+  margin: -${PIN_SIZE}px 0 0 0;
+  border: 2px solid #fff;
+  border-radius: 14px 14px 14px 2px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform 120ms ease;
+  will-change: transform;
+}
+.pin:hover, .pin[data-active="true"] { z-index: 2; }
+.pin[data-active="true"] { box-shadow: 0 0 0 3px var(--n-accent), 0 2px 8px rgba(0,0,0,0.25); }
+.pin[data-status="resolved"] { opacity: 0.55; filter: grayscale(0.6); }
+.pin[data-replies]::after {
+  content: attr(data-replies);
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--n-bg);
+  color: var(--n-fg);
+  border: 1px solid var(--n-border);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+.pin[data-confidence="low"] { border-style: dashed; }
+.pin[hidden] { display: none; }
+.pin-pending { opacity: 0.7; }
+
+.marks { position: fixed; inset: 0; pointer-events: none; }
+.mark {
+  position: fixed;
+  border-bottom: 2px solid var(--n-accent);
+  background: var(--n-accent-soft);
+  opacity: 0.7;
+  pointer-events: none;
+}
+.mark-active { opacity: 1; background: color-mix(in srgb, var(--n-accent) 26%, transparent); }
+.area {
+  position: fixed;
+  border: 2px dashed var(--n-accent);
+  border-radius: 4px;
+  background: var(--n-accent-soft);
+  pointer-events: none;
+}
+`

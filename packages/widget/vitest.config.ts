@@ -1,10 +1,8 @@
-import { urlDefines } from "@nuni/shared/build"
 import { defineConfig } from "vitest/config"
 
+import { define } from "./tsdown.config"
+
 export default defineConfig({
-  define: {
-    ...urlDefines({}),
-    __NUNI_VERSION__: JSON.stringify("test"),
-  },
+  define,
   test: { environment: "happy-dom" },
 })

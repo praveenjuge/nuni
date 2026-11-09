@@ -424,3 +424,72 @@ function describeElement(el: Element): string {
   const text = elementText(el, 40)
   return `${tag}${id}${cls}${text ? ` "${text}"` : ""}`
 }
+
+export const PICKER_CSS = /* css */ `
+.pick-hint {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: calc(100vw - 24px);
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--n-fg);
+  color: var(--n-bg);
+  font-size: 13px;
+  box-shadow: var(--n-shadow);
+  pointer-events: none;
+}
+.highlight {
+  position: fixed;
+  border: 2px solid var(--n-accent);
+  background: var(--n-accent-soft);
+  border-radius: 4px;
+  pointer-events: none;
+  transition: all 60ms ease-out;
+}
+.highlight-label {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  margin-bottom: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--n-accent);
+  color: var(--n-accent-fg);
+  font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drag-box { transition: none; border-style: dashed; }
+
+.select-btn {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--n-fg);
+  color: var(--n-bg);
+  font-weight: 550;
+  font-size: 13px;
+  box-shadow: var(--n-shadow);
+  pointer-events: auto;
+}
+.select-btn[hidden] { display: none; }
+
+.pick-keys { opacity: 0.7; }
+.pick-keys::before { content: "·"; margin-right: 8px; }
+@media (max-width: 900px) { .pick-keys { display: none; } }
+`
