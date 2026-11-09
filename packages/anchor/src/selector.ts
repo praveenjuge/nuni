@@ -3,13 +3,6 @@ import { MASK_SELECTOR } from "@nuni/shared"
 import { isShadowRoot, scopeRootOf, type ScopeRoot } from "./scope"
 import { isStableId, stableClasses, TEST_ID_ATTRIBUTES } from "./stable"
 
-export function cssEscape(value: string): string {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(value)
-  }
-  return value.replace(/([^\w-])/g, "\\$1").replace(/^(\d)/, "\\3$1 ")
-}
-
 export function attrSelector(name: string, value: string): string {
   return `[${name}="${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`
 }
@@ -85,7 +78,7 @@ function queryCount(root: ParentNode, selector: string): number {
 }
 
 function isUniqueId(root: ScopeRoot, id: string): boolean {
-  return queryCount(root, `#${cssEscape(id)}`) === 1
+  return queryCount(root, `#${CSS.escape(id)}`) === 1
 }
 
 /**
@@ -102,7 +95,7 @@ export function buildPath(el: Element): string {
   while (node && node !== doc.documentElement) {
     const id = stableIdOf(node)
     if (id && node !== el && isUniqueId(root, id)) {
-      parts.unshift(`#${cssEscape(id)}`)
+      parts.unshift(`#${CSS.escape(id)}`)
       return parts.join(" > ")
     }
     const tag = tagOf(node)
@@ -139,7 +132,7 @@ function describeSegment(el: Element): string {
 
   let segment = tag
   for (const cls of stableClasses(el).slice(0, 2))
-    segment += `.${cssEscape(cls)}`
+    segment += `.${CSS.escape(cls)}`
 
   for (const name of ["name", "type", "role"]) {
     const value = el.getAttribute(name)
@@ -164,7 +157,7 @@ export function buildCssSelector(el: Element): string | undefined {
   const doc = el.ownerDocument
   const root = scopeRootOf(el)
   const id = stableIdOf(el)
-  if (id && isUniqueId(root, id)) return `#${cssEscape(id)}`
+  if (id && isUniqueId(root, id)) return `#${CSS.escape(id)}`
 
   const segments: string[] = []
   let node: Element | null = el
@@ -175,7 +168,7 @@ export function buildCssSelector(el: Element): string | undefined {
     }
     const nodeId = stableIdOf(node)
     if (depth > 0 && nodeId && isUniqueId(root, nodeId)) {
-      segments.unshift(`#${cssEscape(nodeId)}`)
+      segments.unshift(`#${CSS.escape(nodeId)}`)
       const selector = segments.join(" > ")
       if (queryCount(root, selector) === 1) return selector
       break

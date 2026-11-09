@@ -8,13 +8,7 @@ import {
   type ScopeRoot,
 } from "./scope"
 import { findQuote, quoteText, rangeText } from "./quote"
-import {
-  attrSelector,
-  cssEscape,
-  parseTestId,
-  queryAll,
-  queryPath,
-} from "./selector"
+import { attrSelector, parseTestId, queryAll, queryPath } from "./selector"
 import { stableClasses } from "./stable"
 import { elementText, textSimilarity } from "./text"
 
@@ -387,7 +381,7 @@ function collectCandidates(
   if (anchor.selectors.id) {
     add(
       isShadowRoot(root)
-        ? firstMatches(root, `#${cssEscape(anchor.selectors.id)}`, 1)[0]
+        ? firstMatches(root, `#${CSS.escape(anchor.selectors.id)}`, 1)[0]
         : root.getElementById(anchor.selectors.id)
     )
   }

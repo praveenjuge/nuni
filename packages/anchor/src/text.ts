@@ -25,7 +25,7 @@ export function skipsText(el: Element): boolean {
   )
 }
 
-export function normalizeText(value: string): string {
+function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim()
 }
 
