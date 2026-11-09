@@ -11,8 +11,8 @@ Reliable pins are the heart of Nuni. A comment is only useful if it is still att
 
 When you click an element, Nuni records several independent ways to find it again:
 
-- **Selectors**: a stable `id`, a test id (`data-testid`, `data-test`, `data-cy`, `data-nuni`), the shortest unique CSS selector built from human-written classes and attributes, and a structural path.
-- **Content**: the element's text, identifying attributes (`href`, `name`, `aria-label`, `alt`, `placeholder`), and a short text snippet from its closest containers (like the card title).
+- **Selectors**: a stable `id`, a test id (`data-nuni`, `data-testid`, `data-test-id`, `data-test`, `data-cy`, `data-qa`), the shortest unique CSS selector built from human-written classes and attributes, and a structural path.
+- **Content**: the element's text, identifying attributes (`aria-label`, `name`, `href`, `src`, `alt`, `placeholder`, `title`, `type`, `role`, `for`, and a button's `value`), and a short text snippet from its closest containers (like the card title).
 - **Geometry**: its box on the page, where inside it you clicked, the viewport size and scroll position.
 - **Context**: the URL, page title, author, comment and time. In React apps, the component name too.
 

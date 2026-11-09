@@ -17,7 +17,7 @@ For owners, and commenters who sign in: the name, email and avatar from GitHub v
 
 ## Images commenters attach
 
-On a claimed site, a commenter can attach up to three images to a comment: their own (picked or pasted), or the screenshot of the element after drawing boxes, arrows or lines on it. These images are **public, like the comment**: everyone who can see the comment sees them, and the comment box says so. Images are scaled down and re-encoded in the browser before they are sent, which also removes their metadata (such as location). They are deleted with the comment. Turn them off with the [`images` option](/reference/options).
+On a claimed site, a commenter can attach up to {{images-per-comment}} images to a comment: their own (picked or pasted), or the screenshot of the element after drawing boxes, arrows or lines on it. These images are **public, like the comment**: everyone who can see the comment sees them, and the comment box says so. Images are scaled down and re-encoded in the browser before they are sent, which also removes their metadata (such as location). They are deleted with the comment. Turn them off with the [`images` option](/reference/options).
 
 ## Page context (owner only)
 
@@ -51,7 +51,7 @@ init({ project: "nuni_...", capture: { screenshot: false, console: false } })
 
 ## Abuse protection
 
-Comment creation is rate limited per IP and per project, and unclaimed projects are capped at 500 comments. Comment text is always rendered as plain text, never HTML.
+Comment creation is rate limited per IP and per project, and unclaimed projects are capped at {{unclaimed-cap}} comments. Comment text is always rendered as plain text, never HTML.
 
 ## Content Security Policy
 

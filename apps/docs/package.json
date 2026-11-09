@@ -11,7 +11,7 @@
   "dependencies": {
     "@nuni/shared": "workspace:*",
     "@nuniapp/widget": "workspace:*",
-    "blume": "^2.0.3",
+    "blume": "^2.2.4",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

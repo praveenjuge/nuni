@@ -1,4 +1,29 @@
+import { readFileSync } from "node:fs"
+
+import {
+  CDN_URL,
+  CLI_NPX,
+  DASHBOARD_ROUTES,
+  DOCS_URL,
+  LIMITS,
+  MCP_ADD_COMMAND,
+  PACKAGES,
+  dashboardUrl,
+} from "@nuni/shared"
 import { defineConfig } from "blume"
+
+const DAY = 24 * 60 * 60 * 1000
+const days = (ms: number) => String(ms / DAY)
+
+/** The CDN script's size budget, which CI enforces. */
+const cdnBudget = (
+  JSON.parse(
+    readFileSync(
+      new URL("../../packages/widget/.size-limit.json", import.meta.url),
+      "utf8"
+    )
+  ) as { path: string; limit: string }[]
+).find((entry) => entry.path === "dist/nuni.global.js")!.limit
 
 export default defineConfig({
   title: "Nuni",
@@ -14,8 +39,22 @@ export default defineConfig({
   navigation: {
     cta: {
       label: "Sign in",
-      href: "https://nuni.praveenjuge.com/dashboard/sign-in",
+      href: dashboardUrl(DOCS_URL, DASHBOARD_ROUTES.signIn),
     },
+  },
+  // Values the pages state, from the code that decides them: `{{name}}`.
+  variables: {
+    cli: CLI_NPX,
+    "cli-package": PACKAGES.cli,
+    "mcp-add": MCP_ADD_COMMAND,
+    "cdn-url": CDN_URL,
+    "cdn-budget": cdnBudget,
+    "session-days": days(LIMITS.sessionTtlMs),
+    "cli-session-days": days(LIMITS.cliSessionTtlMs),
+    "transfer-days": days(LIMITS.transferTtlMs),
+    "unclaimed-cap": String(LIMITS.unclaimedCommentCap),
+    "images-per-comment": String(LIMITS.imagesPerComment),
+    "agent-list-default": String(LIMITS.agentListDefault),
   },
   github: {
     owner: "praveenjuge",
@@ -30,12 +69,12 @@ export default defineConfig({
       price: 0,
       sameAs: [
         "https://github.com/praveenjuge/nuni",
-        "https://www.npmjs.com/package/@nuniapp/widget",
-        "https://www.npmjs.com/package/@nuniapp/react",
-        "https://www.npmjs.com/package/@nuniapp/cli",
+        ...Object.values(PACKAGES).map(
+          (name) => `https://www.npmjs.com/package/${name}`
+        ),
       ],
     },
   },
   agents: { llmsTxt: true },
-  deployment: { site: "https://nuni.praveenjuge.com" },
+  deployment: { site: DOCS_URL },
 })

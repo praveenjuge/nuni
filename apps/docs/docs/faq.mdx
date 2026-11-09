@@ -25,7 +25,7 @@ sidebar:
   </AccordionItem>
   <AccordionItem title="Will it slow down my site?">
     Nuni loads after the page is idle, renders in a Shadow DOM, and the script
-    is about 40 KB gzipped. The screenshot code is a separate file that only
+    is under {{cdn-budget}} compressed. The screenshot code is a separate file that only
     loads when someone leaves a comment.
   </AccordionItem>
   <AccordionItem title="Can I hide it in production?">
@@ -45,7 +45,7 @@ sidebar:
     language. See the [options](/reference/options#look-and-language).
   </AccordionItem>
   <AccordionItem title="Can commenters add images or draw on the screenshot?">
-    Yes, once the site is claimed. In the comment box, add up to three images
+    Yes, once the site is claimed. In the comment box, add up to {{images-per-comment}} images
     (pick a file or paste one), or choose **Mark up a screenshot** to draw
     boxes, arrows or lines on the element's screenshot. Unlike the screenshot
     itself, which only the owner sees, these images are shown to everyone who
