@@ -3,55 +3,60 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import {
+  buildAgentPrompt,
   buildCommentPrompt,
   cliCommand,
-  DASHBOARD_ROUTES,
-  dashboardUrl,
-  LIMITS,
+  DOCS_URL,
+  MCP_ADD_COMMAND,
   type CommentStatus,
 } from "@nuni/shared"
 
+import { VERSION } from "./env"
+import { NuniError } from "./errors"
 import {
-  credentialFor,
-  credentialsPath,
-  removeCredential,
-  saveCredential,
-} from "./credentials"
-import { APP_URL } from "./env"
-import { formatCommentList, formatPageList, type GroupBy } from "./format"
-import { fetchImage } from "./mcp"
-import { resolveProject } from "./project"
-import type { Remote } from "./remote"
-import { resolveComments } from "./resolve"
+  formatCommentList,
+  formatPageList,
+  formatStatusChange,
+  STATUS_WORDS,
+} from "./format"
+import { detectSetup } from "./frameworks"
+import { createMcpServer, serveStdio } from "./mcp"
+import { GROUPS, oneOf, positiveInteger, STATUSES, type Ops } from "./ops"
 
-export interface CommandContext {
-  remote: Remote
-  version: string
-  cwd: string
-  project?: string
-  json: boolean
-  out: (line: string) => void
-  err: (line: string) => void
-  /** Delay between polls; shorter in tests. */
-  pollMs?: number
-  openBrowser?: (url: string) => void
-}
-
-const LOGIN = cliCommand("login")
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-export class CommandError extends Error {}
-
-function signedIn(ctx: CommandContext) {
-  const project = resolveProject(ctx.project, ctx.cwd)
-  const credential = credentialFor(project.id)
-  if (!credential) {
-    throw new CommandError(
-      `Not signed in to ${project.id}. Run \`${LOGIN}\` first.`
-    )
+/** What a command gets: the operations, its arguments, and the output. */
+export interface Input {
+  ops: Ops
+  /** Positional arguments after the command name. */
+  args: string[]
+  flags: {
+    cwd: string
+    status?: string
+    page?: string
+    limit?: string
+    search?: string
+    group?: string
+    note?: string
+    saveScreenshot?: string
   }
-  return { publicId: project.id, token: credential.token }
+  /** With --json: `data` on stdout. Otherwise `text` on stdout and each of `problems` on stderr. */
+  print(data: unknown, text?: string, problems?: string[]): void
+  style: { bold(s: string): string; dim(s: string): string }
+  openBrowser(url: string): void
+  pollMs?: number
 }
+
+export interface Command {
+  name: string
+  /** Arguments and flags, for the help. */
+  usage?: string
+  summary: string
+  section: "Set up" | "Comments"
+  /** The exit code. */
+  run(input: Input): Promise<number>
+}
+
+/** What to do when there's no session, or it ended. */
+export const LOGIN_HINT = `Run \`${cliCommand("login")}\`.`
 
 /** Try to open the approval page, quietly: there may be no browser at all. */
 export function openInBrowser(url: string) {
@@ -73,271 +78,277 @@ export function openInBrowser(url: string) {
   }
 }
 
-export async function login(ctx: CommandContext): Promise<number> {
-  const project = resolveProject(ctx.project, ctx.cwd)
-  const client = `nuni-cli ${ctx.version} (${process.platform}; node ${process.versions.node})`
-  const start = await ctx.remote.startLogin(project.id, client)
-  const url = dashboardUrl(APP_URL, DASHBOARD_ROUTES.cli, {
-    code: start.userCode,
-  })
+function needsId(id: string | undefined, usage: string): string {
+  if (!id) throw new NuniError(`Pass a comment id: ${usage}`)
+  return id
+}
 
-  if (ctx.json) {
-    ctx.out(JSON.stringify({ status: "waiting", url, code: start.userCode }))
-  } else {
-    ctx.out(`Signing in to ${project.id} (${project.source}).
+function initText(
+  { style: { bold, dim } }: Input,
+  setup: ReturnType<typeof detectSetup>
+) {
+  const { install } = setup
+  return `
+${bold("Nuni")} ${dim(`v${VERSION}`)}
+
+${bold("Project ID")}   ${setup.projectId}
+${dim("Public, safe to commit. Keep using this same ID on every environment.")}
+
+${bold("Detected")}     ${setup.framework}${setup.package ? ` (${setup.packageManager})` : ""}
+${install ? `\n${bold("1. Install")}\n   ${install}\n` : ""}
+${bold(`${install ? "2" : "1"}. Add it once, globally`)} ${dim(`(${setup.file})`)}
+
+${setup.snippet
+  .split("\n")
+  .map((line) => `   ${line}`)
+  .join("\n")}
+
+${bold(`${install ? "3" : "2"}. Open the site`)}
+   Start the dev server. A Nuni button appears in the bottom-right corner.
+   Press C, click anything, leave a comment. No account needed.
+
+${bold("Own this site?")} Open the Nuni panel and choose "Claim Nuni" to sign in with GitHub.
+${dim(`Docs: ${DOCS_URL}`)}
+`
+}
+
+/** `resolve` and `reopen`: one operation, with a note, for 1..n ids. */
+function statusCommand(status: CommentStatus, summary: string): Command {
+  const { verb, done: past } = STATUS_WORDS[status]
+  return {
+    name: verb,
+    usage: `<id...> [--note "what changed"]`,
+    summary,
+    section: "Comments",
+    async run({ ops, args, flags, print }) {
+      needsId(args[0], `${verb} <id...>`)
+      const change = await ops.setStatus(args, status, flags.note)
+      const { text, problems } = formatStatusChange(change)
+      print(
+        { [past.toLowerCase()]: change.done, failed: change.failed },
+        text,
+        problems
+      )
+      return change.failed.length ? 1 : 0
+    },
+  }
+}
+
+export const COMMANDS: Command[] = [
+  {
+    name: "init",
+    usage: "[--id <project-id>] [--cwd <dir>]",
+    summary:
+      "Generate a project ID and print the install steps for this project",
+    section: "Set up",
+    async run(input) {
+      const setup = detectSetup(input.flags.cwd, input.ops.projectIdForSetup())
+      input.print(setup, initText(input, setup))
+      return 0
+    },
+  },
+  {
+    name: "prompt",
+    usage: "[--id <project-id>]",
+    summary: "Print the ready-made prompt for Codex, Claude Code, Cursor, etc.",
+    section: "Set up",
+    async run({ ops, print }) {
+      const projectId = ops.projectIdForSetup()
+      const prompt = buildAgentPrompt({ projectId })
+      print({ projectId, prompt }, prompt)
+      return 0
+    },
+  },
+  {
+    name: "id",
+    summary: "Print a new project ID",
+    section: "Set up",
+    async run({ ops, print }) {
+      const projectId = ops.projectIdForSetup()
+      print({ projectId }, projectId)
+      return 0
+    },
+  },
+  {
+    name: "login",
+    summary: "Approve this terminal in the Nuni dashboard (works over SSH too)",
+    section: "Comments",
+    async run({ ops, print, openBrowser, pollMs }) {
+      const outcome = await ops.login({
+        pollMs,
+        onWaiting({ project, url, code }) {
+          print(
+            { status: "waiting", url, code },
+            `Signing in to ${project.id} (${project.source}).
 
   Open  ${url}
-  Code  ${start.userCode}
+  Code  ${code}
 
-Check that the code matches, then approve. Waiting…`)
-  }
-  ;(ctx.openBrowser ?? openInBrowser)(url)
-
-  let delay = ctx.pollMs ?? 2000
-  for (;;) {
-    await sleep(delay)
-    const result = await ctx.remote.pollLogin(start.deviceSecret)
-    if (result.status === "pending") continue
-    if (result.status === "slow_down") {
-      delay *= 2
-      continue
-    }
-    if (result.status === "approved") {
-      saveCredential(project.id, {
-        token: result.token,
-        ownerName: result.ownerName,
-        projectName: result.projectName,
-        expiresAt: result.expiresAt,
+Check that the code matches, then approve. Waiting…`
+          )
+          openBrowser(url)
+        },
       })
-      if (ctx.json) {
-        ctx.out(
-          JSON.stringify({
-            status: "signed_in",
-            project: project.id,
-            owner: result.ownerName,
-          })
+      if (outcome.status === "signed_in") {
+        print(
+          {
+            status: outcome.status,
+            project: outcome.project,
+            owner: outcome.ownerName,
+          },
+          `Signed in as ${outcome.ownerName} to ${outcome.projectName}. Saved to ${outcome.savedTo}`
         )
-      } else {
-        ctx.out(
-          `Signed in as ${result.ownerName} to ${result.projectName}. Saved to ${credentialsPath()}`
+        return 0
+      }
+      const message =
+        outcome.status === "denied"
+          ? "The sign-in was denied."
+          : "The code expired. Run login again."
+      print({ status: outcome.status, message }, undefined, [message])
+      return 1
+    },
+  },
+  {
+    name: "whoami",
+    summary: "Who this terminal is signed in as",
+    section: "Comments",
+    async run({ ops, print }) {
+      const me = await ops.whoami()
+      print(
+        me,
+        me.signedIn
+          ? `Signed in to ${me.project} as ${me.owner}.`
+          : `Not signed in to ${me.project}. ${LOGIN_HINT}`
+      )
+      return me.signedIn ? 0 : 1
+    },
+  },
+  {
+    name: "comments",
+    usage: `[--status open|resolved] [--page /path] [--limit 20] [--search "words"] [--group page|element]`,
+    summary: "List comments, newest first (or best match with --search)",
+    section: "Comments",
+    async run({ ops, flags, print }) {
+      const status = oneOf(flags.status, STATUSES, "--status")
+      const groupBy = oneOf(flags.group, GROUPS, "--group")
+      const list = await ops.listComments({
+        status,
+        path: flags.page,
+        search: flags.search,
+        limit: positiveInteger(flags.limit, "--limit"),
+      })
+      const { comments, cursor } = list
+      print(
+        { comments, cursor },
+        formatCommentList(list, {
+          groupBy,
+          detailHint: `Full context: ${cliCommand("comment <id>")}`,
+        })
+      )
+      return 0
+    },
+  },
+  {
+    name: "pages",
+    summary: "Pages with open comments, most first",
+    section: "Comments",
+    async run({ ops, print }) {
+      const pages = await ops.listPages()
+      print(pages, formatPageList(pages))
+      return 0
+    },
+  },
+  {
+    name: "comment",
+    usage: "<id> [--save-screenshot <dir>]",
+    summary:
+      "One comment with the element, DOM, styles, console and screenshot",
+    section: "Comments",
+    async run({ ops, args, flags, print }) {
+      const comment = await ops.getComment(needsId(args[0], "comment <id>"))
+      let screenshotFile: string | null = null
+      const imageFiles: string[] = []
+      if (flags.saveScreenshot) {
+        const dir = resolve(flags.cwd, flags.saveScreenshot)
+        for (const { kind, index, image } of await ops.images(comment)) {
+          mkdirSync(dir, { recursive: true })
+          const name =
+            kind === "screenshot"
+              ? `nuni-${comment._id}`
+              : `nuni-${comment._id}-image-${index + 1}`
+          const path = join(dir, `${name}.${image.mimeType.split("/")[1]}`)
+          writeFileSync(path, Buffer.from(image.data, "base64"))
+          if (kind === "screenshot") screenshotFile = path
+          else imageFiles.push(path)
+        }
+      }
+      print(
+        { ...comment, screenshotFile, imageFiles },
+        [
+          buildCommentPrompt(comment),
+          ...(screenshotFile
+            ? [`\nScreenshot saved to ${screenshotFile}`]
+            : []),
+          ...imageFiles.map((path) => `Image saved to ${path}`),
+        ].join("\n")
+      )
+      return 0
+    },
+  },
+  {
+    name: "reply",
+    usage: `<id> "message"`,
+    summary: "Reply in a comment's thread, as the owner",
+    section: "Comments",
+    async run({ ops, args: [id, body], print }) {
+      if (!id || !body?.trim()) {
+        throw new NuniError(
+          'Pass a comment id and a message: reply <id> "message"'
         )
       }
+      await ops.reply(id, body)
+      print({ id, replied: true }, `Replied to ${id}.`)
       return 0
-    }
-    const message =
-      result.status === "denied"
-        ? "The sign-in was denied."
-        : "The code expired. Run login again."
-    if (ctx.json) ctx.out(JSON.stringify({ status: result.status, message }))
-    else ctx.err(message)
-    return 1
-  }
-}
-
-export async function logout(ctx: CommandContext): Promise<number> {
-  const project = resolveProject(ctx.project, ctx.cwd)
-  const credential = credentialFor(project.id)
-  if (credential && !process.env.NUNI_TOKEN) {
-    // Revoke it on the server too; the local copy goes either way.
-    await ctx.remote.logout(credential.token).catch(() => {})
-  }
-  const removed = removeCredential(project.id)
-  ctx.out(
-    removed ? `Signed out of ${project.id}.` : `Not signed in to ${project.id}.`
-  )
-  return 0
-}
-
-export async function whoami(ctx: CommandContext): Promise<number> {
-  const project = resolveProject(ctx.project, ctx.cwd)
-  const credential = credentialFor(project.id)
-  const result = credential
-    ? await ctx.remote.whoami(project.id, credential.token)
-    : { valid: false }
-  if (ctx.json) {
-    ctx.out(
-      JSON.stringify({
-        project: project.id,
-        signedIn: result.valid,
-        owner: result.ownerName ?? null,
-      })
-    )
-  } else if (result.valid) {
-    ctx.out(`Signed in to ${project.id} as ${result.ownerName}.`)
-  } else {
-    ctx.out(`Not signed in to ${project.id}. Run \`${LOGIN}\`.`)
-  }
-  return result.valid ? 0 : 1
-}
-
-export async function listComments(
-  ctx: CommandContext,
-  options: {
-    status?: string
-    page?: string
-    limit?: string
-    search?: string
-    group?: string
-  }
-): Promise<number> {
-  const { publicId, token } = signedIn(ctx)
-  if (
-    options.status &&
-    options.status !== "open" &&
-    options.status !== "resolved"
-  ) {
-    throw new CommandError(`--status must be open or resolved`)
-  }
-  if (
-    options.group &&
-    options.group !== "page" &&
-    options.group !== "element"
-  ) {
-    throw new CommandError(`--group must be page or element`)
-  }
-  const status = (options.status ?? "open") as CommentStatus
-  const limit = options.limit ? Number(options.limit) : LIMITS.agentListDefault
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw new CommandError(`--limit must be a positive number`)
-  }
-  const search = options.search?.trim() || undefined
-  const page = await ctx.remote.listComments(publicId, token, {
-    status,
-    path: options.page,
-    search,
-    limit,
-  })
-  if (ctx.json) {
-    ctx.out(JSON.stringify(page, null, 2))
-    return 0
-  }
-  ctx.out(
-    formatCommentList(page.comments, {
-      status,
-      more: Boolean(page.cursor),
-      order: search ? "best match first" : undefined,
-      groupBy: options.group as GroupBy | undefined,
-      detailHint: `Full context: ${cliCommand("comment <id>")}`,
-    })
-  )
-  return 0
-}
-
-export async function listPages(ctx: CommandContext): Promise<number> {
-  const { publicId, token } = signedIn(ctx)
-  const pages = await ctx.remote.listPages(publicId, token)
-  ctx.out(ctx.json ? JSON.stringify(pages, null, 2) : formatPageList(pages))
-  return 0
-}
-
-export async function showComment(
-  ctx: CommandContext,
-  id: string | undefined,
-  options: { saveScreenshot?: string }
-): Promise<number> {
-  if (!id) throw new CommandError("Pass a comment id: comment <id>")
-  const { publicId, token } = signedIn(ctx)
-  const comment = await ctx.remote.getComment(publicId, token, id)
-  if (!comment) throw new CommandError(`No comment ${id} in ${publicId}.`)
-  let saved: string | null = null
-  const imageFiles: string[] = []
-  if (options.saveScreenshot) {
-    const dir = resolve(ctx.cwd, options.saveScreenshot)
-    // The screenshot keeps its old name; attached images are numbered.
-    const files = [
-      ...(comment.screenshotUrl
-        ? [{ url: comment.screenshotUrl, name: `nuni-${comment._id}` }]
-        : []),
-      ...(comment.imageUrls ?? []).map((url, i) => ({
-        url,
-        name: `nuni-${comment._id}-image-${i + 1}`,
-      })),
-    ]
-    for (const file of files) {
-      const image = await fetchImage(file.url)
-      if (!image) continue
-      mkdirSync(dir, { recursive: true })
-      const ext = image.mimeType.split("/")[1] ?? "webp"
-      const path = join(dir, `${file.name}.${ext}`)
-      writeFileSync(path, Buffer.from(image.data, "base64"))
-      if (file.url === comment.screenshotUrl) saved = path
-      else imageFiles.push(path)
-    }
-  }
-  if (ctx.json) {
-    ctx.out(
-      JSON.stringify({ ...comment, screenshotFile: saved, imageFiles }, null, 2)
-    )
-    return 0
-  }
-  ctx.out(buildCommentPrompt(comment))
-  if (saved) ctx.out(`\nScreenshot saved to ${saved}`)
-  for (const path of imageFiles) ctx.out(`Image saved to ${path}`)
-  return 0
-}
-
-export async function reply(
-  ctx: CommandContext,
-  id: string | undefined,
-  body: string | undefined
-): Promise<number> {
-  if (!id || !body?.trim()) {
-    throw new CommandError(
-      'Pass a comment id and a message: reply <id> "message"'
-    )
-  }
-  const { publicId, token } = signedIn(ctx)
-  await ctx.remote.reply(publicId, token, id, body)
-  ctx.out(
-    ctx.json ? JSON.stringify({ id, replied: true }) : `Replied to ${id}.`
-  )
-  return 0
-}
-
-export async function markResolved(
-  ctx: CommandContext,
-  ids: string[],
-  note?: string
-): Promise<number> {
-  if (!ids.length) throw new CommandError("Pass a comment id: resolve <id...>")
-  const session = signedIn(ctx)
-  if (ids.length === 1) {
-    const id = ids[0]!
-    // The status first: a note saying what changed is only posted once the
-    // change of status went through.
-    await ctx.remote.setStatus(session.token, id, "resolved")
-    if (note?.trim()) {
-      await ctx.remote.reply(session.publicId, session.token, id, note)
-    }
-    ctx.out(
-      ctx.json ? JSON.stringify({ id, status: "resolved" }) : `Resolved ${id}.`
-    )
-    return 0
-  }
-  const result = await resolveComments(ctx.remote, session, ids, note)
-  if (ctx.json) {
-    ctx.out(JSON.stringify(result, null, 2))
-  } else {
-    if (result.resolved.length) {
-      ctx.out(`Resolved ${result.resolved.join(", ")}.`)
-    }
-    for (const f of result.failed) {
-      ctx.err(`Couldn't resolve ${f.id}: ${f.error}`)
-    }
-    for (const f of result.noteFailed) {
-      ctx.err(`Resolved ${f.id}, but couldn't post the note: ${f.error}`)
-    }
-  }
-  return result.failed.length || result.noteFailed.length ? 1 : 0
-}
-
-export async function reopen(
-  ctx: CommandContext,
-  id: string | undefined
-): Promise<number> {
-  if (!id) throw new CommandError(`Pass a comment id: reopen <id>`)
-  const { token } = signedIn(ctx)
-  await ctx.remote.setStatus(token, id, "open")
-  ctx.out(ctx.json ? JSON.stringify({ id, status: "open" }) : `Reopened ${id}.`)
-  return 0
-}
+    },
+  },
+  statusCommand(
+    "resolved",
+    "Mark comments resolved, with a note saying what changed"
+  ),
+  statusCommand("open", "Reopen resolved comments"),
+  {
+    name: "logout",
+    summary: "Sign this terminal out of the project",
+    section: "Comments",
+    async run({ ops, print }) {
+      const { project, signedOut, error } = await ops.logout()
+      print(
+        {
+          project,
+          signedOut,
+          ...(error
+            ? { error: { code: error.code, message: error.message } }
+            : {}),
+        },
+        signedOut
+          ? `Signed out of ${project}.`
+          : `Not signed in to ${project}.`,
+        error
+          ? [
+              `Couldn't revoke the session on the server (${error.message}). Revoke it in the project settings in the dashboard.`,
+            ]
+          : []
+      )
+      return error ? 1 : 0
+    },
+  },
+  {
+    name: "mcp",
+    summary: `Run the MCP server for coding agents (stdio): ${MCP_ADD_COMMAND}`,
+    section: "Comments",
+    async run({ ops }) {
+      await serveStdio(createMcpServer(ops))
+      return 0
+    },
+  },
+]

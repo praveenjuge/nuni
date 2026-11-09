@@ -3,6 +3,8 @@ import { join, relative } from "node:path"
 
 import { isProjectId, projectIdsIn } from "@nuni/shared"
 
+import { NuniError } from "./errors"
+
 const SKIP_DIRS = new Set([
   "node_modules",
   ".git",
@@ -41,7 +43,7 @@ export function findProjectIds(cwd: string): FoundProject[] {
   const found = new Map<string, string>()
   const queue = [cwd]
   let files = 0
-  while (queue.length && files < MAX_FILES) {
+  scan: while (queue.length) {
     const dir = queue.shift()!
     let entries: string[]
     try {
@@ -62,7 +64,7 @@ export function findProjectIds(cwd: string): FoundProject[] {
         continue
       }
       if (!SOURCE_FILE.test(name) || stat.size > MAX_FILE_BYTES) continue
-      if (++files > MAX_FILES) break
+      if (++files > MAX_FILES) break scan
       let text: string
       try {
         text = readFileSync(path, "utf8")
@@ -79,7 +81,21 @@ export function findProjectIds(cwd: string): FoundProject[] {
   return Array.from(found, ([id, file]) => ({ id, file }))
 }
 
-export class ProjectError extends Error {}
+/** A project ID given on the command line or in $NUNI_PROJECT, checked. */
+export function checkProjectId(id: string): string {
+  if (!isProjectId(id)) {
+    throw new NuniError(
+      `"${id}" is not a valid Nuni project ID (expected nuni_ followed by 22 characters).`
+    )
+  }
+  return id
+}
+
+export interface ProjectRef {
+  id: string
+  /** Where it came from: the flag, the env var, or the file it was found in. */
+  source: string
+}
 
 /**
  * The project to work on: --project, then $NUNI_PROJECT, then the one ID
@@ -88,24 +104,22 @@ export class ProjectError extends Error {}
 export function resolveProject(
   flag: string | undefined,
   cwd: string
-): { id: string; source: string } {
-  const explicit = flag ?? process.env.NUNI_PROJECT
-  if (explicit) {
-    if (!isProjectId(explicit)) {
-      throw new ProjectError(
-        `"${explicit}" is not a valid Nuni project ID (expected nuni_ followed by 22 characters).`
-      )
+): ProjectRef {
+  if (flag) return { id: checkProjectId(flag), source: "--project" }
+  if (process.env.NUNI_PROJECT) {
+    return {
+      id: checkProjectId(process.env.NUNI_PROJECT),
+      source: "NUNI_PROJECT",
     }
-    return { id: explicit, source: flag ? "--project" : "NUNI_PROJECT" }
   }
   const found = findProjectIds(cwd)
   if (found.length === 1) return { id: found[0]!.id, source: found[0]!.file }
   if (!found.length) {
-    throw new ProjectError(
+    throw new NuniError(
       `No Nuni project ID found in ${cwd}. Run this in the project that uses Nuni, or pass --project nuni_...`
     )
   }
-  throw new ProjectError(
+  throw new NuniError(
     `Found more than one Nuni project ID. Pass one with --project:\n${found
       .map((p) => `  ${p.id}  (${p.file})`)
       .join("\n")}`

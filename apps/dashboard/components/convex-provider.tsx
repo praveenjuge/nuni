@@ -8,6 +8,9 @@ import {
 import { ConvexProviderWithAuth, ConvexReactClient } from "convex/react"
 import { useCallback, useRef, useState, type ReactNode } from "react"
 
+import { UserProvider } from "@/components/user"
+import { CONVEX_URL } from "@/lib/config"
+
 function useAuthFromAuthKit() {
   const { user, loading } = useAuth()
   const { getAccessToken, refresh } = useAccessToken()
@@ -26,6 +29,7 @@ function useAuthFromAuthKit() {
         lastToken.current = token
         return token
       } catch {
+        // Convex reads null as signed out.
         return null
       }
     },
@@ -40,17 +44,12 @@ function useAuthFromAuthKit() {
 
 export function ConvexClientProvider({ children }: { children: ReactNode }) {
   const [client] = useState(
-    () =>
-      new ConvexReactClient(
-        process.env.NEXT_PUBLIC_CONVEX_URL ?? "http://127.0.0.1:3210",
-        // Keep the token from page load instead of refreshing right away.
-        { initialAuthTokenReuse: true }
-      )
+    () => new ConvexReactClient(CONVEX_URL, { initialAuthTokenReuse: true })
   )
   return (
     <AuthKitProvider>
       <ConvexProviderWithAuth client={client} useAuth={useAuthFromAuthKit}>
-        {children}
+        <UserProvider>{children}</UserProvider>
       </ConvexProviderWithAuth>
     </AuthKitProvider>
   )

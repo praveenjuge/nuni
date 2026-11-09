@@ -3,11 +3,7 @@ import { domToCanvas } from "modern-screenshot"
 
 import { encodeCanvas } from "./image"
 import { CAPTURE_MARK } from "./mark"
-
-/**
- * Screenshots are loaded lazily (a separate chunk for npm users, a separate
- * script for the CDN build), so the widget itself stays small.
- */
+import { privateElements, showsTypedText } from "./privacy"
 
 export interface ScreenshotOptions {
   /** Nuni's own host element, left out of the image. */
@@ -19,7 +15,7 @@ export interface ScreenshotOptions {
    * area), in viewport coordinates. The image is cropped around it and it
    * is outlined instead of the whole element.
    */
-  focus?: () => Box
+  focus?: () => Edges
 }
 
 export type CaptureScreenshot = (
@@ -34,30 +30,15 @@ const MAX_RENDER = 4096
 /** How much of the surroundings is kept around the element, in CSS px. */
 const MARGIN = 48
 const MASK_COLOR = "#a1a1aa"
-const MASKED_INPUT_TYPES = new Set([
-  "text",
-  "file",
-  "email",
-  "tel",
-  "url",
-  "search",
-  "password",
-  "number",
-  "date",
-  "datetime-local",
-  "month",
-  "week",
-  "time",
-])
 
-export interface Box {
+export interface Edges {
   left: number
   top: number
   right: number
   bottom: number
 }
 
-const around = (b: Box): Box => ({
+const around = (b: Edges): Edges => ({
   left: b.left - MARGIN,
   top: b.top - MARGIN,
   right: b.right + MARGIN,
@@ -69,7 +50,7 @@ const around = (b: Box): Box => ({
  * node to render from. Only that margin ends up in the image, never the rest
  * of the page (it may hold the visitor's own data).
  */
-export function frameFor(el: Element): Element {
+function frameFor(el: Element): Element {
   const doc = el.ownerDocument
   const want = around(el.getBoundingClientRect())
   let frame = el
@@ -93,7 +74,7 @@ export function frameFor(el: Element): Element {
  * stays inside it there; `display: flow-root` gives that same layout. The
  * frame's style attribute is restored exactly afterwards.
  */
-export function isolatedLayout(frame: Element, el: Element, focus?: () => Box) {
+function isolatedLayout(frame: Element, el: Element, focus?: () => Edges) {
   const { display } = getComputedStyle(frame)
   const isolate = display === "block" || display === "list-item"
   const before = frame.getAttribute("style")
@@ -127,7 +108,7 @@ export function isolatedLayout(frame: Element, el: Element, focus?: () => Box) {
   }
 }
 
-function contentBox(el: Element): Box {
+function contentBox(el: Element): Edges {
   const r = el.getBoundingClientRect()
   const s = getComputedStyle(el)
   const px = (value: string) => parseFloat(value) || 0
@@ -143,27 +124,14 @@ function contentBox(el: Element): Box {
  * Areas painted over: what people typed into form fields (the field's
  * border stays visible) and anything marked with data-nuni-mask.
  */
-export function maskedBoxes(frame: Element): Box[] {
-  const out: Box[] = []
-  const fields = frame.querySelectorAll(
-    `input, textarea, select, [${MASK_ATTRIBUTE}]`
-  )
+export function maskedBoxes(frame: Element): Edges[] {
+  const out: Edges[] = []
   // Inside a masked area, everything is masked.
   const masked = frame.closest(`[${MASK_ATTRIBUTE}]`)
   if (masked) return [masked.getBoundingClientRect()]
-  for (const el of [frame, ...Array.from(fields)]) {
-    if (el.hasAttribute(MASK_ATTRIBUTE)) {
-      out.push(el.getBoundingClientRect())
-      continue
-    }
-    const tag = el.tagName
-    if (
-      // The browser-normalized type: unknown or misspelled types act as text.
-      (el instanceof HTMLInputElement && MASKED_INPUT_TYPES.has(el.type)) ||
-      tag === "TEXTAREA" ||
-      tag === "SELECT"
-    )
-      out.push(contentBox(el))
+  for (const el of privateElements(frame)) {
+    if (el.hasAttribute(MASK_ATTRIBUTE)) out.push(el.getBoundingClientRect())
+    else if (showsTypedText(el)) out.push(contentBox(el))
   }
   return out
 }
@@ -218,7 +186,7 @@ export const captureScreenshot: CaptureScreenshot = async (el, options) => {
     canvas.height
   )
 
-  const toCanvas = (b: Box) => ({
+  const toCanvas = (b: Edges) => ({
     x: (b.left - crop.left) * scale,
     y: (b.top - crop.top) * scale,
     w: (b.right - b.left) * scale,

@@ -2,24 +2,34 @@ import { LIMITS } from "@nuni/shared"
 import { v } from "convex/values"
 
 import { internal } from "./_generated/api"
+import type { Doc } from "./_generated/dataModel"
 import { internalMutation, mutation, query } from "./_generated/server"
-import {
-  assertProjectId,
-  claimFor,
-  commentFiles,
-  ensureProject,
-  fail,
-  parseOrigin,
-  projectByPublicId,
-  requireDashboardOwner,
-  requireOwner,
-  requireUser,
-  revokeSessions,
-  currentUser,
-} from "./lib"
+import { currentUser } from "./accounts"
+import { deleteCommentRows } from "./lifecycle"
+import { assertProjectId, fail, parseOrigin, projectByPublicId } from "./lib"
 import { SERVER_LIMITS } from "./limits"
-import { deleteThread } from "./replies"
+import {
+  dashboardProject,
+  ensureProject,
+  requireDashboardProject,
+  revokeSessions,
+  setOwner,
+} from "./ownership"
 import { rateLimiter } from "./rateLimits"
+
+/** A project as its owner sees it in the dashboard. */
+function forOwner(p: Doc<"projects">) {
+  return {
+    _id: p._id,
+    _creationTime: p._creationTime,
+    publicId: p.publicId,
+    name: p.name,
+    origins: p.origins,
+    commentCount: p.commentCount,
+    openCount: p.openCount,
+    lastActivityAt: p.lastActivityAt,
+  }
+}
 
 /** Called by the widget on load. Creates the unclaimed project lazily. */
 export const touch = mutation({
@@ -67,34 +77,6 @@ export const claimStatus = query({
   },
 })
 
-/** Claim an unclaimed project. First come, first served. */
-export const claim = mutation({
-  args: { publicId: v.string(), origin: v.optional(v.string()) },
-  handler: async (ctx, { publicId, origin }) => {
-    assertProjectId(publicId)
-    const user = await requireUser(ctx)
-    const cleanOrigin = origin ? parseOrigin(origin) : undefined
-    const project = cleanOrigin
-      ? await ensureProject(ctx, publicId, cleanOrigin)
-      : ((await projectByPublicId(ctx, publicId)) ??
-        fail("not_found", "This project has not been used yet"))
-
-    if (project.ownerId === user._id) {
-      return { status: "already_owner" as const, projectId: project._id }
-    }
-    if (project.ownerId) {
-      const owner = await ctx.db.get(project.ownerId)
-      return {
-        status: "claimed_by_other" as const,
-        ownerName: owner?.name ?? "someone else",
-      }
-    }
-
-    await claimFor(ctx, project, user._id, cleanOrigin)
-    return { status: "claimed" as const, projectId: project._id }
-  },
-})
-
 export const listMine = query({
   args: {},
   handler: async (ctx) => {
@@ -105,29 +87,15 @@ export const listMine = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", user._id))
       .order("desc")
       .take(SERVER_LIMITS.projectsListMax)
-    return projects
-      .filter((p) => !p.deletingAt)
-      .map((p) => ({
-        _id: p._id,
-        publicId: p.publicId,
-        name: p.name,
-        origins: p.origins,
-        commentCount: p.commentCount,
-        openCount: p.openCount,
-        lastActivityAt: p.lastActivityAt,
-        claimedAt: p.claimedAt,
-      }))
+    return projects.filter((p) => !p.deletingAt).map(forOwner)
   },
 })
 
 export const getMine = query({
   args: { publicId: v.string() },
   handler: async (ctx, { publicId }) => {
-    const user = await currentUser(ctx)
-    const project = await projectByPublicId(ctx, publicId)
-    if (!user || !project || project.ownerId !== user._id) return null
-    if (project.deletingAt) return null
-    return project
+    const project = await dashboardProject(ctx, publicId)
+    return project && forOwner(project)
   },
 })
 
@@ -137,11 +105,9 @@ export const getMine = query({
  * ones only grow here, because widget owner sessions are bound to this list.
  */
 export const addOrigin = mutation({
-  args: { projectId: v.id("projects"), origin: v.string() },
-  handler: async (ctx, { projectId, origin }) => {
-    await requireOwner(ctx, projectId)
-    const project = await ctx.db.get(projectId)
-    if (!project) fail("not_found", "Project not found")
+  args: { publicId: v.string(), origin: v.string() },
+  handler: async (ctx, { origin, publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     const clean = parseOrigin(origin)
     if (project.origins.includes(clean)) return
     if (project.origins.length >= SERVER_LIMITS.maxOriginsPerProject) {
@@ -150,7 +116,7 @@ export const addOrigin = mutation({
         `A project can have at most ${SERVER_LIMITS.maxOriginsPerProject} origins`
       )
     }
-    await ctx.db.patch(projectId, { origins: [...project.origins, clean] })
+    await ctx.db.patch(project._id, { origins: [...project.origins, clean] })
   },
 })
 
@@ -160,18 +126,18 @@ export const addOrigin = mutation({
  * but owner tools need the site added again.
  */
 export const removeOrigin = mutation({
-  args: { projectId: v.id("projects"), origin: v.string() },
-  handler: async (ctx, { projectId, origin }) => {
-    const { project } = await requireDashboardOwner(ctx, projectId)
+  args: { publicId: v.string(), origin: v.string() },
+  handler: async (ctx, { origin, publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     const clean = parseOrigin(origin)
     if (!project.origins.includes(clean)) return
-    await ctx.db.patch(projectId, {
+    await ctx.db.patch(project._id, {
       origins: project.origins.filter((o) => o !== clean),
     })
     for (const table of ["widgetSessions", "commenterSessions"] as const) {
       const sessions = await ctx.db
         .query(table)
-        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .withIndex("by_project", (q) => q.eq("projectId", project._id))
         .collect()
       for (const session of sessions) {
         if (session.origin === clean) await ctx.db.delete(session._id)
@@ -181,12 +147,12 @@ export const removeOrigin = mutation({
 })
 
 export const rename = mutation({
-  args: { projectId: v.id("projects"), name: v.string() },
-  handler: async (ctx, { projectId, name }) => {
-    await requireOwner(ctx, projectId)
+  args: { publicId: v.string(), name: v.string() },
+  handler: async (ctx, { name, publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     const clean = name.trim().slice(0, LIMITS.projectNameMaxLength)
     if (!clean) fail("invalid_name", "Name cannot be empty")
-    await ctx.db.patch(projectId, { name: clean })
+    await ctx.db.patch(project._id, { name: clean })
   },
 })
 
@@ -195,19 +161,10 @@ export const rename = mutation({
  * from the widget. Comments stay; every owner session is signed out.
  */
 export const release = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, { projectId }) => {
-    const { project } = await requireDashboardOwner(ctx, projectId)
-    await ctx.db.patch(project._id, {
-      ownerId: undefined,
-      claimedAt: undefined,
-    })
-    await revokeSessions(ctx, project._id)
-    const transfers = await ctx.db
-      .query("transfers")
-      .withIndex("by_project", (q) => q.eq("projectId", project._id))
-      .collect()
-    for (const transfer of transfers) await ctx.db.delete(transfer._id)
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
+    await setOwner(ctx, project, null)
   },
 })
 
@@ -217,9 +174,9 @@ export const release = mutation({
  * is hidden and takes no new comments.
  */
 export const remove = mutation({
-  args: { projectId: v.id("projects"), confirmName: v.string() },
-  handler: async (ctx, { projectId, confirmName }) => {
-    const { project } = await requireDashboardOwner(ctx, projectId)
+  args: { publicId: v.string(), confirmName: v.string() },
+  handler: async (ctx, { confirmName, publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     if (confirmName.trim() !== project.name.trim()) {
       fail("invalid_name", "Type the project name to confirm")
     }
@@ -244,11 +201,7 @@ export const deleteBatch = internalMutation({
       .query("comments")
       .withIndex("by_project_status", (q) => q.eq("projectId", projectId))
       .take(SERVER_LIMITS.deleteBatch)
-    for (const comment of comments) {
-      await deleteThread(ctx, comment._id)
-      for (const file of commentFiles(comment)) await ctx.storage.delete(file)
-      await ctx.db.delete(comment._id)
-    }
+    for (const comment of comments) await deleteCommentRows(ctx, comment)
     if (comments.length) {
       await again()
       return "comments"

@@ -6,7 +6,7 @@ import {
 } from "../src"
 import { textMap, textOffset } from "../src/quote"
 
-;(window as unknown as Record<string, unknown>).NuniAnchor = {
+const engine = {
   captureAnchor,
   captureSelection,
   createResolveCache,
@@ -14,3 +14,7 @@ import { textMap, textOffset } from "../src/quote"
   textMap,
   textOffset,
 }
+
+/** The engine API the bench page gets as `window.NuniAnchor`. */
+export type Engine = typeof engine
+;(window as unknown as { NuniAnchor: Engine }).NuniAnchor = engine

@@ -1,28 +1,33 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { PassThrough } from "node:stream"
 import { fileURLToPath } from "node:url"
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
-import type { OwnerComment } from "@nuni/shared"
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
+import { LIMITS, type OwnerComment } from "@nuni/shared"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { run } from "../src/cli"
-import { credentialFor, saveCredential } from "../src/credentials"
-import { createMcpServer } from "../src/mcp"
+import { saveCredential } from "../src/credentials"
+import { NuniError } from "../src/errors"
+import { createMcpServer, serve } from "../src/mcp"
+import { createOps } from "../src/ops"
 import { findProjectIds, resolveProject } from "../src/project"
-import { RemoteError, type LoginPoll, type Remote } from "../src/remote"
+import { createRemote, type LoginPoll, type Remote } from "../src/remote"
 
 const PROJECT = "nuni_JJHAES8DaHHYNVh4JoWWXw"
 const OTHER = "nuni_KKHAES8DaHHYNVh4JoWWXw"
+const LOGIN = "npx @nuniapp/cli@latest login"
 
 function tempDir(files: Record<string, string> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "nuni-agent-"))
@@ -79,63 +84,116 @@ const second: OwnerComment = {
   authorName: "Kim",
 }
 
-function fakeRemote(polls: LoginPoll[] = []): Remote & {
-  calls: string[]
-} {
+const SIGNED_OUT = new NuniError(
+  "Not signed in to this project",
+  "unauthenticated"
+)
+
+/**
+ * The backend, in memory. Tokens other than nuni_s_good and nuni_s_env are
+ * signed out; "gone" is no comment and "full" a thread with no room for a
+ * note.
+ */
+function fakeRemote(polls: LoginPoll[] = []) {
   const calls: string[] = []
-  return {
-    calls,
+  const signedIn = (token: string) => {
+    if (token !== "nuni_s_good" && token !== "nuni_s_env") throw SIGNED_OUT
+  }
+  const remote: Remote = {
     startLogin: async (publicId, client) => {
       calls.push(`start ${publicId} ${client.split(" ")[0]}`)
       return { deviceSecret: "nuni_d_x", userCode: "BCDF-GHJK", expiresAt: 0 }
     },
     pollLogin: async () => polls.shift() ?? { status: "expired" },
-    whoami: async (_p, token) =>
+    whoami: async ({ token }) =>
       token === "nuni_s_good"
         ? { valid: true, ownerName: "Alice" }
         : { valid: false },
     logout: async (token) => {
       calls.push(`logout ${token}`)
     },
-    listComments: async (publicId, token, options) => {
+    listComments: async ({ publicId, token }, options) => {
+      signedIn(token)
       calls.push(
-        `list ${publicId} ${token} ${options?.status}${options?.search ? ` search=${options.search}` : ""}`
+        `list ${publicId} ${token} ${options.status}${options.search ? ` search=${options.search}` : ""}`
       )
       return { comments: [comment, second], cursor: null }
     },
-    listPages: async (publicId, token) => {
-      calls.push(`pages ${publicId} ${token}`)
+    listPages: async ({ token }) => {
+      signedIn(token)
       return [
         { path: "/pricing", openCount: 12 },
         { path: "/", openCount: 3 },
       ]
     },
-    getComment: async (_p, _t, id) => (id === comment._id ? comment : null),
-    setStatus: async (token, id, status) => {
-      if (id === "gone") throw new RemoteError("Comment not found", "not_found")
-      calls.push(`${status} ${id} ${token}`)
+    getComment: async ({ token }, id) => {
+      signedIn(token)
+      return [comment, second].find((c) => c._id === id) ?? null
     },
-    reply: async (_p, token, id, body) => {
-      if (id === "noreply") throw new RemoteError("Replies are off", "error")
-      calls.push(`reply ${id} ${token} ${body}`)
+    setStatus: async ({ token }, ids, status, note) => {
+      signedIn(token)
+      calls.push(`${status} ${ids.join(",")}${note ? ` note=${note}` : ""}`)
+      return ids.map((id) =>
+        id === "gone"
+          ? {
+              id,
+              ok: false as const,
+              error: {
+                code: "not_found" as const,
+                message: "Comment not found",
+              },
+            }
+          : id === "full" && note
+            ? {
+                id,
+                ok: false as const,
+                error: {
+                  code: "cap_reached" as const,
+                  message: "This thread has reached its reply limit",
+                },
+              }
+            : { id, ok: true as const, changed: true }
+      )
     },
+    reply: async ({ token }, id, body) => {
+      signedIn(token)
+      calls.push(`reply ${id} ${body}`)
+    },
+    fetchImage: async (url) => ({
+      data: Buffer.from(url.endsWith("drawn") ? "drawn" : "shot").toString(
+        "base64"
+      ),
+      mimeType: url.endsWith("drawn") ? "image/png" : "image/webp",
+    }),
   }
+  return Object.assign(remote, { calls })
 }
 
-function capture() {
+/** Runs the CLI in a project folder with a fake backend, capturing output. */
+function cli(options: { remote?: Remote; cwd?: string } = {}) {
+  const remote = options.remote ?? fakeRemote()
+  const cwd =
+    options.cwd ?? tempDir({ "index.html": `data-project="${PROJECT}"` })
   const out: string[] = []
   const err: string[] = []
+  const opened: string[] = []
   return {
     out,
     err,
-    options: {
-      out: (line: string) => out.push(line),
-      err: (line: string) => err.push(line),
-      pollMs: 1,
-      openBrowser: () => {},
-    },
+    opened,
+    run: (...argv: string[]) =>
+      run([...argv, "--cwd", cwd], {
+        remote,
+        out: (line) => out.push(line),
+        err: (line) => err.push(line),
+        pollMs: 1,
+        openBrowser: (url) => opened.push(url),
+      }),
+    json: () => JSON.parse(out.at(-1)!),
   }
 }
+
+const signIn = () => saveCredential(PROJECT, { token: "nuni_s_good" })
 
 beforeEach(() => {
   vi.stubEnv("NUNI_CONFIG_DIR", tempDir())
@@ -145,6 +203,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
 })
 
 describe("project detection", () => {
@@ -177,7 +236,6 @@ describe("project detection", () => {
       source: "NUNI_PROJECT",
     })
     expect(() => resolveProject("nuni_bad", dir)).toThrow(/not a valid/)
-    expect(() => resolveProject(undefined, tempDir())).not.toThrow()
     vi.stubEnv("NUNI_PROJECT", "")
     expect(() => resolveProject(undefined, tempDir())).toThrow(
       /No Nuni project/
@@ -193,299 +251,360 @@ describe("login", () => {
       {
         status: "approved",
         token: "nuni_s_good",
-        expiresAt: Date.now() + 1000_000,
+        expiresAt: 123,
         ownerName: "Alice",
         projectName: "example.com",
       },
     ])
-    const io = capture()
-    const opened: string[] = []
-    const code = await run(["login", "--project", PROJECT], {
-      remote,
-      ...io.options,
-      openBrowser: (url) => opened.push(url),
-    })
-    expect(code).toBe(0)
-    expect(remote.calls[0]).toBe(`start ${PROJECT} nuni-cli`)
+    const io = cli({ remote })
+    expect(await io.run("login")).toBe(0)
+    expect(remote.calls).toEqual([`start ${PROJECT} nuni-cli`])
     expect(io.out[0]).toContain("/dashboard/cli?code=BCDF-GHJK")
     expect(io.out[0]).toContain("Code  BCDF-GHJK")
-    expect(opened).toEqual([expect.stringContaining("code=BCDF-GHJK")])
+    expect(io.opened).toEqual([expect.stringContaining("code=BCDF-GHJK")])
     expect(io.out[1]).toContain("Signed in as Alice to example.com")
-    expect(credentialFor(PROJECT)?.token).toBe("nuni_s_good")
+
     const file = join(process.env.NUNI_CONFIG_DIR!, "credentials.json")
-    if (process.platform !== "win32") {
-      expect(statSync(file).mode & 0o777).toBe(0o600)
-    }
-    expect(JSON.parse(readFileSync(file, "utf8"))[PROJECT].ownerName).toBe(
-      "Alice"
-    )
+    expect(statSync(file).mode & 0o777).toBe(0o600)
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
+      [PROJECT]: {
+        token: "nuni_s_good",
+        ownerName: "Alice",
+        projectName: "example.com",
+        expiresAt: 123,
+      },
+    })
   })
 
-  it("fails clearly when denied or expired, with JSON for agents", async () => {
-    const denied = capture()
-    expect(
-      await run(["login", "--project", PROJECT], {
-        remote: fakeRemote([{ status: "denied" }]),
-        ...denied.options,
-      })
-    ).toBe(1)
-    expect(denied.err).toEqual(["The sign-in was denied."])
+  it("reports a denied sign-in", async () => {
+    const io = cli({ remote: fakeRemote([{ status: "denied" }]) })
+    expect(await io.run("login")).toBe(1)
+    expect(io.err).toEqual(["The sign-in was denied."])
+  })
 
-    const expired = capture()
-    expect(
-      await run(["login", "--project", PROJECT, "--json"], {
-        remote: fakeRemote([]),
-        ...expired.options,
-      })
-    ).toBe(1)
-    expect(JSON.parse(expired.out[0]!)).toMatchObject({
-      status: "waiting",
-      code: "BCDF-GHJK",
-    })
-    expect(JSON.parse(expired.out[1]!)).toMatchObject({ status: "expired" })
-    expect(credentialFor(PROJECT)).toBeNull()
+  it("prints one JSON line per step for agents", async () => {
+    const io = cli({ remote: fakeRemote([]) })
+    expect(await io.run("login", "--json")).toBe(1)
+    expect(io.out.map((line) => JSON.parse(line))).toEqual([
+      {
+        status: "waiting",
+        url: expect.stringContaining("/dashboard/cli?code=BCDF-GHJK"),
+        code: "BCDF-GHJK",
+      },
+      { status: "expired", message: expect.any(String) },
+    ])
+    expect(io.err).toEqual([])
   })
 })
 
-describe("comment commands", () => {
-  it("need a session first", async () => {
-    const io = capture()
-    expect(
-      await run(["comments", "--project", PROJECT], {
-        remote: fakeRemote(),
-        ...io.options,
-      })
-    ).toBe(1)
-    expect(io.err[0]).toContain("Run `npx @nuniapp/cli@latest login` first")
+describe("login polling", () => {
+  function answer(status: number, body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(body), { status }))
+    )
+  }
+
+  it("reads each state with its HTTP status", async () => {
+    answer(202, { status: "pending" })
+    expect(await createRemote().pollLogin("x")).toEqual({ status: "pending" })
+    answer(410, { status: "expired" })
+    expect(await createRemote().pollLogin("x")).toEqual({ status: "expired" })
   })
 
-  it("list, show, resolve and reopen with the saved session", async () => {
-    saveCredential(PROJECT, { token: "nuni_s_good" })
-    const remote = fakeRemote()
-    const io = capture()
-    const dir = tempDir({ "index.html": `data-project="${PROJECT}"` })
+  it("slows down when rate limited", async () => {
+    answer(429, { code: "rate_limited", message: "Polling too fast" })
+    expect(await createRemote().pollLogin("x")).toEqual({
+      status: "slow_down",
+    })
+  })
 
-    expect(
-      await run(["comments", "--cwd", dir], { remote, ...io.options })
-    ).toBe(0)
+  it("fails on an error instead of reading it as a state", async () => {
+    answer(400, { code: "bad_json", message: "Invalid sign-in request" })
+    await expect(createRemote().pollLogin("x")).rejects.toMatchObject({
+      code: "bad_json",
+      message: "Invalid sign-in request",
+    })
+    answer(410, { code: "expired", message: "Gone" })
+    await expect(createRemote().pollLogin("x")).rejects.toBeInstanceOf(
+      NuniError
+    )
+  })
+})
+
+describe("signing in", () => {
+  it("is needed before reading comments", async () => {
+    const io = cli()
+    expect(await io.run("comments")).toBe(1)
+    expect(io.err).toEqual([`Not signed in to ${PROJECT}. Run \`${LOGIN}\`.`])
+  })
+
+  it("is asked for again when the server says the session ended", async () => {
+    saveCredential(PROJECT, { token: "nuni_s_revoked" })
+    const io = cli()
+    expect(await io.run("comment", "jd7abc123")).toBe(1)
+    expect(io.err).toEqual([`Not signed in to this project. Run \`${LOGIN}\`.`])
+  })
+
+  it("uses $NUNI_TOKEN over the saved session", async () => {
+    saveCredential(PROJECT, { token: "nuni_s_saved" })
+    vi.stubEnv("NUNI_TOKEN", "nuni_s_env")
+    const remote = fakeRemote()
+    expect(await cli({ remote }).run("comments")).toBe(0)
+    expect(remote.calls).toEqual([`list ${PROJECT} nuni_s_env open`])
+  })
+
+  it("whoami tells who is signed in", async () => {
+    const io = cli()
+    signIn()
+    expect(await io.run("whoami")).toBe(0)
+    expect(io.out).toEqual([`Signed in to ${PROJECT} as Alice.`])
+    expect(await io.run("whoami", "--json")).toBe(0)
+    expect(io.json()).toEqual({
+      project: PROJECT,
+      signedIn: true,
+      owner: "Alice",
+    })
+  })
+
+  it("logout revokes the saved session, even with $NUNI_TOKEN set", async () => {
+    signIn()
+    vi.stubEnv("NUNI_TOKEN", "nuni_s_env")
+    const remote = fakeRemote()
+    const io = cli({ remote })
+    expect(await io.run("logout")).toBe(0)
+    expect(io.out).toEqual([`Signed out of ${PROJECT}.`])
+    expect(remote.calls).toEqual(["logout nuni_s_good"])
+
+    expect(await io.run("logout", "--json")).toBe(0)
+    expect(io.json()).toEqual({ project: PROJECT, signedOut: false })
+    expect(remote.calls).toHaveLength(1)
+  })
+
+  it("logout reports a session it couldn't revoke", async () => {
+    signIn()
+    const remote = fakeRemote()
+    remote.logout = async () => {
+      throw new NuniError("Could not reach Nuni (offline)", "network")
+    }
+    const io = cli({ remote })
+    expect(await io.run("logout")).toBe(1)
+    expect(io.out).toEqual([`Signed out of ${PROJECT}.`])
+    expect(io.err[0]).toContain("Could not reach Nuni (offline)")
+    expect(await cli({ remote }).run("whoami")).toBe(1)
+  })
+})
+
+describe("comments", () => {
+  beforeEach(signIn)
+
+  it("lists open comments, newest first", async () => {
+    const io = cli()
+    expect(await io.run("comments")).toBe(0)
     expect(io.out[0]).toContain("2 open comments, newest first")
     expect(io.out[0]).toContain("jd7abc123 · /pricing · Sam · 2 hours ago")
     expect(io.out[0]).toContain('On <button> "Buy now"')
-
-    expect(
-      await run(["comment", "jd7abc123", "--cwd", dir], {
-        remote,
-        ...io.options,
-      })
-    ).toBe(0)
-    expect(io.out[1]).toContain("> Make this bigger")
-    expect(io.out[1]).toContain("[error] Boom")
-    expect(io.out[1]).toContain("resolve jd7abc123")
-
-    expect(
-      await run(["comment", "nope", "--cwd", dir], { remote, ...io.options })
-    ).toBe(1)
-    expect(
-      await run(["resolve", "jd7abc123", "--cwd", dir], {
-        remote,
-        ...io.options,
-      })
-    ).toBe(0)
-    expect(
-      await run(["reopen", "jd7abc123", "--cwd", dir, "--json"], {
-        remote,
-        ...io.options,
-      })
-    ).toBe(0)
-    expect(remote.calls).toContain("resolved jd7abc123 nuni_s_good")
-    expect(remote.calls).toContain("open jd7abc123 nuni_s_good")
-    expect(JSON.parse(io.out.at(-1)!)).toEqual({
-      id: "jd7abc123",
-      status: "open",
-    })
-
-    expect(
-      await run(["reply", "jd7abc123", "Looking into it", "--cwd", dir], {
-        remote,
-        ...io.options,
-      })
-    ).toBe(0)
-    expect(
-      await run(
-        ["resolve", "jd7abc123", "--note", "Made it bigger", "--cwd", dir],
-        { remote, ...io.options }
-      )
-    ).toBe(0)
-    const calls = remote.calls.slice(-3)
-    expect(calls).toEqual([
-      "reply jd7abc123 nuni_s_good Looking into it",
-      "resolved jd7abc123 nuni_s_good",
-      "reply jd7abc123 nuni_s_good Made it bigger",
-    ])
-    // When resolving fails, the note is not posted.
-    const before = remote.calls.length
-    expect(
-      await run(["resolve", "gone", "--note", "Done", "--cwd", dir], {
-        remote,
-        ...io.options,
-      })
-    ).toBe(1)
-    expect(remote.calls.length).toBe(before)
-    expect(
-      await run(["reply", "jd7abc123", "--cwd", dir], { remote, ...io.options })
-    ).toBe(1)
-
-    expect(
-      await run(["comments", "--cwd", dir, "--status", "closed"], {
-        remote,
-        ...io.options,
-      })
-    ).toBe(1)
   })
 
-  it("search, group, list pages and resolve several", async () => {
-    saveCredential(PROJECT, { token: "nuni_s_good" })
+  it("prints the page as JSON", async () => {
+    const io = cli()
+    expect(await io.run("comments", "--json")).toBe(0)
+    expect(io.json()).toEqual({
+      comments: [
+        expect.objectContaining({ _id: comment._id }),
+        expect.objectContaining({ _id: second._id }),
+      ],
+      cursor: null,
+    })
+  })
+
+  it("searches, best match first", async () => {
     const remote = fakeRemote()
-    const io = capture()
-    const dir = tempDir({ "index.html": `data-project="${PROJECT}"` })
+    const io = cli({ remote })
+    expect(await io.run("comments", "--search", " bigger ")).toBe(0)
+    expect(remote.calls).toEqual([
+      `list ${PROJECT} nuni_s_good open search=bigger`,
+    ])
+    expect(io.out[0]).toContain("best match first")
+  })
 
-    expect(
-      await run(["comments", "--cwd", dir, "--search", "bigger"], {
-        remote,
-        ...io.options,
-      })
-    ).toBe(0)
-    expect(remote.calls.at(-1)).toBe(
-      `list ${PROJECT} nuni_s_good open search=bigger`
-    )
-    expect(io.out.at(-1)).toContain("best match first")
-
-    expect(
-      await run(["comments", "--cwd", dir, "--group", "element"], {
-        remote,
-        ...io.options,
-      })
-    ).toBe(0)
-    expect(io.out.at(-1)).toContain(
+  it("groups comments on the same element", async () => {
+    const io = cli()
+    expect(await io.run("comments", "--group", "element")).toBe(0)
+    expect(io.out[0]).toContain(
       "grouped by element:\n\n## /pricing · button.buy (2)\n1. jd7abc123"
     )
-    expect(
-      await run(["comments", "--cwd", dir, "--group", "color"], {
-        remote,
-        ...io.options,
-      })
-    ).toBe(1)
-
-    expect(await run(["pages", "--cwd", dir], { remote, ...io.options })).toBe(
-      0
-    )
-    expect(io.out.at(-1)).toBe(
-      "2 pages with open comments:\n\n12 open  /pricing\n 3 open  /"
-    )
   })
 
-  it("resolve several reports the ones that failed", async () => {
-    saveCredential(PROJECT, { token: "nuni_s_good" })
+  it("rejects unknown options before asking the server", async () => {
     const remote = fakeRemote()
-    const io = capture()
-    const dir = tempDir({ "index.html": `data-project="${PROJECT}"` })
-    expect(
-      await run(
-        [
-          "resolve",
-          "jd7abc123",
-          "gone",
-          "jd7def456",
-          "--note",
-          "Done",
-          "--cwd",
-          dir,
-        ],
-        { remote, ...io.options }
-      )
-    ).toBe(1)
-    expect(remote.calls.slice(-4)).toEqual([
-      "resolved jd7abc123 nuni_s_good",
-      "reply jd7abc123 nuni_s_good Done",
-      "resolved jd7def456 nuni_s_good",
-      "reply jd7def456 nuni_s_good Done",
+    const io = cli({ remote })
+    expect(await io.run("comments", "--status", "closed")).toBe(1)
+    expect(await io.run("comments", "--group", "color")).toBe(1)
+    expect(await io.run("comments", "--limit", "0")).toBe(1)
+    expect(io.err).toEqual([
+      "--status must be open or resolved.",
+      "--group must be page or element.",
+      "--limit must be a positive number.",
     ])
-    expect(io.out.at(-1)).toBe("Resolved jd7abc123, jd7def456.")
-    expect(io.err.at(-1)).toBe("Couldn't resolve gone: Comment not found")
-
-    // Resolved, but the note failed: reported as resolved, with the note error.
-    expect(
-      await run(
-        ["resolve", "jd7abc123", "noreply", "--note", "Done", "--cwd", dir],
-        { remote, ...io.options }
-      )
-    ).toBe(1)
-    expect(remote.calls).toContain("resolved noreply nuni_s_good")
-    expect(io.out.at(-1)).toBe("Resolved jd7abc123, noreply.")
-    expect(io.err.at(-1)).toBe(
-      "Resolved noreply, but couldn't post the note: Replies are off"
-    )
+    expect(remote.calls).toEqual([])
   })
 
-  it("whoami and logout", async () => {
-    saveCredential(PROJECT, { token: "nuni_s_good" })
+  it("lists pages with open comments", async () => {
+    const io = cli()
+    expect(await io.run("pages")).toBe(0)
+    expect(io.out).toEqual([
+      "2 pages with open comments:\n\n12 open  /pricing\n 3 open  /",
+    ])
+  })
+
+  it("shows one comment with its full context", async () => {
+    const io = cli()
+    expect(await io.run("comment", "jd7abc123")).toBe(0)
+    expect(io.out[0]).toContain("> Make this bigger")
+    expect(io.out[0]).toContain("[error] Boom")
+    expect(io.out[0]).toContain("resolve jd7abc123")
+    expect(await io.run("comment", "nope")).toBe(1)
+    expect(io.err).toEqual([`No comment nope in ${PROJECT}.`])
+  })
+
+  it("saves the screenshot and attached images", async () => {
+    const io = cli()
+    const dir = tempDir()
+    expect(
+      await io.run("comment", "jd7abc123", "--save-screenshot", dir, "--json")
+    ).toBe(0)
+    const shot = join(dir, "nuni-jd7abc123.webp")
+    const drawn = join(dir, "nuni-jd7abc123-image-1.png")
+    expect(io.json()).toMatchObject({
+      _id: "jd7abc123",
+      screenshotFile: shot,
+      imageFiles: [drawn],
+    })
+    expect(readdirSync(dir).sort()).toEqual([
+      "nuni-jd7abc123-image-1.png",
+      "nuni-jd7abc123.webp",
+    ])
+    expect(readFileSync(shot, "utf8")).toBe("shot")
+  })
+
+  it("replies as the owner", async () => {
     const remote = fakeRemote()
-    const io = capture()
-    expect(
-      await run(["whoami", "-p", PROJECT], { remote, ...io.options })
-    ).toBe(0)
-    expect(io.out[0]).toBe(`Signed in to ${PROJECT} as Alice.`)
-    expect(
-      await run(["logout", "-p", PROJECT], { remote, ...io.options })
-    ).toBe(0)
-    expect(remote.calls).toContain("logout nuni_s_good")
-    expect(credentialFor(PROJECT)).toBeNull()
-    expect(
-      await run(["whoami", "-p", PROJECT], { remote, ...io.options })
-    ).toBe(1)
-  })
-
-  it("uses $NUNI_TOKEN over saved sessions", async () => {
-    vi.stubEnv("NUNI_TOKEN", "nuni_s_env")
-    expect(credentialFor(PROJECT)?.token).toBe("nuni_s_env")
+    const io = cli({ remote })
+    expect(await io.run("reply", "jd7abc123", "Looking into it")).toBe(0)
+    expect(io.out).toEqual(["Replied to jd7abc123."])
+    expect(remote.calls).toEqual(["reply jd7abc123 Looking into it"])
+    expect(await io.run("reply", "jd7abc123")).toBe(1)
   })
 })
 
-async function connect(server: ReturnType<typeof createMcpServer>) {
-  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
-  serverSide.onmessage = (message) => {
-    void server.handle(message as never).then((response) => {
-      if (response) void serverSide.send(response as never)
+describe("resolve and reopen", () => {
+  beforeEach(signIn)
+
+  it("resolve one or several comments, with the note, in one call", async () => {
+    const remote = fakeRemote()
+    const io = cli({ remote })
+    expect(
+      await io.run("resolve", "jd7abc123", "jd7def456", "--note", "Bigger")
+    ).toBe(0)
+    expect(remote.calls).toEqual(["resolved jd7abc123,jd7def456 note=Bigger"])
+    expect(io.out).toEqual(["Resolved jd7abc123, jd7def456."])
+  })
+
+  it("resolves more ids than one request takes, in batches", async () => {
+    const remote = fakeRemote()
+    const io = cli({ remote })
+    const ids = Array.from({ length: LIMITS.bulkMax + 1 }, (_, i) => `c${i}`)
+    expect(await io.run("resolve", ...ids, "--json")).toBe(0)
+    expect(remote.calls.map((call) => call.split(",").length)).toEqual([
+      LIMITS.bulkMax,
+      1,
+    ])
+    expect(io.json()).toEqual({ resolved: ids, failed: [] })
+  })
+
+  it("reports the ones that failed, and still resolves the rest", async () => {
+    const io = cli()
+    expect(
+      await io.run("resolve", "jd7abc123", "gone", "full", "--note", "Done")
+    ).toBe(1)
+    expect(io.out).toEqual(["Resolved jd7abc123."])
+    expect(io.err).toEqual([
+      "Couldn't resolve gone: Comment not found",
+      "Couldn't resolve full: This thread has reached its reply limit",
+    ])
+  })
+
+  it("prints the same JSON for one id as for several", async () => {
+    const io = cli()
+    expect(await io.run("resolve", "jd7abc123", "--json")).toBe(0)
+    expect(io.json()).toEqual({ resolved: ["jd7abc123"], failed: [] })
+    expect(await io.run("resolve", "jd7abc123", "gone", "--json")).toBe(1)
+    expect(io.json()).toEqual({
+      resolved: ["jd7abc123"],
+      failed: [{ id: "gone", code: "not_found", error: "Comment not found" }],
     })
-  }
-  await serverSide.start()
+  })
+
+  it("reopens", async () => {
+    const remote = fakeRemote()
+    const io = cli({ remote })
+    expect(await io.run("reopen", "jd7abc123")).toBe(0)
+    expect(io.out).toEqual(["Reopened jd7abc123."])
+    expect(remote.calls).toEqual(["open jd7abc123"])
+    expect(await io.run("reopen", "jd7abc123", "--json")).toBe(0)
+    expect(io.json()).toEqual({ reopened: ["jd7abc123"], failed: [] })
+  })
+
+  it("needs an id", async () => {
+    const io = cli()
+    expect(await io.run("resolve")).toBe(1)
+    expect(io.err).toEqual(["Pass a comment id: resolve <id...>"])
+  })
+})
+
+/** The MCP server on in-memory streams, with the official client. */
+async function mcp(options: { remote?: Remote; project?: string } = {}) {
+  const toServer = new PassThrough()
+  const toClient = new PassThrough()
+  const ops = createOps({
+    remote: options.remote ?? fakeRemote(),
+    project: options.project ?? PROJECT,
+    cwd: tempDir(),
+  })
+  const served = serve(createMcpServer(ops), toServer, toClient)
   const client = new Client({ name: "test", version: "1.0.0" })
-  await client.connect(clientSide)
-  return client
+  await client.connect(new StdioServerTransport(toClient, toServer))
+  return {
+    client,
+    async call(name: string, args: Record<string, unknown> = {}) {
+      const result = await client.callTool({ name, arguments: args })
+      const content = result.content as {
+        type: string
+        text?: string
+        data?: string
+      }[]
+      return {
+        content,
+        text: content[0]?.text ?? "",
+        isError: result.isError === true,
+      }
+    },
+    async close() {
+      await client.close()
+      toServer.end()
+      await served
+    },
+  }
 }
 
 describe("MCP server", () => {
-  it("works with the official MCP client", async () => {
-    saveCredential(PROJECT, { token: "nuni_s_good" })
-    const remote = fakeRemote()
-    const client = await connect(
-      createMcpServer({
-        remote,
-        version: "9.9.9",
-        project: PROJECT,
-        cwd: tempDir(),
-        fetchImage: async (url) => ({
-          data: url.endsWith("drawn") ? "BBBB" : "AAAA",
-          mimeType: "image/webp",
-        }),
-      })
-    )
-    expect(client.getServerVersion()).toMatchObject({
-      name: "nuni",
-      version: "9.9.9",
-    })
+  beforeEach(signIn)
 
-    const { tools } = await client.listTools()
+  it("introduces itself and lists its tools", async () => {
+    const server = await mcp()
+    expect(server.client.getServerVersion()).toMatchObject({ name: "nuni" })
+    const { tools } = await server.client.listTools()
     expect(tools.map((t) => t.name)).toEqual([
       "list_comments",
       "search_comments",
@@ -496,108 +615,109 @@ describe("MCP server", () => {
       "resolve_comments",
       "reopen_comment",
     ])
+    await server.close()
+  })
 
-    const list = await client.callTool({ name: "list_comments", arguments: {} })
-    expect(JSON.stringify(list.content)).toContain("jd7abc123")
-
-    const grouped = await client.callTool({
-      name: "list_comments",
-      arguments: { group_by: "page" },
-    })
-    expect(JSON.stringify(grouped.content)).toContain("## /pricing (2)")
-
-    const found = await client.callTool({
-      name: "search_comments",
-      arguments: { query: "green" },
-    })
-    expect(found.isError).toBeFalsy()
+  it("lists, groups and searches comments", async () => {
+    const remote = fakeRemote()
+    const server = await mcp({ remote })
+    expect((await server.call("list_comments")).text).toContain("jd7abc123")
+    expect(
+      (await server.call("list_comments", { group_by: "page" })).text
+    ).toContain("## /pricing (2)")
+    const found = await server.call("search_comments", { query: "green" })
+    expect(found.isError).toBe(false)
     expect(remote.calls.at(-1)).toBe(
       `list ${PROJECT} nuni_s_good open search=green`
     )
-    const noQuery = await client.callTool({
-      name: "search_comments",
-      arguments: {},
-    })
-    expect(noQuery.isError).toBe(true)
-
-    const pages = await client.callTool({ name: "list_pages", arguments: {} })
-    expect(JSON.stringify(pages.content)).toContain("12 open  /pricing")
-
-    const one = await client.callTool({
-      name: "get_comment",
-      arguments: { id: "jd7abc123" },
-    })
-    const content = one.content as { type: string; text?: string }[]
-    expect(content[0]?.text).toContain("> Make this bigger")
-    expect(content[0]?.text).toContain(
-      "## Images from Sam (1)\n\n- https://files.example.com/drawn"
+    expect((await server.call("search_comments")).isError).toBe(true)
+    expect(
+      (await server.call("list_comments", { status: "closed" })).isError
+    ).toBe(true)
+    expect((await server.call("list_pages")).text).toContain(
+      "12 open  /pricing"
     )
-    // The commenter's own image first, then the element's screenshot.
-    expect(content.slice(1)).toEqual([
-      { type: "image", data: "BBBB", mimeType: "image/webp" },
-      { type: "image", data: "AAAA", mimeType: "image/webp" },
-    ])
-
-    const resolved = await client.callTool({
-      name: "resolve_comment",
-      arguments: { id: "jd7abc123", note: "Bigger now" },
-    })
-    expect(resolved.isError).toBeFalsy()
-    expect(remote.calls.slice(-2)).toEqual([
-      "resolved jd7abc123 nuni_s_good",
-      "reply jd7abc123 nuni_s_good Bigger now",
-    ])
-    const several = await client.callTool({
-      name: "resolve_comments",
-      arguments: { ids: ["jd7abc123", "gone", "jd7def456"], note: "Fixed" },
-    })
-    expect(several.isError).toBeFalsy()
-    expect(JSON.stringify(several.content)).toContain(
-      "Resolved jd7abc123, jd7def456."
-    )
-    expect(JSON.stringify(several.content)).toContain(
-      "Couldn't resolve gone: Comment not found"
-    )
-    const none = await client.callTool({
-      name: "resolve_comments",
-      arguments: { ids: ["gone"] },
-    })
-    expect(none.isError).toBe(true)
-
-    await client.callTool({
-      name: "reply_to_comment",
-      arguments: { id: "jd7abc123", body: "Thanks!" },
-    })
-    expect(remote.calls.at(-1)).toBe("reply jd7abc123 nuni_s_good Thanks!")
-
-    const missing = await client.callTool({
-      name: "get_comment",
-      arguments: { id: "nope" },
-    })
-    expect(missing.isError).toBe(true)
-    await expect(
-      client.callTool({ name: "nope", arguments: {} })
-    ).rejects.toThrow()
-    await client.close()
+    await server.close()
   })
 
-  it("tells the agent to log in when there is no session", async () => {
-    const client = await connect(
-      createMcpServer({
-        remote: fakeRemote(),
-        version: "1",
-        cwd: tempDir({ "index.html": `data-project="${PROJECT}"` }),
-      })
+  it("gives one comment with its images, attached ones first", async () => {
+    const server = await mcp()
+    const one = await server.call("get_comment", { id: "jd7abc123" })
+    expect(one.text).toContain("> Make this bigger")
+    expect(one.text).toContain(
+      "## Images from Sam (1)\n\n- https://files.example.com/drawn"
     )
-    const result = await client.callTool({
-      name: "list_comments",
-      arguments: {},
+    expect(one.content.slice(1)).toEqual([
+      {
+        type: "image",
+        data: Buffer.from("drawn").toString("base64"),
+        mimeType: "image/png",
+      },
+      {
+        type: "image",
+        data: Buffer.from("shot").toString("base64"),
+        mimeType: "image/webp",
+      },
+    ])
+    expect((await server.call("get_comment", { id: "nope" })).isError).toBe(
+      true
+    )
+    await server.close()
+  })
+
+  it("replies, resolves and reopens", async () => {
+    const remote = fakeRemote()
+    const server = await mcp({ remote })
+    await server.call("reply_to_comment", { id: "jd7abc123", body: "Thanks!" })
+    const resolved = await server.call("resolve_comment", {
+      id: "jd7abc123",
+      note: "Bigger now",
     })
-    expect(result.isError).toBe(true)
-    expect(JSON.stringify(result.content)).toContain(
-      "npx @nuniapp/cli@latest login"
+    expect(resolved.text).toBe("Resolved jd7abc123.")
+    await server.call("reopen_comment", { id: "jd7abc123" })
+    expect(remote.calls).toEqual([
+      "reply jd7abc123 Thanks!",
+      "resolved jd7abc123 note=Bigger now",
+      "open jd7abc123",
+    ])
+    await server.close()
+  })
+
+  it("resolves several, and fails only when none could be", async () => {
+    const server = await mcp()
+    const several = await server.call("resolve_comments", {
+      ids: ["jd7abc123", "gone", "jd7def456"],
+      note: "Fixed",
+    })
+    expect(several.isError).toBe(false)
+    expect(several.text).toBe(
+      "Resolved jd7abc123, jd7def456.\nCouldn't resolve gone: Comment not found"
     )
-    await client.close()
+    const none = await server.call("resolve_comments", { ids: ["gone"] })
+    expect(none.isError).toBe(true)
+    await server.close()
+  })
+
+  it("tells the agent to ask for a login, before and after the session ends", async () => {
+    vi.stubEnv("NUNI_CONFIG_DIR", tempDir())
+    const server = await mcp()
+    const missing = await server.call("list_comments")
+    expect(missing.isError).toBe(true)
+    expect(missing.text).toContain(`Ask the user to run \`${LOGIN}\``)
+
+    saveCredential(PROJECT, { token: "nuni_s_revoked" })
+    const ended = await server.call("get_comment", { id: "jd7abc123" })
+    expect(ended.isError).toBe(true)
+    expect(ended.text).toBe(
+      `Not signed in to this project. Ask the user to run \`${LOGIN}\` in this project (it opens the Nuni dashboard to approve), then try again.`
+    )
+    await server.close()
+  })
+
+  it("rejects unknown tools", async () => {
+    const server = await mcp()
+    await expect(server.call("nope")).rejects.toThrow()
+    await server.close()
   })
 
   it("serves over stdio", async () => {

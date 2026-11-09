@@ -1,13 +1,16 @@
-import { DASHBOARD_ROUTES, dashboardPath } from "@nuni/shared"
-import Image from "next/image"
+"use client"
 
+import { usePathname } from "next/navigation"
+
+import { NuniMark } from "@/components/logo"
 import { buttonVariants } from "@/components/ui/button"
-import { BASE_PATH } from "@/lib/config"
+import { signInUrl } from "@/lib/config"
 
-export function SignedOut({ returnTo = BASE_PATH }: { returnTo?: string }) {
+export function SignedOut() {
+  const pathname = usePathname()
   return (
     <div className="mx-auto grid max-w-sm justify-items-center gap-8 py-16 text-center">
-      <Image src={`${BASE_PATH}/icon.svg`} alt="" width={44} height={44} />
+      <NuniMark size={44} />
       <div className="grid gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">
           Your Nuni projects
@@ -19,7 +22,7 @@ export function SignedOut({ returnTo = BASE_PATH }: { returnTo?: string }) {
       </div>
       <a
         className={buttonVariants({ size: "lg", className: "w-full" })}
-        href={dashboardPath(DASHBOARD_ROUTES.signIn, { returnTo })}
+        href={signInUrl(pathname)}
       >
         Sign in to Nuni
       </a>

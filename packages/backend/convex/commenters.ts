@@ -1,22 +1,12 @@
-import { LIMITS, randomBase58, TOKEN_PREFIX } from "@nuni/shared"
 import { v } from "convex/values"
 
-import { internal } from "./_generated/api"
-import { internalMutation, mutation, query } from "./_generated/server"
-import { searchTextFor } from "./comments"
-import {
-  checkSecret,
-  cleanName,
-  commenterFromToken,
-  fail,
-  parseOrigin,
-  projectByPublicId,
-  requireUser,
-  sha256Hex,
-  userAuthorKey,
-} from "./lib"
+import { mutation, query } from "./_generated/server"
+import { requireUser } from "./accounts"
+import { checkSecret, commenterFromToken, userAuthorKey } from "./authors"
+import { adjustThread, reauthorComment } from "./lifecycle"
+import { cleanName, fail, projectByPublicId, sha256Hex } from "./lib"
 import { SERVER_LIMITS } from "./limits"
-import { rateLimiter } from "./rateLimits"
+import { createSiteSession, findByToken } from "./tokens"
 
 /**
  * Optional sign-in for people who comment. A signed-in commenter writes
@@ -27,7 +17,7 @@ import { rateLimiter } from "./rateLimits"
 
 /**
  * Called by the dashboard sign-in page. The raw token is returned once and
- * handed to the widget via postMessage; only its hash is stored.
+ * handed to the widget via postMessage.
  */
 export const create = mutation({
   args: { publicId: v.string(), origin: v.string() },
@@ -35,27 +25,11 @@ export const create = mutation({
     const user = await requireUser(ctx)
     const project = await projectByPublicId(ctx, publicId)
     if (!project || project.deletingAt) fail("not_found", "Project not found")
-    // The token is postMessage'd to this origin, so it must be one the
-    // project is used on.
-    const cleanOrigin = parseOrigin(origin)
-    if (!project.origins.includes(cleanOrigin)) {
-      fail("unknown_origin", "Nuni isn't set up on this site")
-    }
-    const { ok } = await rateLimiter.limit(ctx, "sessionPerUser", {
-      key: user._id,
-    })
-    if (!ok) fail("rate_limited", "Too many sign-ins, try again later")
-
-    const token = `${TOKEN_PREFIX.commenter}${randomBase58(40)}`
-    const expiresAt = Date.now() + LIMITS.sessionTtlMs
-    await ctx.db.insert("commenterSessions", {
-      tokenHash: await sha256Hex(token),
+    return createSiteSession(ctx, "commenter", {
       userId: user._id,
-      projectId: project._id,
-      origin: cleanOrigin,
-      expiresAt,
+      project,
+      origin,
     })
-    return { token, expiresAt }
   },
 })
 
@@ -123,11 +97,10 @@ export const linkBrowser = mutation({
     ])
 
     for (const comment of comments) {
-      await ctx.db.patch(comment._id, {
+      await reauthorComment(ctx, comment, {
         authorKeyHash: to,
         authorId: user._id,
         authorName,
-        searchText: searchTextFor({ ...comment, authorName }),
       })
     }
     for (const reply of replies) {
@@ -154,47 +127,15 @@ export const linkBrowser = mutation({
       }
       // The account already has this emoji here: keep one.
       await ctx.db.delete(reaction._id)
-      const comment = await ctx.db.get(reaction.commentId)
-      if (comment) {
-        await ctx.db.patch(comment._id, {
-          reactionCount: Math.max(0, (comment.reactionCount ?? 1) - 1),
-        })
-      }
+      await adjustThread(ctx, reaction.commentId, { reactions: -1 })
     }
   },
 })
 
-/** Widget sign-out: the widget revokes its own token. */
 export const signOut = mutation({
   args: { commenterToken: v.string() },
   handler: async (ctx, { commenterToken }) => {
-    if (
-      !commenterToken ||
-      commenterToken.length > SERVER_LIMITS.tokenMaxLength
-    ) {
-      return
-    }
-    const tokenHash = await sha256Hex(commenterToken)
-    const session = await ctx.db
-      .query("commenterSessions")
-      .withIndex("by_tokenHash", (q) => q.eq("tokenHash", tokenHash))
-      .unique()
+    const session = await findByToken(ctx, "commenterSessions", commenterToken)
     if (session) await ctx.db.delete(session._id)
-  },
-})
-
-/** Daily cron: delete expired commenter sessions. */
-export const cleanupExpired = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const expired = await ctx.db
-      .query("commenterSessions")
-      .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
-      .take(SERVER_LIMITS.cleanupBatch)
-    for (const session of expired) await ctx.db.delete(session._id)
-    if (expired.length === SERVER_LIMITS.cleanupBatch) {
-      await ctx.scheduler.runAfter(0, internal.commenters.cleanupExpired, {})
-    }
-    return expired.length
   },
 })

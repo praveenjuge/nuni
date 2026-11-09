@@ -1,9 +1,13 @@
 import { api } from "@nuni/backend/api"
 import {
+  ERROR_STATUS,
   errorData,
   errorMessage,
   HTTP_ROUTES,
+  isImageType,
+  LOGIN_POLL_STATUS,
   type CommentStatus,
+  type ErrorCode,
   type LoginPoll as ServerLoginPoll,
   type LoginStart,
   type OwnerComment,
@@ -12,15 +16,7 @@ import { ConvexHttpClient } from "convex/browser"
 import type { FunctionReturnType } from "convex/server"
 
 import { CONVEX_SITE_URL, CONVEX_URL } from "./env"
-
-export class RemoteError extends Error {
-  constructor(
-    message: string,
-    public code: string
-  ) {
-    super(message)
-  }
-}
+import { NuniError } from "./errors"
 
 export type { LoginStart }
 
@@ -33,57 +29,79 @@ export type PageCount = FunctionReturnType<
   typeof api.comments.pagesForAgent
 >[number]
 
-/** Everything the CLI and MCP server ask the backend. */
+/** One entry per id, in order: changed, or why not. */
+export type StatusResult = FunctionReturnType<
+  typeof api.comments.setStatusForAgent
+>[number]
+
+export interface Image {
+  /** Base64. */
+  data: string
+  /** Always one of the image types Nuni stores. */
+  mimeType: string
+}
+
+/** A `nuni login` session for one project. */
+export interface Session {
+  publicId: string
+  token: string
+}
+
+/**
+ * Everything the CLI and MCP server ask over the network. Failures throw a
+ * `NuniError` with the backend's code, or `network`.
+ */
 export interface Remote {
   startLogin(publicId: string, client: string): Promise<LoginStart>
   pollLogin(deviceSecret: string): Promise<LoginPoll>
-  whoami(
-    publicId: string,
-    token: string
-  ): Promise<{ valid: boolean; ownerName?: string }>
+  whoami(session: Session): Promise<{ valid: boolean; ownerName?: string }>
   logout(token: string): Promise<void>
   listComments(
-    publicId: string,
-    token: string,
-    options?: {
-      status?: CommentStatus
+    session: Session,
+    options: {
+      status: CommentStatus
       path?: string
       /** Words in the comment or the author's name; by relevance. */
       search?: string
+      /** The server's default when unset. */
       limit?: number
-      cursor?: string | null
     }
   ): Promise<CommentPage>
-  listPages(publicId: string, token: string): Promise<PageCount[]>
-  getComment(
-    publicId: string,
-    token: string,
-    id: string
-  ): Promise<OwnerComment | null>
-  setStatus(token: string, id: string, status: CommentStatus): Promise<void>
-  reply(
-    publicId: string,
-    token: string,
-    id: string,
-    body: string
-  ): Promise<void>
+  listPages(session: Session): Promise<PageCount[]>
+  getComment(session: Session, id: string): Promise<OwnerComment | null>
+  setStatus(
+    session: Session,
+    ids: string[],
+    status: CommentStatus,
+    note?: string
+  ): Promise<StatusResult[]>
+  reply(session: Session, id: string, body: string): Promise<void>
+  /** A comment's screenshot or attached image; null when it's gone. */
+  fetchImage(url: string): Promise<Image | null>
 }
 
-function wrap(error: unknown): RemoteError {
-  const { code, message } = errorData(error)
-  if (message) return new RemoteError(message, code ?? "error")
-  return new RemoteError(errorMessage(error, String(error)), "network")
-}
+const unreachable = (error: unknown) =>
+  new NuniError(
+    `Could not reach Nuni (${errorMessage(error, String(error))})`,
+    "network"
+  )
 
-async function call<T>(fn: () => Promise<T>): Promise<T> {
+async function convexCall<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn()
   } catch (error) {
-    throw wrap(error)
+    const { code, message } = errorData(error)
+    if (code && message) throw new NuniError(message, code)
+    throw unreachable(error)
   }
 }
 
-async function postJson(path: string, body: unknown) {
+/** POST JSON to an HTTP route; any answer other than `ok` is an error. */
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  ok: (status: number, data: Record<string, unknown>) => boolean
+): Promise<T> {
   let res: Response
   try {
     res = await fetch(`${CONVEX_SITE_URL}${path}`, {
@@ -92,101 +110,123 @@ async function postJson(path: string, body: unknown) {
       body: JSON.stringify(body),
     })
   } catch (error) {
-    throw new RemoteError(
-      `Could not reach Nuni (${error instanceof Error ? error.message : String(error)})`,
-      "network"
-    )
+    throw unreachable(error)
   }
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
-  return { status: res.status, data }
+  if (ok(res.status, data)) return data as T
+  const code = (
+    typeof data.code === "string" && data.code in ERROR_STATUS
+      ? data.code
+      : res.status === ERROR_STATUS.rate_limited
+        ? "rate_limited"
+        : "server_error"
+  ) as ErrorCode
+  throw new NuniError(
+    typeof data.message === "string"
+      ? data.message
+      : `Nuni answered ${res.status}`,
+    code
+  )
+}
+
+/** A poll answer is a known state with the HTTP status that state has. */
+function isLoginPoll(status: number, data: Record<string, unknown>) {
+  const state = data.status as ServerLoginPoll["status"]
+  return LOGIN_POLL_STATUS[state] === status
 }
 
 export function createRemote(): Remote {
-  const client = new ConvexHttpClient(CONVEX_URL, {
-    skipConvexDeploymentUrlCheck: !/\.convex\.cloud\/?$/.test(CONVEX_URL),
-    logger: false,
+  let client: ConvexHttpClient | undefined
+  const convex = () =>
+    (client ??= new ConvexHttpClient(CONVEX_URL, {
+      skipConvexDeploymentUrlCheck: !/\.convex\.cloud\/?$/.test(CONVEX_URL),
+      logger: false,
+    }))
+  const agent = ({ publicId, token }: Session) => ({
+    publicId,
+    sessionToken: token,
   })
 
   return {
-    async startLogin(publicId, clientName) {
-      const { status, data } = await postJson(HTTP_ROUTES.cliLoginStart, {
-        publicId,
-        client: clientName,
-      })
-      if (status !== 201) {
-        throw new RemoteError(
-          String(data.message ?? `Sign-in failed (${status})`),
-          String(data.code ?? "error")
-        )
-      }
-      return data as unknown as LoginStart
-    },
-
-    async pollLogin(deviceSecret) {
-      const { status, data } = await postJson(HTTP_ROUTES.cliLoginPoll, {
-        deviceSecret,
-      })
-      if (status === 429) return { status: "slow_down" }
-      if (status >= 500) {
-        throw new RemoteError(String(data.message ?? "Server error"), "server")
-      }
-      return data as unknown as LoginPoll
-    },
-
-    whoami: (publicId, token) =>
-      call(() =>
-        client.query(api.sessions.validate, {
-          publicId,
-          sessionToken: token,
-        })
+    startLogin: (publicId, clientName) =>
+      postJson<LoginStart>(
+        HTTP_ROUTES.cliLoginStart,
+        { publicId, client: clientName },
+        (status) => status === 201
       ),
 
+    async pollLogin(deviceSecret) {
+      try {
+        return await postJson<ServerLoginPoll>(
+          HTTP_ROUTES.cliLoginPoll,
+          { deviceSecret },
+          isLoginPoll
+        )
+      } catch (error) {
+        if (error instanceof NuniError && error.code === "rate_limited") {
+          return { status: "slow_down" }
+        }
+        throw error
+      }
+    },
+
+    whoami: (session) =>
+      convexCall(() => convex().query(api.sessions.validate, agent(session))),
+
     logout: (token) =>
-      call(async () => {
-        await client.mutation(api.sessions.revokeOwn, { sessionToken: token })
+      convexCall(async () => {
+        await convex().mutation(api.sessions.revokeOwn, { sessionToken: token })
       }),
 
-    listComments: (publicId, token, options = {}) =>
-      call(() =>
-        client.query(api.comments.listForAgent, {
-          publicId,
-          sessionToken: token,
+    listComments: (session, options) =>
+      convexCall(() =>
+        convex().query(api.comments.listForAgent, {
+          ...agent(session),
           ...options,
         })
       ),
 
-    listPages: (publicId, token) =>
-      call(() =>
-        client.query(api.comments.pagesForAgent, {
-          publicId,
-          sessionToken: token,
+    listPages: (session) =>
+      convexCall(() =>
+        convex().query(api.comments.pagesForAgent, agent(session))
+      ),
+
+    getComment: (session, id) =>
+      convexCall(() =>
+        convex().query(api.comments.getForAgent, { ...agent(session), id })
+      ),
+
+    setStatus: (session, ids, status, note) =>
+      convexCall(() =>
+        convex().mutation(api.comments.setStatusForAgent, {
+          ...agent(session),
+          ids,
+          status,
+          note,
         })
       ),
 
-    getComment: (publicId, token, id) =>
-      call(() =>
-        client.query(api.comments.getForOwner, {
-          publicId,
-          id,
-          sessionToken: token,
-        })
-      ),
-
-    setStatus: (token, id, status) =>
-      call(async () => {
-        const fn =
-          status === "resolved" ? api.comments.resolve : api.comments.reopen
-        await client.mutation(fn, { id, sessionToken: token })
-      }),
-
-    reply: (publicId, token, id, body) =>
-      call(async () => {
-        await client.mutation(api.replies.replyAsOwner, {
-          publicId,
+    reply: (session, id, body) =>
+      convexCall(async () => {
+        await convex().mutation(api.replies.replyAsOwner, {
+          ...agent(session),
           commentId: id,
           body,
-          sessionToken: token,
         })
       }),
+
+    async fetchImage(url) {
+      try {
+        const res = await fetch(url)
+        if (!res.ok) return null
+        const type = res.headers.get("Content-Type")?.split(";")[0] ?? ""
+        return {
+          data: Buffer.from(await res.arrayBuffer()).toString("base64"),
+          mimeType: isImageType(type) ? type : "image/webp",
+        }
+      } catch {
+        return null
+      }
+    },
   }
 }

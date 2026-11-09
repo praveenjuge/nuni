@@ -1,6 +1,6 @@
 import Link from "next/link"
 
-import { FlowShell } from "@/components/flow-shell"
+import { FlowShell } from "@/components/flow"
 import { buttonVariants } from "@/components/ui/button"
 
 export default function NotFound() {

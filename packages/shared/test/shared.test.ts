@@ -305,6 +305,14 @@ describe("URL secrets", () => {
     )
   })
 
+  it("keeps the punctuation that closes a URL", () => {
+    expect(
+      stripUrlQueries(
+        "background: url(/bg.png?t=2); (see https://a.com/x?key=3). Done"
+      )
+    ).toBe("background: url(/bg.png); (see https://a.com/x). Done")
+  })
+
   it("stays fast on long words", () => {
     const long = `src="data:image/png;base64,${"ab/c".repeat(250_000)}"`
     const started = performance.now()
@@ -330,7 +338,7 @@ describe("stripHtmlUrlQueries", () => {
         `<img data-src="i.png?sig=1" data-lazy-srcset="a.png?x=1 1x" style="background: url(/bg.png?t=2)"><p>See https://a.com/x?key=3</p>`
       )
     ).toBe(
-      `<img data-src="i.png" data-lazy-srcset="a.png 1x" style="background: url(/bg.png"><p>See https://a.com/x</p>`
+      `<img data-src="i.png" data-lazy-srcset="a.png 1x" style="background: url(/bg.png)"><p>See https://a.com/x</p>`
     )
   })
 })

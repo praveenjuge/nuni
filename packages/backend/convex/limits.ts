@@ -48,11 +48,14 @@ export const SERVER_LIMITS = {
   authorSecretMinLength: 16,
   authorSecretMaxLength: 128,
 
-  /** JSON bodies of the HTTP routes, in characters. */
-  commentBodyMax: 64_000,
-  replyBodyMax: 16_000,
-  pinReportBodyMax: 16_000,
-  cliLoginBodyMax: 2_000,
+  /**
+   * JSON bodies of the HTTP routes, in bytes: room for 64,000, 16,000 and
+   * 2,000 characters even when each takes 3 bytes in UTF-8.
+   */
+  commentBodyMax: 192_000,
+  replyBodyMax: 48_000,
+  pinReportBodyMax: 48_000,
+  cliLoginBodyMax: 6_000,
 
   /** Guest comments, replies and reactions moved to an account at sign-in. */
   linkBrowserMax: 200,

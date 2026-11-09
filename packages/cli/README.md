@@ -19,6 +19,9 @@ npx @nuniapp/cli@latest pages              # pages with open comments
 npx @nuniapp/cli@latest comment <id>       # one comment with the element, DOM, console and screenshot
 npx @nuniapp/cli@latest reply <id> "message"
 npx @nuniapp/cli@latest resolve <id...> --note "what changed"
+npx @nuniapp/cli@latest reopen <id...>
+npx @nuniapp/cli@latest whoami             # or logout
+npx @nuniapp/cli@latest help <command>     # every command and flag
 claude mcp add nuni -- npx -y @nuniapp/cli@latest mcp
 ```
 

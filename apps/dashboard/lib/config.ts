@@ -1,4 +1,9 @@
-import { DASHBOARD_PATH, DASHBOARD_ROUTES, dashboardUrl } from "@nuni/shared"
+import {
+  DASHBOARD_PATH,
+  DASHBOARD_ROUTES,
+  dashboardPath,
+  dashboardUrl,
+} from "@nuni/shared"
 
 import type nextConfig from "../next.config"
 
@@ -12,20 +17,34 @@ export const BASE_PATH: (typeof nextConfig)["basePath"] = DASHBOARD_PATH
  */
 export const APP_URL = (
   process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
-).replace(/\/$/, "")
+).replace(/\/+$/, "")
 
-export const REDIRECT_URI =
-  process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI ??
-  `${APP_URL}${BASE_PATH}/callback`
+export const CONVEX_URL =
+  process.env.NEXT_PUBLIC_CONVEX_URL ?? "http://127.0.0.1:3210"
 
-/** Only allow redirects back into the dashboard. */
-export function safeReturnTo(value: string | null | undefined): string {
-  if (!value || !value.startsWith(`${BASE_PATH}`) || value.startsWith("//"))
-    return BASE_PATH
-  return value
+/**
+ * A dashboard URL on the public origin, for links that leave the app: sign-in
+ * redirects, AuthKit callbacks and links people send to others. Pages link
+ * to each other with `<Link href={route}>`, which adds the basePath itself.
+ */
+export function appUrl(route = "", query?: Record<string, string>): string {
+  return dashboardUrl(APP_URL, route, query)
 }
 
-/** Sign in first, then come back to `returnTo` (a path in the dashboard). */
-export function signInUrl(returnTo: string): string {
-  return dashboardUrl(APP_URL, DASHBOARD_ROUTES.signIn, { returnTo })
+export const REDIRECT_URI =
+  process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI ?? appUrl("/callback")
+
+/** Only allow redirects back into the dashboard. */
+export function safeReturnTo(value: string | null): string {
+  return value?.startsWith(BASE_PATH) ? value : BASE_PATH
+}
+
+/** Sign in first, then come back to `route` in the dashboard. */
+export function signInUrl(
+  route: string,
+  query?: Record<string, string>
+): string {
+  return appUrl(DASHBOARD_ROUTES.signIn, {
+    returnTo: dashboardPath(route, query),
+  })
 }

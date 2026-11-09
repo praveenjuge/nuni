@@ -1,76 +1,19 @@
 import { resolve } from "node:path"
 import { parseArgs } from "node:util"
 
-import packageJson from "../package.json"
+import { CLI_NPX, cliCommand, DOCS_URL } from "@nuni/shared"
 
 import {
-  buildAgentPrompt,
-  CLI_NPX,
-  cliCommand,
-  DOCS_URL,
-  generateProjectId,
-  isProjectId,
-  MCP_ADD_COMMAND,
-} from "@nuni/shared"
-
-import {
-  CommandError,
-  listComments,
-  listPages,
-  login,
-  logout,
-  reopen,
-  reply,
-  markResolved,
-  showComment,
-  whoami,
-  type CommandContext,
+  COMMANDS,
+  LOGIN_HINT,
+  openInBrowser,
+  type Command,
+  type Input,
 } from "./commands"
-import { detectFramework, detectPackageManager, installCommand } from "./detect"
-import { createMcpServer, serveStdio } from "./mcp"
-import { ProjectError } from "./project"
-import { createRemote, RemoteError, type Remote } from "./remote"
-import { packageFor, snippetFor } from "./snippets"
-
-const VERSION = packageJson.version
-
-const HELP = `nuni ${VERSION}: pinned comments on your live site
-
-Usage
-  ${CLI_NPX} init [--id <project-id>] [--cwd <dir>] [--json]
-  ${CLI_NPX} prompt [--id <project-id>]
-  ${CLI_NPX} id
-
-  ${CLI_NPX} login              sign in to this project's comments
-  ${CLI_NPX} comments [--status open|resolved] [--page /path] [--limit 20]
-                                   [--search "words"] [--group page|element]
-  ${CLI_NPX} pages
-  ${CLI_NPX} comment <id> [--save-screenshot <dir>]
-  ${CLI_NPX} reply <id> "message"
-  ${CLI_NPX} resolve <id...> [--note "what changed"]
-  ${CLI_NPX} reopen <id>
-  ${CLI_NPX} whoami | logout
-  ${CLI_NPX} mcp                MCP server for coding agents (stdio)
-
-Commands
-  init      Generate a project ID and print the install steps for this project
-  prompt    Print the ready-made prompt for Codex, Claude Code, Cursor, etc.
-  id        Print a new project ID
-  login     Approve this terminal in the Nuni dashboard (works over SSH too)
-  comments  List comments, newest first (or best match with --search)
-  pages     Pages with open comments, most first
-  comment   One comment with the element, DOM, styles, console and screenshot
-  reply     Reply in a comment's thread, as the owner
-  resolve   Mark comments resolved (with an optional note); reopen does the opposite
-  mcp       Run the MCP server: ${MCP_ADD_COMMAND}
-
-The project comes from --project, $NUNI_PROJECT, or the nuni_ ID in your code.
-Add --json to any command for machine-readable output.
-
-Docs: ${DOCS_URL}`
-
-const bold = (s: string) => (process.stdout.isTTY ? `\x1b[1m${s}\x1b[22m` : s)
-const dim = (s: string) => (process.stdout.isTTY ? `\x1b[2m${s}\x1b[22m` : s)
+import { VERSION } from "./env"
+import { describeError, NuniError } from "./errors"
+import { createOps } from "./ops"
+import { createRemote, type Remote } from "./remote"
 
 const OPTIONS = {
   id: { type: "string" },
@@ -88,19 +31,29 @@ const OPTIONS = {
   version: { type: "boolean", short: "v", default: false },
 } as const
 
-const ACCOUNT_COMMANDS = new Set([
-  "login",
-  "logout",
-  "whoami",
-  "comments",
-  "pages",
-  "comment",
-  "reply",
-  "resolve",
-  "reopen",
-  "mcp",
-])
+const DEFAULT_COMMAND = "init"
 
+const usageOf = (command: Command) =>
+  `${command.name}${command.usage ? ` ${command.usage}` : ""}`
+
+const HELP = `nuni ${VERSION}: pinned comments on your live site
+
+Usage: ${CLI_NPX} <command> [options]   (${DEFAULT_COMMAND} when there is none)
+${[...new Set(COMMANDS.map((c) => c.section))]
+  .map(
+    (section) =>
+      `\n${section}\n${COMMANDS.filter((c) => c.section === section)
+        .map((c) => `  ${usageOf(c)}\n      ${c.summary}`)
+        .join("\n")}`
+  )
+  .join("\n")}
+
+The project comes from --project, $NUNI_PROJECT, or the nuni_ ID in your code.
+Add --json to any command for machine-readable output.
+
+Docs: ${DOCS_URL}`
+
+/** The seams tests replace. */
 export interface RunOptions {
   remote?: Remote
   out?: (line: string) => void
@@ -109,174 +62,96 @@ export interface RunOptions {
   openBrowser?: (url: string) => void
 }
 
+function parse(argv: string[]) {
+  try {
+    return parseArgs({ args: argv, allowPositionals: true, options: OPTIONS })
+  } catch (error) {
+    throw new NuniError((error as Error).message)
+  }
+}
+
+function find(name: string): Command {
+  const command = COMMANDS.find((c) => c.name === name)
+  if (!command) {
+    throw new NuniError(
+      `Unknown command "${name}". Run \`${cliCommand("help")}\` to see them all.`
+    )
+  }
+  return command
+}
+
 export async function run(
   argv: string[],
   options: RunOptions = {}
 ): Promise<number> {
-  let parsed
+  const out = options.out ?? ((line: string) => console.log(line))
+  const err = options.err ?? ((line: string) => console.error(line))
+  // Before parsing, so that a parse error is JSON too.
+  const json = argv.includes("--json")
+  const print: Input["print"] = (data, text, problems = []) => {
+    if (json) return out(JSON.stringify(data))
+    if (text !== undefined) out(text)
+    problems.forEach((problem) => err(problem))
+  }
+  const color = !options.out && Boolean(process.stdout.isTTY)
+  const style = {
+    bold: (s: string) => (color ? `\x1b[1m${s}\x1b[22m` : s),
+    dim: (s: string) => (color ? `\x1b[2m${s}\x1b[22m` : s),
+  }
+
   try {
-    parsed = parse(argv)
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error))
-    return 1
-  }
-  const { values, positionals } = parsed
-  const command = positionals[0] ?? "init"
-
-  if (ACCOUNT_COMMANDS.has(command) && !values.help) {
-    return runAccountCommand(command, positionals, values, options)
-  }
-
-  if (values.version) {
-    console.log(VERSION)
-    return 0
-  }
-  if (values.help || command === "help") {
-    console.log(HELP)
-    return 0
-  }
-  if (values.id && !isProjectId(values.id)) {
-    console.error(
-      `"${values.id}" is not a valid Nuni project ID (expected nuni_ followed by 22 characters).`
-    )
-    return 1
-  }
-  const projectId = values.id ?? generateProjectId()
-
-  if (command === "id") {
-    console.log(projectId)
-    return 0
-  }
-  if (command === "prompt") {
-    console.log(buildAgentPrompt({ projectId }))
-    return 0
-  }
-  if (command !== "init") {
-    console.error(`Unknown command "${command}".\n\n${HELP}`)
-    return 1
-  }
-
-  const cwd = resolve(values.cwd ?? process.cwd())
-  const framework = detectFramework(cwd)
-  const pm = detectPackageManager(cwd)
-  const pkg = packageFor(framework)
-  const install = pkg ? installCommand(pm, pkg) : null
-  const snippet = snippetFor(framework, projectId)
-
-  if (values.json) {
-    console.log(
-      JSON.stringify(
+    const { values, positionals } = parse(argv)
+    const [name, ...args] = positionals
+    if (values.version) {
+      print({ version: VERSION }, VERSION)
+      return 0
+    }
+    if (values.help || name === "help") {
+      const topic = name === "help" ? args[0] : name
+      const commands = topic ? [find(topic)] : COMMANDS
+      print(
         {
-          projectId,
-          framework: framework.name,
-          frameworkId: framework.id,
-          file: framework.file,
-          package: pkg,
-          install,
-          snippet,
+          commands: commands.map((c) => ({
+            name: c.name,
+            usage: usageOf(c),
+            summary: c.summary,
+          })),
         },
-        null,
-        2
+        topic
+          ? `Usage: ${CLI_NPX} ${usageOf(commands[0]!)}\n\n${commands[0]!.summary}`
+          : HELP
       )
-    )
-    return 0
-  }
-
-  console.log(`
-${bold("Nuni")} ${dim(`v${VERSION}`)}
-
-${bold("Project ID")}   ${projectId}
-${dim("Public, safe to commit. Keep using this same ID on every environment.")}
-
-${bold("Detected")}     ${framework.name}${pkg ? ` (${pm})` : ""}
-${install ? `\n${bold("1. Install")}\n   ${install}\n` : ""}
-${bold(`${install ? "2" : "1"}. Add it once, globally`)} ${dim(`(${framework.file})`)}
-
-${snippet
-  .split("\n")
-  .map((line) => `   ${line}`)
-  .join("\n")}
-
-${bold(`${install ? "3" : "2"}. Open the site`)}
-   Start the dev server. A Nuni button appears in the bottom-right corner.
-   Press C, click anything, leave a comment. No account needed.
-
-${bold("Own this site?")} Open the Nuni panel and choose "Claim Nuni" to sign in with GitHub.
-${dim(`Docs: ${DOCS_URL}`)}
-`)
-  return 0
-}
-
-function parse(argv: string[]) {
-  return parseArgs({ args: argv, allowPositionals: true, options: OPTIONS })
-}
-
-type Values = ReturnType<typeof parse>["values"]
-
-async function runAccountCommand(
-  command: string,
-  positionals: string[],
-  values: Values,
-  options: RunOptions
-): Promise<number> {
-  const arg = positionals[1]
-  const ctx: CommandContext = {
-    remote: options.remote ?? createRemote(),
-    version: VERSION,
-    cwd: resolve(values.cwd ?? process.cwd()),
-    project: values.project ?? values.id,
-    json: values.json,
-    out: options.out ?? ((line) => console.log(line)),
-    err: options.err ?? ((line) => console.error(line)),
-    pollMs: options.pollMs,
-    openBrowser: options.openBrowser,
-  }
-  try {
-    switch (command) {
-      case "login":
-        return await login(ctx)
-      case "logout":
-        return await logout(ctx)
-      case "whoami":
-        return await whoami(ctx)
-      case "comments":
-        return await listComments(ctx, values)
-      case "pages":
-        return await listPages(ctx)
-      case "comment":
-        return await showComment(ctx, arg, {
-          saveScreenshot: values["save-screenshot"],
-        })
-      case "reply":
-        return await reply(ctx, arg, positionals[2])
-      case "resolve":
-        return await markResolved(ctx, positionals.slice(1), values.note)
-      case "reopen":
-        return await reopen(ctx, arg)
-      default: {
-        const server = createMcpServer({
-          remote: ctx.remote,
-          version: VERSION,
-          project: ctx.project,
-          cwd: ctx.cwd,
-        })
-        await serveStdio(server)
-        return 0
-      }
+      return 0
     }
+    const cwd = resolve(values.cwd ?? process.cwd())
+    return await find(name ?? DEFAULT_COMMAND).run({
+      ops: createOps({
+        remote: options.remote ?? createRemote(),
+        project: values.project ?? values.id,
+        cwd,
+      }),
+      args,
+      flags: {
+        cwd,
+        status: values.status,
+        page: values.page,
+        limit: values.limit,
+        search: values.search,
+        group: values.group,
+        note: values.note,
+        saveScreenshot: values["save-screenshot"],
+      },
+      print,
+      style,
+      openBrowser: options.openBrowser ?? openInBrowser,
+      pollMs: options.pollMs,
+    })
   } catch (error) {
-    if (
-      error instanceof CommandError ||
-      error instanceof ProjectError ||
-      error instanceof RemoteError
-    ) {
-      const hint =
-        error instanceof RemoteError && error.code === "unauthenticated"
-          ? ` Run \`${cliCommand("login")}\`.`
-          : ""
-      ctx.err(`${error.message.replace(/\.$/, "")}.${hint}`)
-      return 1
-    }
-    throw error
+    if (!(error instanceof NuniError)) throw error
+    const message = describeError(error, LOGIN_HINT)
+    err(
+      json ? JSON.stringify({ error: { code: error.code, message } }) : message
+    )
+    return 1
   }
 }
