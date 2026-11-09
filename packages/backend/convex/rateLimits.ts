@@ -2,7 +2,7 @@ import { HOUR, MINUTE, RateLimiter } from "@convex-dev/rate-limiter"
 
 import { components } from "./_generated/api"
 
-export const rateLimiter = new RateLimiter(components.rateLimiter, {
+export const RATE_LIMITS = {
   commentPerIp: {
     kind: "token bucket",
     rate: 10,
@@ -62,7 +62,9 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     capacity: 20,
   },
   sessionPerUser: { kind: "token bucket", rate: 20, period: HOUR },
-})
+} as const
+
+export const rateLimiter = new RateLimiter(components.rateLimiter, RATE_LIMITS)
 
 /**
  * The key for a per-IP limit. On test deployments (NUNI_ALLOW_TESTING=1)
