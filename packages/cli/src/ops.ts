@@ -2,6 +2,7 @@ import {
   DASHBOARD_ROUTES,
   dashboardUrl,
   generateProjectId,
+  LIMITS,
   type CommentStatus,
   type OwnerComment,
 } from "@nuni/shared"
@@ -266,12 +267,14 @@ export function createOps({ remote, project: flag, cwd }: OpsOptions) {
       status: CommentStatus,
       note?: string
     ): Promise<StatusChange> {
-      const results = await remote.setStatus(
-        session(),
-        [...new Set(ids)],
-        status,
-        note
-      )
+      const unique = [...new Set(ids)]
+      const results = []
+      for (let i = 0; i < unique.length; i += LIMITS.bulkMax) {
+        const batch = unique.slice(i, i + LIMITS.bulkMax)
+        results.push(
+          ...(await remote.setStatus(session(), batch, status, note))
+        )
+      }
       const change: StatusChange = { status, done: [], failed: [] }
       for (const result of results) {
         if (result.ok) change.done.push(result.id)

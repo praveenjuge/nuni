@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
-import type { OwnerComment } from "@nuni/shared"
+import { LIMITS, type OwnerComment } from "@nuni/shared"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { run } from "../src/cli"
@@ -509,6 +509,18 @@ describe("resolve and reopen", () => {
     ).toBe(0)
     expect(remote.calls).toEqual(["resolved jd7abc123,jd7def456 note=Bigger"])
     expect(io.out).toEqual(["Resolved jd7abc123, jd7def456."])
+  })
+
+  it("resolves more ids than one request takes, in batches", async () => {
+    const remote = fakeRemote()
+    const io = cli({ remote })
+    const ids = Array.from({ length: LIMITS.bulkMax + 1 }, (_, i) => `c${i}`)
+    expect(await io.run("resolve", ...ids, "--json")).toBe(0)
+    expect(remote.calls.map((call) => call.split(",").length)).toEqual([
+      LIMITS.bulkMax,
+      1,
+    ])
+    expect(io.json()).toEqual({ resolved: ids, failed: [] })
   })
 
   it("reports the ones that failed, and still resolves the rest", async () => {

@@ -14,6 +14,7 @@ export type Page = ReturnType<typeof createPage>
 export function createPage(ctx: Ctx) {
   const { config } = ctx
   let key = ""
+  let following = false
   let loaded = false
   /** The page's comments, as the live query lists them. */
   let listed: WidgetComment[] = []
@@ -78,7 +79,8 @@ export function createPage(ctx: Ctx) {
   /** Subscribe to the comments of the page the visitor is on now. */
   const follow = () => {
     const next = config.getPageKey(new URL(location.href))
-    if (next === key) return
+    if (following && next === key) return
+    following = true
     key = next
     listed = []
     extra = null
