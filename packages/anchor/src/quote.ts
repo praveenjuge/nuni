@@ -92,12 +92,25 @@ export interface TextMap {
 }
 
 export function textMap(el: Element): TextMap {
+  return readText(el, true)
+}
+
+/**
+ * An element's words as a text comment's quote was taken from them (the
+ * text of `textMap`), for checking whether they hold a quote.
+ */
+export function quoteText(el: Element): string {
+  return readText(el, false).text
+}
+
+function readText(el: Element, positions: boolean): TextMap {
   const map: TextMap = { text: "", nodes: [], node: [], offset: [] }
   if (el.closest(MASK_SELECTOR)) return map
   const chars: string[] = []
   let space = true
   const push = (c: string, node: number, offset: number) => {
     chars.push(c)
+    if (!positions) return
     map.node.push(node)
     map.offset.push(offset)
   }
@@ -171,6 +184,22 @@ export function textOffset(
     return -1
   }
   return lo
+}
+
+/**
+ * The words a range covers, read like `textMap` reads them (so they compare
+ * with a quote's `exact`): a range over two list items reads "One Two",
+ * and a non-breaking space stays one.
+ */
+export function rangeText(range: Range): string {
+  const node = range.commonAncestorContainer
+  const el = node.nodeType === 1 ? (node as Element) : node.parentElement
+  if (!el) return ""
+  const map = textMap(el)
+  const start = textOffset(map, range.startContainer, range.startOffset)
+  const end = textOffset(map, range.endContainer, range.endOffset)
+  if (start < 0 || end < start) return ""
+  return map.text.slice(start, end).replace(/^ +| +$/g, "")
 }
 
 /** A Range over characters [start, end) of the element's text. */

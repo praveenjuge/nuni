@@ -279,6 +279,41 @@ export const quoteScenarios: Scenario[] = [
     expect: "found",
   },
   {
+    name: "quote with a non-breaking space, text edited around it",
+    category: "quote",
+    before: article([
+      INTRO,
+      {
+        text: "Our review bot costs $20&nbsp;per month and pays for itself.",
+        target: true,
+      },
+      PARAS[2]!,
+    ]),
+    after: article([
+      INTRO,
+      PARAS[0]!,
+      {
+        text: "Pricing changed in May: the hosted review bot still costs $20&nbsp;per month, billed yearly, with a free trial.",
+        target: true,
+      },
+      PARAS[2]!,
+    ]),
+    quote: { text: "costs $20\u00a0per month" },
+    expect: "found",
+  },
+  {
+    name: "quote across two list items, list edited",
+    category: "quote",
+    before: doc(
+      `<article><h1>Quick start</h1><ol class="steps"${T}>${STEPS.map((s) => `<li>${s}</li>`).join("")}</ol></article>`
+    ),
+    after: doc(
+      `<article><h1>Quick start</h1><ol class="steps"><li>Sign up.</li><li>Pick a plan.</li></ol><h2>Install</h2><ol class="steps"${T}><li>Check your Node version.</li>${STEPS.map((s) => `<li>${s}</li>`).join("")}</ol></article>`
+    ),
+    quote: { text: "root layout. Deploy and open" },
+    expect: "found",
+  },
+  {
     name: "quote, words deleted",
     category: "quote",
     before: article([INTRO, { text: PARAS[2]!, target: true }, PARAS[3]!]),

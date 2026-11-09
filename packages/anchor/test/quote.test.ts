@@ -5,6 +5,7 @@ import {
   captureArea,
   captureSelection,
   resolveAnchor,
+  stillMatches,
 } from "../src"
 import {
   captureQuote,
@@ -177,6 +178,45 @@ describe("finding a quote again", () => {
     const result = resolveAnchor(anchor)
     expect(result.element?.textContent).toContain("Beta")
     expect(text(result.range)).toBe("with a deadline")
+  })
+})
+
+describe("checking a placed pin", () => {
+  it("keeps a text pin while its words are where its range is", () => {
+    document.body.innerHTML = `<p id="a">It costs $20&nbsp;per month.</p><ol id="b"><li>Add the tag.</li><li>Deploy it.</li></ol>`
+    for (const [id, words] of [
+      ["a", "$20\u00a0per month"],
+      ["b", "tag. Deploy"],
+    ] as const) {
+      const el = document.getElementById(id)!
+      const { anchor } = captureSelection(select(el, words))!
+      const placed = resolveAnchor(anchor)
+      expect(placed.element).toBe(el)
+      expect(stillMatches(anchor, placed)).toBe(true)
+    }
+  })
+
+  it("drops a text pin whose words were removed", () => {
+    document.body.innerHTML = `<p id="a">Ship the docs by Friday.</p>`
+    const p = document.getElementById("a")!
+    const { anchor } = captureSelection(select(p, "by Friday"))!
+    const placed = resolveAnchor(anchor)
+    p.textContent = "Ship the docs."
+    expect(stillMatches(anchor, placed)).toBe(false)
+  })
+
+  it("keeps an element pin until its text changes or it is detached", () => {
+    document.body.innerHTML = `<button id="a">Choose plan</button>`
+    const button = document.getElementById("a")!
+    const anchor = captureAnchor(button)
+    expect(stillMatches(anchor, { element: button })).toBe(true)
+    button.textContent = "Choose a plan"
+    expect(stillMatches(anchor, { element: button })).toBe(true)
+    button.textContent = "Contact sales"
+    expect(stillMatches(anchor, { element: button })).toBe(false)
+    button.textContent = "Choose plan"
+    button.remove()
+    expect(stillMatches(anchor, { element: button })).toBe(false)
   })
 })
 

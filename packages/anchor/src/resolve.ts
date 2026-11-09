@@ -7,7 +7,7 @@ import {
   scopeDocument,
   type ScopeRoot,
 } from "./scope"
-import { findQuote } from "./quote"
+import { findQuote, quoteText, rangeText } from "./quote"
 import {
   attrSelector,
   cssEscape,
@@ -16,7 +16,7 @@ import {
   queryPath,
 } from "./selector"
 import { stableClasses } from "./stable"
-import { elementText, normalizeText, textSimilarity } from "./text"
+import { elementText, textSimilarity } from "./text"
 
 export type Confidence = "exact" | "high" | "low" | "lost"
 
@@ -77,12 +77,10 @@ function contentOf(el: Element, cache: ResolveCache): string {
   return content
 }
 
-/** All of an element's text with whitespace collapsed, for quote checks. */
+/** All of an element's words, read the way quotes are taken from them. */
 function wordsOf(el: Element, cache: ResolveCache): string {
   let words = cache.words.get(el)
-  if (words === undefined) {
-    cache.words.set(el, (words = normalizeText(contentOf(el, cache))))
-  }
+  if (words === undefined) cache.words.set(el, (words = quoteText(el)))
   return words
 }
 
@@ -446,10 +444,7 @@ export function stillMatches(
   const { element, range } = placement
   if (!element?.isConnected) return false
   if (anchor.quote) {
-    return (
-      range !== undefined &&
-      normalizeText(range.toString()) === anchor.quote.exact
-    )
+    return range !== undefined && rangeText(range) === anchor.quote.exact
   }
   const text = elementText(element)
   return (
