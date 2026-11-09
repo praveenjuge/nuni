@@ -8,8 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview --port 5173",
     "typecheck": "tsc",
-    "lint": "eslint .",
-    "smoke:release": "playwright test -c playwright.release.config.ts"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@nuniapp/react": "workspace:*",
@@ -19,8 +18,6 @@
   "devDependencies": {
     "@nuni/eslint-config": "workspace:*",
     "@nuni/tsconfig": "workspace:*",
-    "@playwright/test": "^1.63.0",
-    "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.1.1",

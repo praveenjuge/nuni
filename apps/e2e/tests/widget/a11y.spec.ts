@@ -1,9 +1,7 @@
-import { generateProjectId as projectId } from "@nuni/shared"
 import AxeBuilder from "@axe-core/playwright"
-import { expect, test, type Page } from "@playwright/test"
+import type { Page } from "@playwright/test"
 
-const root = (page: Page) => page.locator("#nuni-root")
-const toolbar = (page: Page) => root(page).locator(".toolbar")
+import { expect, test } from "../../fixtures"
 
 /** Serious or critical axe findings inside the widget. */
 async function widgetViolations(page: Page) {
@@ -25,55 +23,43 @@ async function widgetViolations(page: Page) {
 }
 
 test("keyboard only: pick, post, confirm, tabs and focus return", async ({
-  page,
+  widget,
+  projectId,
 }) => {
-  const project = projectId()
-  await page.goto(`/?project=${project}`)
-  await expect(toolbar(page)).toBeVisible()
+  const { page } = widget
+  await widget.goto("/")
 
   // Start from a focused link: C, then Enter comments on it.
-  const link = page.getByRole("link", { name: "See pricing" })
-  await link.focus()
+  await page.getByRole("link", { name: "See pricing" }).focus()
   await page.keyboard.press("c")
-  await expect(
-    toolbar(page).getByRole("button", { name: "Cancel adding a comment" })
-  ).toHaveAttribute("aria-pressed", "true")
+  await expect(widget.commentButton).toHaveAttribute("aria-pressed", "true")
   await page.keyboard.press("ArrowDown")
-  await expect(root(page).locator(".highlight-label")).toContainText(
-    "See pricing"
-  )
+  await expect(widget.highlightLabel).toContainText("See pricing")
   // Up to the actions row and back to the first link.
   await page.keyboard.press("ArrowUp")
-  await expect(root(page).locator(".highlight-label")).toContainText(
-    "div.hero-actions"
-  )
+  await expect(widget.highlightLabel).toContainText("div.hero-actions")
   await page.keyboard.press("ArrowDown")
   await page.keyboard.press("ArrowRight")
-  await expect(root(page).locator(".highlight-label")).toContainText(
-    "Learn more"
-  )
+  await expect(widget.highlightLabel).toContainText("Learn more")
   await page.keyboard.press("ArrowLeft")
   await page.keyboard.press("Enter")
-  const composer = root(page).locator('[data-card="composer"]')
-  await expect(composer).toBeVisible()
-  await composer.getByRole("textbox", { name: "Your name" }).focus()
-  await expect(
-    composer.getByRole("textbox", { name: "Your name" })
-  ).toBeFocused()
+  await expect(widget.composer).toBeVisible()
+  await widget.nameField.focus()
+  await expect(widget.nameField).toBeFocused()
   await page.keyboard.type("Sam Tester")
   await page.keyboard.press("Tab")
   await page.keyboard.type("Keyboard comment")
   await page.keyboard.press("ControlOrMeta+Enter")
-  await expect(root(page).locator(".toast")).toHaveText("Comment added")
-  await expect(page).toHaveURL(new RegExp(`/\\?project=${project}$`))
+  await expect(widget.toast).toHaveText("Comment added")
+  await expect(page).toHaveURL(new RegExp(`/\\?project=${projectId}$`))
 
   // The panel: focus moves to the selected tab, arrows switch tabs.
-  await toolbar(page).getByRole("button", { name: /open/ }).focus()
+  await widget.panelButton.focus()
   await page.keyboard.press("Enter")
-  const openTab = root(page).getByRole("tab", { name: /Open/ })
+  const openTab = widget.tab(/Open/)
   await expect(openTab).toBeFocused()
   await page.keyboard.press("ArrowRight")
-  const resolvedTab = root(page).getByRole("tab", { name: /Resolved/ })
+  const resolvedTab = widget.tab(/Resolved/)
   await expect(resolvedTab).toBeFocused()
   await expect(resolvedTab).toHaveAttribute("aria-selected", "true")
   await page.keyboard.press("ArrowLeft")
@@ -83,95 +69,47 @@ test("keyboard only: pick, post, confirm, tabs and focus return", async ({
   // asks first, and Escape keeps the comment.
   await page.keyboard.press("Tab")
   await page.keyboard.press("Enter")
-  const thread = root(page).locator('[data-card="thread"]')
-  await expect(thread).toContainText("Keyboard comment")
-  await thread.getByRole("button", { name: "Delete" }).click()
-  const dialog = root(page).getByRole("alertdialog")
-  await expect(dialog).toContainText("Delete this comment?")
-  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused()
+  await expect(widget.thread).toContainText("Keyboard comment")
+  await widget.thread.getByRole("button", { name: "Delete" }).click()
+  await expect(widget.confirm).toContainText("Delete this comment?")
+  const cancel = widget.confirm.getByRole("button", { name: "Cancel" })
+  await expect(cancel).toBeFocused()
   // Tab stays inside the dialog.
   await page.keyboard.press("Tab")
-  await expect(dialog.getByRole("button", { name: "Delete" })).toBeFocused()
+  await expect(
+    widget.confirm.getByRole("button", { name: "Delete" })
+  ).toBeFocused()
   await page.keyboard.press("Tab")
-  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused()
+  await expect(cancel).toBeFocused()
   await page.keyboard.press("Escape")
-  await expect(dialog).toHaveCount(0)
-  await expect(thread).toContainText("Keyboard comment")
-  await expect(thread.getByRole("button", { name: "Delete" })).toBeFocused()
+  await expect(widget.confirm).toHaveCount(0)
+  await expect(widget.thread).toContainText("Keyboard comment")
+  await expect(
+    widget.thread.getByRole("button", { name: "Delete" })
+  ).toBeFocused()
 
   // Closing the thread and the panel returns focus to the toolbar.
   await page.keyboard.press("Escape")
-  await expect(thread).toHaveCount(0)
+  await expect(widget.thread).toHaveCount(0)
   await page.keyboard.press("Escape")
-  await expect(root(page).locator(".panel")).toHaveCount(0)
-  await expect(
-    toolbar(page).getByRole("button", { name: /open/ })
-  ).toBeFocused()
+  await expect(widget.panel).toHaveCount(0)
+  await expect(widget.panelButton).toBeFocused()
 })
 
-test("no serious accessibility issues in the widget", async ({ page }) => {
-  const project = projectId()
-  await page.goto(`/pricing?project=${project}`)
-  await expect(toolbar(page)).toBeVisible()
-  expect(await widgetViolations(page)).toEqual([])
+test("no serious accessibility issues in the widget", async ({ widget }) => {
+  await widget.goto("/pricing")
+  expect(await widgetViolations(widget.page)).toEqual([])
 
-  // The composer, with a comment posted.
-  await toolbar(page).getByRole("button", { name: "Add a comment" }).click()
-  await page.locator(".plan").first().locator(".price").click()
-  const composer = root(page).locator('[data-card="composer"]')
-  await composer.getByPlaceholder("Your name").fill("Sam Tester")
-  await composer.getByPlaceholder("Leave a comment").fill("Check contrast")
-  expect(await widgetViolations(page)).toEqual([])
-  await composer.getByRole("button", { name: "Post" }).click()
-  await expect(root(page).locator(".toast")).toHaveText("Comment added")
+  // The composer, with a comment typed.
+  await widget.startComment(
+    widget.page.locator(".plan").first().locator(".price")
+  )
+  await widget.nameField.fill("Sam Tester")
+  await widget.bodyField.fill("Check contrast")
+  expect(await widgetViolations(widget.page)).toEqual([])
+  await widget.post("Check contrast")
 
   // The panel and a thread.
-  await toolbar(page).getByRole("button", { name: /open/ }).click()
-  await root(page).locator(".panel .item").first().click()
-  await expect(root(page).locator('[data-card="thread"]')).toBeVisible()
-  expect(await widgetViolations(page)).toEqual([])
-})
-
-test("position, color, theme, label, hotkey and locale options", async ({
-  page,
-}) => {
-  const project = projectId()
-  await page.goto(
-    `/?project=${project}&position=top-left&accent=%23facc15&theme=dark&label=Feedback&hotkey=f&locale=de`
-  )
-  await expect(toolbar(page)).toBeVisible()
-  // The toolbar re-renders, so measure it in one step.
-  const box = await root(page).evaluate((host) => {
-    const r = host
-      .shadowRoot!.querySelector(".toolbar")!
-      .getBoundingClientRect()
-    return { x: r.x, y: r.y }
-  })
-  expect(box.x).toBeLessThan(40)
-  expect(box.y).toBeLessThan(40)
-  await expect(toolbar(page)).toContainText("Feedback")
-  await expect(root(page)).toHaveAttribute("data-theme", "dark")
-  const accent = await root(page).evaluate((el) => {
-    const style = getComputedStyle(el)
-    return {
-      accent: style.getPropertyValue("--n-accent").trim(),
-      fg: style.getPropertyValue("--n-accent-fg").trim(),
-      bg: style.getPropertyValue("--n-bg").trim(),
-    }
-  })
-  expect(accent).toEqual({
-    accent: "rgb(250, 204, 21)",
-    fg: "#111111",
-    bg: "#1d1b20",
-  })
-
-  // The hotkey is F now; C does nothing.
-  const add = toolbar(page).locator('[data-focus-key="tb-comment"]')
-  await page.keyboard.press("c")
-  await expect(add).toHaveAttribute("aria-pressed", "false")
-  await page.keyboard.press("f")
-  await expect(add).toHaveAttribute("aria-pressed", "true")
-  await expect(add).toHaveAttribute("title", "Add a comment (F)")
-  await page.keyboard.press("Escape")
-  await expect(add).toHaveAttribute("aria-pressed", "false")
+  await widget.openThread("Check contrast")
+  expect(await widgetViolations(widget.page)).toEqual([])
 })

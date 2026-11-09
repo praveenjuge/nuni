@@ -1,37 +1,37 @@
-import { test, expect } from "../../fixtures"
+import { readdirSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 
-const docsURL = "http://localhost:4321"
-const routes = [
-  "/",
-  "/quickstart",
-  "/install/react",
-  "/install/javascript",
-  "/install/script-tag",
-  "/guides/claiming",
-  "/guides/dashboard",
-  "/guides/agents",
-  "/guides/environments",
-  "/guides/how-pins-work",
-  "/reference/options",
-  "/reference/cli",
-  "/faq",
-  "/privacy",
-]
+import {
+  CAPTURED_ATTRIBUTES,
+  TEST_ID_ATTRIBUTES,
+} from "../../../../packages/anchor/src/stable"
+import { URLS } from "../../env"
+import { expect, test } from "../../fixtures"
+import { Widget } from "../../widget"
+
+/** Every page in apps/docs/docs, by its route. */
+const routes = readdirSync(
+  fileURLToPath(new URL("../../../docs/docs", import.meta.url)),
+  { recursive: true, encoding: "utf8" }
+)
+  .filter((file) => file.endsWith(".mdx"))
+  .map((file) => `/${file.replace(/\.mdx$/, "").replace(/(^|\/)index$/, "")}`)
+  .sort()
 
 for (const route of routes) {
   test(`docs render ${route}`, async ({ page }) => {
-    const response = await page.goto(`${docsURL}${route}`)
+    const response = await page.goto(`${URLS.docs}${route}`)
     expect(response?.status()).toBe(200)
     await expect(page.getByRole("main")).toBeVisible()
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible()
   })
 }
 
-test("crawl internal documentation links without dead ends", async ({
+test("internal documentation links all lead somewhere", async ({
   page,
   request,
 }) => {
-  const pending = new Set(routes.map((route) => `${docsURL}${route}`))
+  const pending = new Set(routes.map((route) => `${URLS.docs}${route}`))
   const visited = new Set<string>()
   while (pending.size) {
     const url = pending.values().next().value!
@@ -47,7 +47,10 @@ test("crawl internal documentation links without dead ends", async ({
       )
     for (const href of links) {
       const target = new URL(href)
-      if (target.origin !== docsURL || target.pathname.startsWith("/dashboard"))
+      if (
+        target.origin !== URLS.docs ||
+        target.pathname.startsWith("/dashboard")
+      )
         continue
       target.hash = ""
       if (visited.has(target.href)) continue
@@ -57,13 +60,23 @@ test("crawl internal documentation links without dead ends", async ({
         pending.add(target.href)
     }
   }
-  expect(visited.size).toBeGreaterThanOrEqual(routes.length)
+})
+
+test("How pins stay put lists every attribute a pin records", async ({
+  page,
+}) => {
+  await page.goto(`${URLS.docs}/guides/how-pins-work`)
+  const main = page.getByRole("main")
+  for (const name of [...TEST_ID_ATTRIBUTES, ...CAPTURED_ATTRIBUTES])
+    await expect(
+      main.locator("code", { hasText: new RegExp(`^${name}$`) }),
+      `${name} is missing`
+    ).not.toHaveCount(0)
 })
 
 test("embedded feedback widget opens on the docs site", async ({ page }) => {
-  await page.goto(docsURL)
-  const toolbar = page.locator("#nuni-root .toolbar")
-  await expect(toolbar).toBeVisible()
-  await toolbar.getByRole("button", { name: /open/ }).click()
-  await expect(page.locator("#nuni-root .panel")).toBeVisible()
+  await page.goto(URLS.docs)
+  // The docs use their own project, not the test's.
+  const widget = new Widget(page, "")
+  await widget.openPanel()
 })

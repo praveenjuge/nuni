@@ -1,35 +1,47 @@
-import { test, expect } from "../../fixtures"
-import { addComment, dashboardURL } from "../../helpers"
+import {
+  DASHBOARD_ROUTES,
+  TOKEN_PREFIX,
+  handoffMessage,
+  type HandoffMessage,
+} from "@nuni/shared"
+
+import { expect, test } from "../../fixtures"
+import { addComment, dashboard } from "../../helpers"
+import { Widget } from "../../widget"
 
 test("widget popup claims with a real owner session and enables owner tools", async ({
-  ownerPage,
   projectId,
+  ownerPage,
 }) => {
-  await addComment(ownerPage, projectId, "Claim popup feedback")
-  await ownerPage
-    .locator("#nuni-root .toolbar")
-    .getByRole("button", { name: /open/ })
-    .click()
-  const popupPromise = ownerPage.waitForEvent("popup")
-  await ownerPage
-    .locator("#nuni-root")
-    .getByRole("button", { name: "Claim Nuni" })
-    .click()
+  const owner = new Widget(ownerPage, projectId)
+  await addComment(owner, "Claim popup feedback")
+  await owner.openPanel()
+
+  // A session handed over by any page but the dashboard is ignored. The
+  // widget's listener was added first, so it has run when this one does.
+  await expect(owner.toast).toHaveCount(0)
+  await owner.page.evaluate(
+    (message: HandoffMessage) =>
+      new Promise<void>((resolve) => {
+        addEventListener("message", () => resolve(), { once: true })
+        postMessage(message, "*")
+      }),
+    handoffMessage("session", projectId, `${TOKEN_PREFIX.session}forged`)
+  )
+  await expect(owner.toast).toHaveCount(0)
+
+  const popupPromise = owner.page.waitForEvent("popup")
+  await owner.panel.getByRole("button", { name: "Claim Nuni" }).click()
   const popup = await popupPromise
-  await expect(popup).toHaveURL(new RegExp(`${dashboardURL}/claim\\?`))
+  await expect(popup).toHaveURL(
+    new RegExp(`^${dashboard(DASHBOARD_ROUTES.claim)}\\?`)
+  )
   expect(new URL(popup.url()).searchParams.get("project")).toBe(projectId)
   await popup.getByRole("button", { name: "Claim and allow" }).click()
-  await expect(ownerPage.locator("#nuni-root .toast")).toHaveText(
-    "You're signed in as the owner"
-  )
-  await ownerPage
-    .locator("#nuni-root .panel")
-    .getByText("Claim popup feedback", { exact: true })
+  await expect(owner.toast).toHaveText("You're signed in as the owner")
+  await owner.item("Claim popup feedback").click()
+  await owner.thread
+    .getByRole("button", { name: "Resolve", exact: true })
     .click()
-  const thread = ownerPage.locator('#nuni-root [data-card="thread"]')
-  await expect(
-    thread.getByRole("button", { name: "Resolve", exact: true })
-  ).toBeVisible()
-  await thread.getByRole("button", { name: "Resolve", exact: true }).click()
-  await expect(ownerPage.locator("#nuni-root .tb-count")).toHaveText("0")
+  await owner.expectOpenCount(0)
 })

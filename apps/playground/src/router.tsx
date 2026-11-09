@@ -14,16 +14,19 @@ export function usePath() {
   return path
 }
 
+/** Links keep the query, where the project and widget options live. */
 export function Link(
   props: AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }
 ) {
+  const href = props.href + location.search
   return (
     <a
       {...props}
+      href={href}
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey || e.button !== 0) return
         e.preventDefault()
-        history.pushState(null, "", props.href)
+        history.pushState(null, "", href)
         window.dispatchEvent(new Event("app:navigate"))
       }}
     />

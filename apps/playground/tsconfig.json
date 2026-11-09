@@ -2,12 +2,7 @@
   "extends": "@nuni/tsconfig/library.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "types": ["vite/client", "node"]
+    "types": ["vite/client"]
   },
-  "include": [
-    "src",
-    "release",
-    "vite.config.ts",
-    "playwright.release.config.ts"
-  ]
+  "include": ["src", "vite.config.ts"]
 }

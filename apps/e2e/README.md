@@ -8,11 +8,13 @@ bunx playwright install chromium
 bun run e2e
 ```
 
-The suite starts WorkOS Emulate (4100), anonymous Convex (3310/3311, so a dev backend on 3210 can keep running), the playground (5173), dashboard (3000), and docs (4321). It signs in through the emulator UI and saves owner sessions in `.auth/`. No production credentials are required. Keep these ports free; use `CHROMIUM_PATH=/path/to/chrome` for an existing Chromium installation.
+The suite starts WorkOS Emulate (4100), anonymous Convex (3310/3311, so a dev backend on 3210 can keep running), the playground (5173), dashboard (3000), and docs (4321). Every port, URL and local credential is in `env.ts`. It signs in through the emulator UI and saves owner sessions in `.auth/`. No production credentials are required. Keep these ports free; use `CHROMIUM_PATH=/path/to/chrome` for an existing Chromium installation.
 
-Test users live in `workos-emulate.config.yaml`. The committed signing key is disposable local test data. Backend source is copied into a fresh ignored `.runtime/` directory per run; deployment selection never reads the developer backend environment or provisions hosted AuthKit. The suite refuses a non-anonymous backend. All test helpers are guarded by `NUNI_ALLOW_TESTING`; they must never be enabled in production.
+Test users live in `workos-emulate.config.yaml`; `scripts/workos-emulate.ts` starts the emulator with them. The committed signing key is disposable local test data. `scripts/setup-convex.ts` copies the backend source into a fresh ignored `.runtime/backend` on each run; deployment selection never reads the developer backend environment or provisions hosted AuthKit. The suite refuses a non-anonymous backend. All test helpers are guarded by `NUNI_ALLOW_TESTING`; they must never be enabled in production.
 
-Use `fixtures.ts` for an authenticated `ownerPage`, a unique `projectId`, and `convexRun`. Widget regression tests retain `testing:seedOwner` for isolated widget sessions. New dashboard, claim, CLI, MCP, and journey specs use real emulator sign-in. The migrated widget CLI regression retains seeded approval to test its original command behavior.
+Write specs with `fixtures.ts`: a unique `projectId` per test, `widget` (the widget on `page` for that project), `newVisitor()` for another browser, `ownerWidget` for a browser holding the project's owner session (seeded with `testing:seedOwner`), and the signed-in dashboard pages `ownerPage` and `secondOwnerPage`. `widget.ts` is the only place that knows the widget's DOM; `helpers.ts` has the dashboard flows (`signIn`, `claimProject`) and `cliSession` for the built CLI and its MCP server.
+
+`tests/release/` checks a published release against production instead (see the root README); it runs only when `NUNI_RELEASE_VERSION` is set.
 
 ## Debug
 

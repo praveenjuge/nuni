@@ -1,74 +1,95 @@
-import { defineConfig } from "@playwright/test"
+import { defineConfig, type PlaywrightTestConfig } from "@playwright/test"
+
+import { DASHBOARD_URL, URLS, WORKOS, backendEnv, portOf } from "./env"
+
+/**
+ * The local suite starts every service. With NUNI_RELEASE_VERSION set, only
+ * the `release` project runs: the published packages against production.
+ */
+const local: PlaywrightTestConfig = {
+  projects: [
+    { name: "setup", testMatch: /auth\.setup\.ts/ },
+    {
+      name: "chromium",
+      testMatch: /tests\/.*\.spec\.ts/,
+      testIgnore: /tests\/release\//,
+      dependencies: ["setup"],
+    },
+  ],
+  webServer: [
+    {
+      command: "bun scripts/workos-emulate.ts",
+      url: `${URLS.workos}/health`,
+      timeout: 60_000,
+    },
+    {
+      command: "bun scripts/setup-convex.ts",
+      url: URLS.convexReady,
+      timeout: 240_000,
+      // Lets the script stop `convex dev` and the backend binary it starts.
+      gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
+    },
+    {
+      command: `bunx vite --host 127.0.0.1 --port ${portOf(URLS.playground)} --strictPort`,
+      cwd: "../playground",
+      url: URLS.playground,
+      env: backendEnv("VITE_"),
+    },
+    {
+      command: `bunx next dev --port ${portOf(URLS.app)}`,
+      cwd: "../dashboard",
+      url: DASHBOARD_URL,
+      timeout: 180_000,
+      env: {
+        ...backendEnv("NEXT_PUBLIC_"),
+        WORKOS_CLIENT_ID: WORKOS.clientId,
+        WORKOS_API_KEY: WORKOS.apiKey,
+        WORKOS_API_HOSTNAME: new URL(URLS.workos).hostname,
+        WORKOS_API_PORT: String(portOf(URLS.workos)),
+        WORKOS_API_HTTPS: "false",
+        WORKOS_COOKIE_PASSWORD: WORKOS.cookiePassword,
+        NEXT_PUBLIC_WORKOS_REDIRECT_URI: `${DASHBOARD_URL}/callback`,
+      },
+    },
+    {
+      command: `bunx blume dev --port ${portOf(URLS.docs)}`,
+      cwd: "../docs",
+      url: URLS.docs,
+      timeout: 120_000,
+      env: backendEnv("PUBLIC_NUNI_"),
+    },
+  ],
+}
+
+const proxy = process.env.HTTPS_PROXY ?? process.env.https_proxy
+const release: PlaywrightTestConfig = {
+  projects: [
+    {
+      name: "release",
+      testMatch: /tests\/release\/.*\.spec\.ts/,
+      timeout: 180_000,
+      use: {
+        // Sandboxes that only allow outbound traffic through a proxy.
+        proxy: proxy
+          ? { server: proxy, bypass: "localhost,127.0.0.1" }
+          : undefined,
+      },
+    },
+  ],
+}
+
 export default defineConfig({
   testDir: ".",
-  testMatch: /tests\/.*\.spec\.ts|auth\.setup\.ts/,
   timeout: 60_000,
   workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],
+  ...(process.env.NUNI_RELEASE_VERSION ? release : local),
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: URLS.playground,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     launchOptions: process.env.CHROMIUM_PATH
       ? { executablePath: process.env.CHROMIUM_PATH }
       : {},
   },
-  projects: [
-    { name: "setup", testMatch: /auth\.setup\.ts/ },
-    {
-      name: "chromium",
-      testIgnore: /auth\.setup\.ts/,
-      dependencies: ["setup"],
-    },
-  ],
-  webServer: [
-    {
-      command:
-        "bunx workos-emulate --interactive --interactive-password --seed workos-emulate.config.yaml --signing-key scripts/workos-test-key.pem",
-      url: "http://localhost:4100/health",
-      timeout: 60_000,
-    },
-    {
-      command: "bun scripts/setup-convex.ts",
-      url: "http://127.0.0.1:4199/ready",
-      timeout: 240_000,
-    },
-    {
-      command: "bun run --cwd ../playground dev -- --host 127.0.0.1",
-      url: "http://127.0.0.1:5173",
-      env: {
-        VITE_CONVEX_URL: "http://127.0.0.1:3310",
-        VITE_CONVEX_SITE_URL: "http://127.0.0.1:3311",
-        VITE_APP_URL: "http://localhost:3000",
-      },
-    },
-    {
-      command: "bun run --cwd ../dashboard dev",
-      url: "http://localhost:3000/dashboard",
-      timeout: 180_000,
-      env: {
-        WORKOS_CLIENT_ID: "client_nuni_local",
-        WORKOS_API_KEY: "sk_test_default",
-        WORKOS_API_HOSTNAME: "localhost",
-        WORKOS_API_PORT: "4100",
-        WORKOS_API_HTTPS: "false",
-        WORKOS_COOKIE_PASSWORD:
-          "nuni-local-cookie-password-at-least-32-characters",
-        NEXT_PUBLIC_WORKOS_REDIRECT_URI:
-          "http://localhost:3000/dashboard/callback",
-        NEXT_PUBLIC_APP_URL: "http://localhost:3000",
-        NEXT_PUBLIC_CONVEX_URL: "http://127.0.0.1:3310",
-      },
-    },
-    {
-      command: "bun run --cwd ../docs dev",
-      url: "http://localhost:4321",
-      timeout: 120_000,
-      env: {
-        PUBLIC_NUNI_CONVEX_URL: "http://127.0.0.1:3310",
-        PUBLIC_NUNI_CONVEX_SITE_URL: "http://127.0.0.1:3311",
-        PUBLIC_NUNI_APP_URL: "http://localhost:3000",
-      },
-    },
-  ],
 })

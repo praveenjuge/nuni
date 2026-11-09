@@ -1,257 +1,142 @@
-import { generateProjectId as projectId } from "@nuni/shared"
-import { expect, test, type Locator, type Page } from "@playwright/test"
+import { expect, test } from "../../fixtures"
+import { choosePlan } from "../../helpers"
+import { near, type Box } from "../../widget"
 
-const root = (page: Page) => page.locator("#nuni-root")
-const composer = (page: Page) => root(page).locator('[data-card="composer"]')
-const thread = (page: Page) => root(page).locator('[data-card="thread"]')
-
-/** Select the words inside an element, as a person dragging over them. */
-async function selectWords(target: Locator, words: string) {
-  await target.evaluate((el, words) => {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      const text = n as Text
-      const at = text.data.indexOf(words)
-      if (at < 0) continue
-      const range = document.createRange()
-      range.setStart(text, at)
-      range.setEnd(text, at + words.length)
-      const selection = getSelection()!
-      selection.removeAllRanges()
-      selection.addRange(range)
-      return
-    }
-    throw new Error(`"${words}" not found`)
-  }, words)
-}
-
-/** Where the words are on screen. */
-async function wordsBoxes(target: Locator, words: string) {
-  return target.evaluate((el, words) => {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      const text = n as Text
-      const at = text.data.indexOf(words)
-      if (at < 0) continue
-      const range = document.createRange()
-      range.setStart(text, at)
-      range.setEnd(text, at + words.length)
-      return Array.from(range.getClientRects(), (r) => ({
-        x: r.x,
-        y: r.y,
-        width: r.width,
-        height: r.height,
-      }))
-    }
-    throw new Error(`"${words}" not found`)
-  }, words)
-}
-
-type Box = { x: number; y: number; width: number; height: number }
-
-/**
- * The widget's overlay boxes, read in one step: marks and areas are redrawn
- * on every layout frame, so a box found a moment ago may already be gone.
- */
-async function boxesOf(page: Page, selector: string): Promise<Box[]> {
-  return root(page).evaluate(
-    (host, selector) =>
-      Array.from(host.shadowRoot!.querySelectorAll(selector), (el) => {
-        const r = el.getBoundingClientRect()
-        return { x: r.x, y: r.y, width: r.width, height: r.height }
-      }),
-    selector
-  )
-}
-
-/** Wait until an overlay box sits where `expected` is. */
-async function expectBox(
-  page: Page,
-  selector: string,
-  expected: Box,
-  slack = 4
-) {
+/** Wait until one of the boxes `read` returns sits where `expected` is. */
+async function expectBox(read: () => Promise<Box[]>, expected: Box, slack = 4) {
   await expect
-    .poll(async () =>
-      (await boxesOf(page, selector)).some((b) => near(b, expected, slack))
-    )
+    .poll(async () => (await read()).some((b) => near(b, expected, slack)))
     .toBe(true)
 }
 
-/** Submit the annotation composer and wait for persisted-comment confirmation. */
-async function post(page: Page, body: string, name?: string) {
-  if (name) await composer(page).getByPlaceholder("Your name").fill(name)
-  await composer(page).getByPlaceholder("Leave a comment").fill(body)
-  await composer(page).getByRole("button", { name: "Post" }).click()
-  await expect(root(page).locator(".toast")).toHaveText("Comment added")
-}
-
-/** Compare every rectangle edge within the pixel tolerance used for moving overlays. */
-function near(a: Box, b: Box, slack = 4) {
-  return (
-    Math.abs(a.x - b.x) <= slack &&
-    Math.abs(a.y - b.y) <= slack &&
-    Math.abs(a.x + a.width - (b.x + b.width)) <= slack &&
-    Math.abs(a.y + a.height - (b.y + b.height)) <= slack
-  )
-}
-
 test("comments on selected text find the same words after a reload", async ({
-  page,
+  widget,
 }) => {
-  const project = projectId()
-  await page.goto(`/?project=${project}`)
-  await expect(root(page).locator(".toolbar")).toBeVisible()
+  const { page } = widget
+  await widget.goto("/")
 
   // Select words: a Comment button shows under them.
   const lead = page.locator(".lead")
-  await selectWords(lead, "ship your product")
-  const button = root(page).getByRole("button", {
-    name: "Comment",
-    exact: true,
-  })
-  await expect(button).toBeVisible()
-  await button.click()
-  await expect(composer(page).locator(".quote")).toHaveText("ship your product")
-  await post(page, `Say what it ships ${Date.now()}`, "Sam Tester")
+  await widget.selectWords(lead, "ship your product")
+  await widget.selectionButton.click()
+  await expect(widget.quote(widget.composer)).toHaveText("ship your product")
+  await widget.post(`Say what it ships ${Date.now()}`, { name: "Sam Tester" })
 
   // The words are marked on the page.
-  const lead1 = await wordsBoxes(lead, "ship your product")
-  await expect(root(page).locator(".mark")).toHaveCount(1)
-  for (const box of lead1) await expectBox(page, ".mark", box)
+  const lead1 = await widget.wordBoxes(lead, "ship your product")
+  const marks = () => widget.markBoxes()
+  await expect.poll(async () => (await marks()).length).toBe(lead1.length)
+  for (const box of lead1) await expectBox(marks, box)
 
   // The same phrase in the second of three cards, commented with C.
   const card = page.locator(".feature").nth(1)
-  await selectWords(card, "your team can focus")
+  await widget.selectWords(card, "your team can focus")
   await page.keyboard.press("c")
-  await expect(composer(page).locator(".quote")).toHaveText(
-    "your team can focus"
-  )
-  await post(page, `Which team? ${Date.now()}`)
+  await expect(widget.quote(widget.composer)).toHaveText("your team can focus")
+  await widget.post(`Which team? ${Date.now()}`)
 
-  await page.reload()
-  await expect(root(page).locator(".pin:not(.pin-draft)")).toHaveCount(2)
-  const cardBoxes = await wordsBoxes(card, "your team can focus")
-  await expect(root(page).locator(".mark")).toHaveCount(
-    lead1.length + cardBoxes.length
-  )
-  for (const box of lead1) await expectBox(page, ".mark", box)
-  for (const box of cardBoxes) await expectBox(page, ".mark", box)
+  await widget.reload()
+  await expect(widget.pins).toHaveCount(2)
+  const cardBoxes = await widget.wordBoxes(card, "your team can focus")
+  await expect
+    .poll(async () => (await marks()).length)
+    .toBe(lead1.length + cardBoxes.length)
+  for (const box of lead1) await expectBox(marks, box)
+  for (const box of cardBoxes) await expectBox(marks, box)
 
   // The thread shows the words.
-  await root(page)
-    .locator(".toolbar")
-    .getByRole("button", { name: /open/ })
-    .click()
-  await root(page).locator(".panel .item", { hasText: "Which team?" }).click()
-  await expect(thread(page).locator(".quote")).toHaveText("your team can focus")
-  await expect(root(page).locator(".mark-active")).toHaveCount(cardBoxes.length)
+  await widget.openThread("Which team?")
+  await expect(widget.quote(widget.thread)).toHaveText("your team can focus")
+  await expect
+    .poll(async () => (await widget.markBoxes({ active: true })).length)
+    .toBe(cardBoxes.length)
 })
 
 test("an area dragged while picking is shown again on its element", async ({
-  page,
+  widget,
+  projectId,
 }) => {
-  const project = projectId()
-  await page.goto(`/?project=${project}`)
-  await root(page)
-    .locator(".toolbar")
-    .getByRole("button", { name: "Add a comment" })
-    .click()
+  const { page } = widget
+  await widget.goto("/")
+  await widget.commentButton.click()
 
-  const hero = page.locator(".hero")
-  const box = (await hero.boundingBox())!
+  const box = (await page.locator(".hero").boundingBox())!
   const from = { x: box.x + box.width * 0.2, y: box.y + box.height * 0.3 }
   const to = { x: box.x + box.width * 0.6, y: box.y + box.height * 0.7 }
   await page.mouse.move(from.x, from.y)
   await page.mouse.down()
   await page.mouse.move(from.x + 20, from.y + 20, { steps: 2 })
   await page.mouse.move(to.x, to.y, { steps: 4 })
-  await expect(root(page).locator(".drag-box")).toBeVisible()
+  await expect
+    .poll(async () => (await widget.areaBoxes({ dragging: true })).length)
+    .toBe(1)
   await page.mouse.up()
-  await expect(composer(page)).toBeVisible()
+  await expect(widget.composer).toBeVisible()
   // The page's links and buttons under the drag were not clicked.
-  await expect(page).toHaveURL(new RegExp(`/\\?project=${project}$`))
+  await expect(page).toHaveURL(new RegExp(`/\\?project=${projectId}$`))
   const expected = {
     x: from.x,
     y: from.y,
     width: to.x - from.x,
     height: to.y - from.y,
   }
-  await expectBox(page, ".area", expected, 3)
-  await post(page, `This whole block ${Date.now()}`, "Sam Tester")
+  const areas = () => widget.areaBoxes()
+  await expectBox(areas, expected, 3)
+  await widget.post(`This whole block ${Date.now()}`, { name: "Sam Tester" })
 
-  await page.reload()
-  await expect(root(page).locator(".pin:not(.pin-draft)")).toHaveCount(1)
-  await root(page).locator(".pin:not(.pin-draft)").click()
-  await expect(thread(page)).toBeVisible()
-  await expectBox(page, ".area", expected, 3)
+  await widget.reload()
+  await expect(widget.pins).toHaveCount(1)
+  await widget.pins.click()
+  await expect(widget.thread).toBeVisible()
+  await expectBox(areas, expected, 3)
 })
 
 test("suggest new words for selected text or a button, then edit them", async ({
-  page,
+  widget,
 }) => {
-  const project = projectId()
-  await page.goto(`/?project=${project}`)
-  await expect(root(page).locator(".toolbar")).toBeVisible()
+  const { page } = widget
+  await widget.goto("/")
 
   // Selected words: the new words alone are enough to post.
-  await selectWords(page.locator(".lead"), "ship your product")
-  await root(page).getByRole("button", { name: "Comment", exact: true }).click()
-  await composer(page).getByPlaceholder("Your name").fill("Sam Tester")
-  await composer(page).getByRole("button", { name: "Suggest an edit" }).click()
-  const newText = composer(page).getByRole("textbox", { name: "New text" })
-  await expect(newText).toHaveValue("ship your product")
-  await expect(newText).toBeFocused()
-  const postButton = composer(page).getByRole("button", { name: "Post" })
+  await widget.selectWords(page.locator(".lead"), "ship your product")
+  await widget.selectionButton.click()
+  await widget.nameField.fill("Sam Tester")
+  const suggest = widget.composer.getByRole("button", {
+    name: "Suggest an edit",
+  })
+  await suggest.click()
+  await expect(widget.newTextField).toHaveValue("ship your product")
+  await expect(widget.newTextField).toBeFocused()
+  const postButton = widget.composer.getByRole("button", { name: "Post" })
   await expect(postButton).toBeDisabled()
-  await newText.fill("launch faster")
+  await widget.newTextField.fill("launch faster")
   await postButton.click()
-  await expect(root(page).locator(".toast")).toHaveText("Comment added")
+  await expect(widget.toast).toHaveText("Comment added")
 
-  await root(page).locator(".pin:not(.pin-draft)").click()
-  const edit = thread(page).locator(".suggest")
-  await expect(edit.locator("del")).toHaveText("ship your product")
-  await expect(edit.locator("ins")).toHaveText("launch faster")
-  await expect(thread(page).locator(".comment-body")).toHaveCount(0)
+  await widget.pins.click()
+  const edit = widget.suggestion(widget.thread)
+  await expect(edit.before).toHaveText("ship your product")
+  await expect(edit.after).toHaveText("launch faster")
+  await expect(widget.threadBody).toHaveCount(0)
 
   // The author can change the new words.
-  await thread(page).getByRole("button", { name: "Edit" }).click()
-  await thread(page)
-    .getByRole("textbox", { name: "New text" })
-    .fill("ship it faster")
-  await thread(page).getByRole("button", { name: "Save" }).click()
-  await expect(edit.locator("ins")).toHaveText("ship it faster")
+  await widget.thread.getByRole("button", { name: "Edit" }).click()
+  await widget.newTextField.fill("ship it faster")
+  await widget.thread.getByRole("button", { name: "Save" }).click()
+  await expect(edit.after).toHaveText("ship it faster")
 
   // A button's whole text, with a note.
-  await page.goto(`/pricing?project=${project}`)
-  await root(page)
-    .locator(".toolbar")
-    .getByRole("button", { name: "Add a comment" })
-    .click()
-  await page
-    .locator(".plan")
-    .first()
-    .getByRole("button", { name: "Choose plan" })
-    .click()
-  await composer(page).getByRole("button", { name: "Suggest an edit" }).click()
-  await expect(
-    composer(page).getByRole("textbox", { name: "New text" })
-  ).toHaveValue("Choose plan")
-  await composer(page)
-    .getByRole("textbox", { name: "New text" })
-    .fill("Pick this plan")
-  await composer(page).getByPlaceholder("Add a note (optional)").fill("Clearer")
-  await composer(page).getByRole("button", { name: "Post" }).click()
-  await expect(root(page).locator(".toast")).toHaveText("Comment added")
+  await widget.goto("/pricing")
+  await widget.startComment(choosePlan(page))
+  await suggest.click()
+  await expect(widget.newTextField).toHaveValue("Choose plan")
+  await widget.newTextField.fill("Pick this plan")
+  await widget.post("Clearer")
 
   // Both show in the panel as old → new, after a reload.
-  await page.reload()
-  await root(page)
-    .locator(".toolbar")
-    .getByRole("button", { name: /open/ })
-    .click()
-  const item = root(page).locator(".panel .item", { hasText: "Clearer" })
-  await expect(item.locator(".item-suggest")).toHaveText(
+  await widget.reload()
+  await widget.openPanel()
+  await expect(widget.itemSuggestion(widget.item("Clearer"))).toHaveText(
     "Choose plan → Pick this plan"
   )
 })
