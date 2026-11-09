@@ -1,0 +1,165 @@
+import { LIMITS, randomBase58, TOKEN_PREFIX } from "@nuni/shared"
+
+import { internal } from "./_generated/api"
+import type { Doc, Id } from "./_generated/dataModel"
+import { internalMutation, type MutationCtx } from "./_generated/server"
+import { clampString, fail, parseOrigin, sha256Hex, type Ctx } from "./lib"
+import { SERVER_LIMITS } from "./limits"
+import { rateLimiter } from "./rateLimits"
+
+/**
+ * Every bearer token Nuni hands out, by the table that keeps its hash. The
+ * raw token is returned once; only its hash is stored. All of them expire,
+ * and the daily cleanup deletes them.
+ */
+const TOKENS = {
+  widgetSessions: { prefix: TOKEN_PREFIX.session, length: 40 },
+  commenterSessions: { prefix: TOKEN_PREFIX.commenter, length: 40 },
+  transfers: { prefix: TOKEN_PREFIX.transfer, length: 32 },
+  cliLogins: { prefix: TOKEN_PREFIX.device, length: 40 },
+} as const
+
+type TokenTable = keyof typeof TOKENS
+
+export async function mintToken(table: TokenTable) {
+  const { prefix, length } = TOKENS[table]
+  const token = `${prefix}${randomBase58(length)}`
+  return { token, hash: await sha256Hex(token) }
+}
+
+/** The stored hash to look a token up by, or null when it can't be ours. */
+export async function hashOf(
+  table: TokenTable,
+  token: string
+): Promise<string | null> {
+  if (
+    !token.startsWith(TOKENS[table].prefix) ||
+    token.length > SERVER_LIMITS.tokenMaxLength
+  ) {
+    return null
+  }
+  return sha256Hex(token)
+}
+
+type HashedTable = Exclude<TokenTable, "cliLogins">
+
+/** The row of a token that is ours and hasn't expired. */
+export async function findByToken<T extends HashedTable>(
+  ctx: Ctx,
+  table: T,
+  token: string
+): Promise<Doc<T> | null> {
+  const tokenHash = await hashOf(table, token)
+  if (!tokenHash) return null
+  const row = (await ctx.db
+    .query(table as HashedTable)
+    .withIndex("by_tokenHash", (q) => q.eq("tokenHash", tokenHash))
+    .unique()) as Doc<T> | null
+  return row && row.expiresAt > Date.now() ? row : null
+}
+
+/**
+ * Owner sessions (the widget's owner tools, or `nuni login` for the CLI and
+ * MCP server) and commenter sign-ins.
+ */
+const SESSIONS = {
+  owner: { table: "widgetSessions", ttlMs: LIMITS.sessionTtlMs },
+  cli: { table: "widgetSessions", ttlMs: LIMITS.cliSessionTtlMs },
+  commenter: { table: "commenterSessions", ttlMs: LIMITS.sessionTtlMs },
+} as const
+
+type SessionKind = keyof typeof SESSIONS
+
+export async function issueSession(
+  ctx: MutationCtx,
+  kind: SessionKind,
+  fields: {
+    userId: Id<"users">
+    projectId: Id<"projects">
+    origin: string
+    userAgent?: string
+  }
+): Promise<{ token: string; expiresAt: number }> {
+  const { table, ttlMs } = SESSIONS[kind]
+  const { token, hash } = await mintToken(table)
+  const expiresAt = Date.now() + ttlMs
+  const row = { tokenHash: hash, expiresAt, ...fields }
+  if (table === "commenterSessions") {
+    await ctx.db.insert(table, row)
+  } else {
+    await ctx.db.insert(table, {
+      ...row,
+      kind: kind === "cli" ? "cli" : "widget",
+      userAgent:
+        fields.userAgent &&
+        clampString(fields.userAgent, SERVER_LIMITS.userAgentMaxLength),
+    })
+  }
+  return { token, expiresAt }
+}
+
+const UNKNOWN_ORIGIN = {
+  owner:
+    "This origin is not registered for the project. Add it from the dashboard first.",
+  commenter: "Nuni isn't set up on this site",
+}
+
+/**
+ * A session the dashboard hands to the widget on one of the project's sites.
+ * The caller has checked who may have it.
+ */
+export async function createSiteSession(
+  ctx: MutationCtx,
+  kind: "owner" | "commenter",
+  {
+    userId,
+    project,
+    origin,
+    userAgent,
+  }: {
+    userId: Id<"users">
+    project: Doc<"projects">
+    origin: string
+    userAgent?: string
+  }
+) {
+  // The token is postMessage'd to this origin verbatim, so it must be one
+  // of the project's registered origins - otherwise a crafted link could
+  // deliver it to any host.
+  const cleanOrigin = parseOrigin(origin)
+  if (!project.origins.includes(cleanOrigin)) {
+    fail("unknown_origin", UNKNOWN_ORIGIN[kind])
+  }
+  const { ok } = await rateLimiter.limit(ctx, "sessionPerUser", {
+    key: userId,
+  })
+  if (!ok) fail("rate_limited", "Too many sign-ins, try again later")
+  return issueSession(ctx, kind, {
+    userId,
+    projectId: project._id,
+    origin: cleanOrigin,
+    userAgent,
+  })
+}
+
+/** Daily cron: delete expired tokens, continuing until none are left. */
+export const cleanupExpired = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    let deleted = 0
+    let more = false
+    for (const table of Object.keys(TOKENS) as TokenTable[]) {
+      const expired = await ctx.db
+        .query(table)
+        .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
+        .take(SERVER_LIMITS.cleanupBatch)
+      for (const row of expired) await ctx.db.delete(row._id)
+      deleted += expired.length
+      more ||= expired.length === SERVER_LIMITS.cleanupBatch
+    }
+    if (more) {
+      await ctx.scheduler.runAfter(0, internal.tokens.cleanupExpired, {})
+    }
+    return deleted
+  },
+})

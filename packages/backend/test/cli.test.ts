@@ -1,16 +1,21 @@
-import { generateProjectId } from "@nuni/shared"
-import { describe, expect, it } from "vitest"
+import { generateProjectId, LIMITS } from "@nuni/shared"
+import { describe, expect, it, vi } from "vitest"
 
 import { api, internal } from "../convex/_generated/api"
-import { addComment, setup, signIn, type T } from "./helpers"
+import { SERVER_LIMITS } from "../convex/limits"
+import { RATE_LIMITS } from "../convex/rateLimits"
+import {
+  addComment,
+  ownedProject,
+  ownerToken,
+  postJson,
+  setup,
+  signIn,
+  type T,
+} from "./helpers"
 
-function post(t: T, path: string, body: unknown, ip = "9.9.9.9") {
-  return t.fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Real-IP": ip },
-    body: JSON.stringify(body),
-  })
-}
+const post = (t: T, path: string, body: unknown) =>
+  postJson(t, path, body, "9.9.9.9")
 
 async function startLogin(t: T, publicId: string) {
   const res = await post(t, "/cli/login/start", {
@@ -27,10 +32,7 @@ const poll = (t: T, deviceSecret: string) =>
 describe("nuni login (device code)", () => {
   it("signs the owner in after they approve the matching code", async () => {
     const t = setup()
-    const publicId = generateProjectId()
-    const id = await addComment(t, publicId)
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
+    const { publicId, alice, id } = await ownedProject(t)
 
     const { deviceSecret, userCode } = await startLogin(t, publicId)
     expect(userCode).toMatch(/^[A-Z]{4}-[A-Z]{4}$/)
@@ -71,17 +73,6 @@ describe("nuni login (device code)", () => {
     expect(listed.comments[0]).toHaveProperty("userAgent")
     expect(listed.cursor).toBeNull()
 
-    await t.mutation(api.comments.resolve, { id, sessionToken: token })
-    expect(
-      (
-        await t.query(api.comments.listForAgent, {
-          publicId,
-          sessionToken: token,
-          status: "resolved",
-        })
-      ).comments
-    ).toHaveLength(1)
-
     // It shows up as a CLI session and can be revoked like any other.
     const sessions = await alice.query(api.sessions.listMine, { publicId })
     expect(sessions).toEqual([
@@ -112,11 +103,8 @@ describe("nuni login (device code)", () => {
 
   it("refuses someone else's project, denials and unknown projects", async () => {
     const t = setup()
-    const publicId = generateProjectId()
-    await addComment(t, publicId)
-    const alice = await signIn(t, "user_alice", "Alice")
+    const { publicId, alice } = await ownedProject(t)
     const bob = await signIn(t, "user_bob", "Bob")
-    await alice.mutation(api.projects.claim, { publicId })
 
     const first = await startLogin(t, publicId)
     expect(
@@ -140,64 +128,191 @@ describe("nuni login (device code)", () => {
   })
 
   it("expires codes nobody approves and cleans them up", async () => {
-    const t = setup()
-    const publicId = generateProjectId()
-    await addComment(t, publicId)
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
-    const { deviceSecret, userCode } = await startLogin(t, publicId)
-    await startLogin(t, publicId)
-    await t.run(async (ctx) => {
-      for (const login of await ctx.db.query("cliLogins").collect()) {
-        await ctx.db.patch(login._id, { expiresAt: Date.now() - 1 })
-      }
-    })
-    expect(await alice.query(api.cliAuth.pending, { userCode })).toEqual({
-      state: "expired",
-    })
-    await expect(
-      alice.mutation(api.cliAuth.approve, { userCode })
-    ).rejects.toThrow(/expired/)
-    expect((await poll(t, deviceSecret)).status).toBe(410)
-    expect(await t.mutation(internal.cliAuth.cleanupExpired, {})).toBe(1)
-    expect(
-      await t.run((ctx) => ctx.db.query("cliLogins").collect())
-    ).toHaveLength(0)
+    vi.useFakeTimers()
+    try {
+      const t = setup()
+      const { publicId, alice } = await ownedProject(t)
+      const { deviceSecret, userCode } = await startLogin(t, publicId)
+      await startLogin(t, publicId)
+      vi.advanceTimersByTime(SERVER_LIMITS.cliLoginTtlMs + 1)
+
+      expect(await alice.query(api.cliAuth.pending, { userCode })).toEqual({
+        state: "expired",
+      })
+      await expect(
+        alice.mutation(api.cliAuth.approve, { userCode })
+      ).rejects.toThrow(/expired/)
+      expect((await poll(t, deviceSecret)).status).toBe(410)
+      await t.mutation(internal.tokens.cleanupExpired, {})
+      expect(
+        await t.run((ctx) => ctx.db.query("cliLogins").collect())
+      ).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("rate limits new logins per IP", async () => {
     const t = setup()
     const publicId = generateProjectId()
     await addComment(t, publicId)
+    const allowed = RATE_LIMITS.cliLoginPerIp.rate
     const statuses: number[] = []
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i <= allowed; i++) {
       statuses.push((await post(t, "/cli/login/start", { publicId })).status)
     }
-    expect(statuses.filter((s) => s === 201)).toHaveLength(10)
+    expect(statuses.filter((s) => s === 201)).toHaveLength(allowed)
     expect(statuses.at(-1)).toBe(429)
   })
+})
 
-  it("rejects a widget token for another project", async () => {
+describe("agent functions", () => {
+  async function agent(t: T) {
+    const owned = await ownedProject(t, ["/b", "/a", "/b"])
+    return { ...owned, token: await ownerToken(owned.alice, owned.publicId) }
+  }
+
+  it("all answer `unauthenticated` for a token that isn't this project's owner session", async () => {
     const t = setup()
-    const mine = generateProjectId()
-    const theirs = generateProjectId()
-    await addComment(t, mine)
-    await addComment(t, theirs)
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId: mine })
-    const { token } = await alice.mutation(api.sessions.create, {
-      publicId: mine,
-      origin: "http://localhost:3000",
-    })
-    await expect(
-      t.query(api.comments.listForAgent, {
-        publicId: theirs,
-        sessionToken: token,
+    const { publicId, id, token } = await agent(t)
+    const theirs = await ownedProject(t)
+    for (const sessionToken of ["nope", "nuni_s_nope", token]) {
+      const args = { publicId: theirs.publicId, sessionToken }
+      const calls = [
+        t.query(api.comments.listForAgent, args),
+        t.query(api.comments.pagesForAgent, args),
+        t.query(api.comments.getForAgent, { ...args, id: theirs.id }),
+        t.mutation(api.comments.setStatusForAgent, {
+          ...args,
+          ids: [theirs.id],
+          status: "resolved",
+        }),
+        t.mutation(api.comments.resolve, { id: theirs.id, sessionToken }),
+        t.mutation(api.replies.replyAsOwner, {
+          ...args,
+          commentId: theirs.id,
+          body: "Hi",
+        }),
+      ]
+      for (const call of calls) {
+        await expect(call).rejects.toThrow(/Not signed in to this project/)
+      }
+    }
+    // The widget's owner view stays quiet instead.
+    expect(
+      await t.query(api.comments.getForOwner, {
+        publicId,
+        id,
+        sessionToken: "nuni_s_nope",
       })
-    ).rejects.toThrow(/Not signed in/)
+    ).toBeNull()
   })
 
-  it("searches comments and lists pages for the agent", async () => {
+  it("resolves several comments, each with the note, and reports each id", async () => {
+    const t = setup()
+    const { publicId, ids, token } = await agent(t)
+    const [a, b, c] = ids
+    const other = await addComment(t, generateProjectId())
+
+    const results = await t.mutation(api.comments.setStatusForAgent, {
+      publicId,
+      sessionToken: token,
+      ids: [a!, "nope", b!, other],
+      status: "resolved",
+      note: "  Fixed in #12  ",
+    })
+    expect(results).toEqual([
+      { id: a, ok: true, changed: true },
+      {
+        id: "nope",
+        ok: false,
+        error: expect.objectContaining({ code: "not_found" }),
+      },
+      { id: b, ok: true, changed: true },
+      {
+        id: other,
+        ok: false,
+        error: expect.objectContaining({ code: "not_found" }),
+      },
+    ])
+    const thread = await t.query(api.comments.getForAgent, {
+      publicId,
+      sessionToken: token,
+      id: a!,
+    })
+    expect(thread).toMatchObject({ status: "resolved" })
+    expect(thread?.replies).toEqual([
+      expect.objectContaining({ body: "Fixed in #12", isOwner: true }),
+    ])
+    expect(
+      await t.query(api.comments.pagesForAgent, {
+        publicId,
+        sessionToken: token,
+      })
+    ).toEqual([{ path: "/b", openCount: 1 }])
+
+    // Reopening without a note posts nothing; one already open is unchanged.
+    expect(
+      await t.mutation(api.comments.setStatusForAgent, {
+        publicId,
+        sessionToken: token,
+        ids: [a!, c!],
+        status: "open",
+      })
+    ).toEqual([
+      { id: a, ok: true, changed: true },
+      { id: c, ok: true, changed: false },
+    ])
+    expect(
+      await t.query(api.comments.getForAgent, {
+        publicId,
+        sessionToken: token,
+        id: "nope",
+      })
+    ).toBeNull()
+  })
+
+  it("leaves a comment as it was when its note can't be posted", async () => {
+    const t = setup()
+    const { publicId, ids, token } = await agent(t)
+    const [full, fine] = ids
+    for (let i = 0; i < SERVER_LIMITS.repliesPerComment; i++) {
+      await t.mutation(api.replies.replyAsOwner, {
+        publicId,
+        commentId: full!,
+        body: `Reply ${i}`,
+        sessionToken: token,
+      })
+    }
+    const results = await t.mutation(api.comments.setStatusForAgent, {
+      publicId,
+      sessionToken: token,
+      ids: [full!, fine!],
+      status: "resolved",
+      note: "Done",
+    })
+    expect(results.map((r) => (r.ok ? "ok" : r.error.code))).toEqual([
+      "cap_reached",
+      "ok",
+    ])
+    const comment = await t.query(api.comments.getForAgent, {
+      publicId,
+      sessionToken: token,
+      id: full!,
+    })
+    expect(comment?.status).toBe("open")
+
+    await expect(
+      t.mutation(api.comments.setStatusForAgent, {
+        publicId,
+        sessionToken: token,
+        ids: Array.from({ length: LIMITS.bulkMax + 1 }, () => fine!),
+        status: "resolved",
+      })
+    ).rejects.toThrow(/up to/)
+  })
+
+  it("searches comments and lists pages", async () => {
     const t = setup()
     const publicId = generateProjectId()
     const typo = await addComment(t, publicId, { body: "Typo in the heading" })
@@ -205,10 +320,7 @@ describe("nuni login (device code)", () => {
     await addComment(t, publicId, { path: "/", body: "Another typo here" })
     const alice = await signIn(t, "user_alice", "Alice")
     await alice.mutation(api.projects.claim, { publicId })
-    const { token } = await alice.mutation(api.sessions.create, {
-      publicId,
-      origin: "http://localhost:3000",
-    })
+    const token = await ownerToken(alice, publicId)
 
     const found = await t.query(api.comments.listForAgent, {
       publicId,
@@ -236,8 +348,5 @@ describe("nuni login (device code)", () => {
       { path: "/pricing", openCount: 2 },
       { path: "/", openCount: 1 },
     ])
-    await expect(
-      t.query(api.comments.pagesForAgent, { publicId, sessionToken: "nope" })
-    ).rejects.toThrow(/Not signed in/)
   })
 })

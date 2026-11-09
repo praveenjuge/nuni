@@ -58,7 +58,10 @@ export default defineSchema({
      * marked up). Public, like the comment. Claimed projects only.
      */
     images: v.optional(v.array(v.id("_storage"))),
-    /** Body plus author name, for dashboard search. */
+    /**
+     * Author name, body and suggested text, for dashboard search. Optional,
+     * like the two counts below, only because older rows may lack them.
+     */
     searchText: v.optional(v.string()),
     createdAt: v.number(),
     editedAt: v.optional(v.number()),
@@ -71,7 +74,7 @@ export default defineSchema({
      * as one finds it again.
      */
     pinLostAt: v.optional(v.number()),
-    /** Replies in the thread, kept in sync by replies.ts. */
+    /** Replies in the thread. */
     replyCount: v.optional(v.number()),
     /** Reactions on the comment and its replies, for the per-thread cap. */
     reactionCount: v.optional(v.number()),
@@ -106,7 +109,6 @@ export default defineSchema({
     editedAt: v.optional(v.number()),
   })
     .index("by_comment", ["commentId", "createdAt"])
-    .index("by_project", ["projectId"])
     .index("by_project_author", ["projectId", "authorKeyHash"]),
 
   /** One emoji from one author on a comment or one of its replies. */
@@ -120,7 +122,6 @@ export default defineSchema({
   })
     .index("by_comment", ["commentId"])
     .index("by_target_author_emoji", ["targetId", "authorKeyHash", "emoji"])
-    .index("by_project", ["projectId"])
     .index("by_project_author", ["projectId", "authorKeyHash"]),
 
   /** Open comment count per page, so the widget can list other pages. */
@@ -136,12 +137,15 @@ export default defineSchema({
     tokenHash: v.string(),
     userId: v.id("users"),
     projectId: v.id("projects"),
-    /** "cli" for `nuni login` (CLI and MCP), otherwise the widget. */
+    /**
+     * "cli" for `nuni login` (CLI and MCP), otherwise the widget. Always
+     * written; sessions from before it was may lack it, and are the widget's.
+     */
     kind: v.optional(v.union(v.literal("widget"), v.literal("cli"))),
+    /** The site the widget session was approved on; "cli" for the CLI. */
     origin: v.string(),
     userAgent: v.optional(v.string()),
     expiresAt: v.number(),
-    lastUsedAt: v.optional(v.number()),
   })
     .index("by_tokenHash", ["tokenHash"])
     .index("by_project", ["projectId"])
@@ -203,6 +207,7 @@ export default defineSchema({
     .index("by_project", ["projectId"])
     .index("by_expires", ["expiresAt"]),
 
+  /** Who claimed or took over which project. An audit log: never read. */
   claims: defineTable({
     projectId: v.id("projects"),
     userId: v.id("users"),

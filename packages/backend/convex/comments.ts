@@ -1,23 +1,4 @@
-import {
-  IMAGE_TYPES_TEXT,
-  isImageType,
-  LIMITS,
-  stripHtmlUrlQueries,
-  stripUrlQueries,
-  withoutQuery,
-  type Anchor,
-  type AnchorAncestor,
-  type AnchorQuote,
-  type CommentContext,
-  type CommentStatus,
-  type OwnerComment,
-  type Rect,
-  type Resolution,
-  type TextSuggestion,
-  type UploadKind,
-  type WidgetAuthor,
-  type WidgetComment,
-} from "@nuni/shared"
+import { LIMITS, type CommentStatus, type ErrorData } from "@nuni/shared"
 import {
   anchorValidator,
   contextValidator,
@@ -31,7 +12,6 @@ import {
 import { paginationOptsValidator } from "convex/server"
 import { v } from "convex/values"
 
-import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import {
   internalMutation,
@@ -40,177 +20,52 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server"
+import { requireUser } from "./accounts"
 import {
-  actingOwner,
   authorLookup,
-  bumpPageOpen,
+  findAuthor,
+  requireOwnRow,
+  widgetAuthor,
+} from "./authors"
+import {
+  cleanAnchor,
+  cleanCommentBody,
+  cleanContext,
+  cleanPage,
+  cleanSuggestion,
+  pageKey,
+} from "./commentInput"
+import {
+  deleteComments,
+  editComment,
+  insertComment,
+  insertOwnerReply,
+  setStatus,
+  threadIsFull,
+} from "./lifecycle"
+import {
   clampString,
   cleanBody,
-  commentFiles,
   cleanName,
-  ensureProject,
   fail,
-  imageUrls,
-  parseOrigin,
+  findComment,
   projectByPublicId,
-  requireOwner,
-  requireUser,
   rowById,
-  currentUser,
-  widgetAuthor,
-  type AuthorLookup,
 } from "./lib"
 import { SERVER_LIMITS } from "./limits"
+import {
+  dashboardProject,
+  ensureProject,
+  ownerOf,
+  requireOwner,
+} from "./ownership"
 import { ipKey, rateLimiter } from "./rateLimits"
-import { deleteThread, repliesFor } from "./replies"
-
-async function toPublic(
-  c: Doc<"comments">,
-  author: AuthorLookup
-): Promise<WidgetComment> {
-  return {
-    _id: c._id,
-    _creationTime: c._creationTime,
-    status: c.status,
-    body: c.body,
-    suggestion: c.suggestion,
-    authorKeyHash: c.authorKeyHash,
-    // Public listings share comments across origins by path, so never expose
-    // another environment's full URL (its query string may be sensitive).
-    page: { origin: c.page.origin, path: c.page.path, title: c.page.title },
-    anchor: c.anchor,
-    viewport: c.viewport,
-    createdAt: c.createdAt,
-    editedAt: c.editedAt,
-    resolvedAt: c.resolvedAt,
-    resolution: c.resolution,
-    imageCount: c.images?.length ?? 0,
-    pinLost: c.pinLostAt !== undefined,
-    replyCount: c.replyCount ?? 0,
-    ...(await author(c)),
-  }
-}
-
-/** Full shape for the owner: page URL, user agent and captured context. */
-async function toOwner(
-  ctx: QueryCtx,
-  c: Doc<"comments">,
-  author: AuthorLookup = authorLookup(ctx)
-): Promise<OwnerComment> {
-  return {
-    ...(await toPublic(c, author)),
-    page: c.page,
-    pinLostAt: c.pinLostAt,
-    userAgent: c.userAgent,
-    context: c.context,
-    screenshotUrl: c.screenshotId
-      ? await ctx.storage.getUrl(c.screenshotId)
-      : null,
-    imageUrls: await imageUrls(ctx, c),
-    replies: c.replyCount ? await repliesFor(ctx, c._id, author) : [],
-  }
-}
+import { toOwner, toPublic } from "./views"
 
 /**
- * Clamp everything the commenter's browser sent, entry by entry. Query
- * strings and hashes are removed here too, not only by the widget, since
- * anyone can call the endpoint directly.
+ * The comment functions clients call by name (`comments.<name>`), so they
+ * stay in this module. Published widgets and CLIs call the public ones.
  */
-function cleanContext(context: CommentContext | undefined) {
-  if (!context) return undefined
-  const max = LIMITS.contextEntryMax
-  const text = (value: string) =>
-    clampString(value, LIMITS.contextMessageMaxLength)
-  const out: CommentContext = {}
-  if (context.console?.length) {
-    out.console = context.console.slice(-max).map((e) => ({
-      level: e.level,
-      message: text(stripUrlQueries(e.message)),
-      at: e.at,
-    }))
-  }
-  if (context.network?.length) {
-    out.network = context.network.slice(-max).map((e) => ({
-      method: clampString(
-        e.method.toUpperCase(),
-        SERVER_LIMITS.methodMaxLength
-      ),
-      url: text(withoutQuery(e.url)),
-      status: Math.trunc(e.status),
-      at: e.at,
-    }))
-  }
-  if (context.dom) {
-    const styles: Record<string, string> = {}
-    for (const [name, value] of Object.entries(context.dom.styles).slice(
-      0,
-      SERVER_LIMITS.stylesMax
-    )) {
-      styles[clampString(name, SERVER_LIMITS.styleNameMaxLength)] = clampString(
-        stripUrlQueries(value),
-        SERVER_LIMITS.styleValueMaxLength
-      )
-    }
-    out.dom = {
-      html: clampString(
-        stripHtmlUrlQueries(context.dom.html),
-        LIMITS.domSnippetMaxLength
-      ),
-      styles,
-    }
-  }
-  return out.console || out.network || out.dom ? out : undefined
-}
-
-export function searchTextFor(
-  c: Pick<Doc<"comments">, "body" | "authorName" | "suggestion">
-) {
-  return [c.authorName, c.body, c.suggestion?.after].filter(Boolean).join("\n")
-}
-
-/**
- * The words a suggestion replaces must be the commented text itself: the
- * selected words, or the whole text of a small element like a button.
- */
-function cleanSuggestion(
-  suggestion: TextSuggestion | undefined,
-  anchor: Pick<Anchor, "text" | "quote" | "region">
-) {
-  if (!suggestion) return undefined
-  const before = suggestion.before.trim()
-  const after = suggestion.after.replace(/\r\n/g, "\n").trim()
-  const target = anchor.quote
-    ? anchor.quote.exact
-    : anchor.region
-      ? ""
-      : anchor.text
-  if (!before || before !== target) {
-    fail("invalid_suggestion", "A suggestion has to change the commented text")
-  }
-  if (!after || after === before) {
-    fail("invalid_suggestion", "Change the text to suggest an edit")
-  }
-  if (after.length > LIMITS.quoteMaxLength) {
-    fail(
-      "invalid_suggestion",
-      `Suggestions are limited to ${LIMITS.quoteMaxLength} characters`
-    )
-  }
-  return { before, after }
-}
-
-/** The comment text: may be empty when the suggestion says it all. */
-function cleanCommentBody(body: string, hasSuggestion: boolean) {
-  return hasSuggestion && !body.trim() ? "" : cleanBody(body)
-}
-
-function originOf(url: string): string | null {
-  try {
-    return new URL(url).origin
-  } catch {
-    return null
-  }
-}
 
 /**
  * Comments for one page (all origins). Realtime in the widget. Returns the
@@ -228,7 +83,7 @@ export const listForPage = query({
         .withIndex("by_project_path_status", (q) =>
           q
             .eq("projectId", project._id)
-            .eq("page.path", path)
+            .eq("page.path", pageKey(path))
             .eq("status", status)
         )
         .order("desc")
@@ -245,21 +100,20 @@ export const listForPage = query({
 /**
  * The commenter's own comments on every page, newest first: their account's
  * when signed in, otherwise this browser's. Takes the browser key, never its
- * hash: hashes are public in every listing.
+ * hash: hashes are public in every listing. Empty for an author that can't
+ * write any more (signed out).
  */
 export const listMine = query({
   args: { publicId: v.string(), ...widgetAuthorArgs },
   handler: async (ctx, { publicId, ...auth }) => {
     const project = await projectByPublicId(ctx, publicId)
     if (!project) return []
-    const { key } = await widgetAuthor(ctx, project._id, auth).catch(() => ({
-      key: null,
-    }))
-    if (!key) return []
+    const me = await findAuthor(ctx, project._id, auth)
+    if (typeof me === "string") return []
     const mine = await ctx.db
       .query("comments")
       .withIndex("by_project_author", (q) =>
-        q.eq("projectId", project._id).eq("authorKeyHash", key)
+        q.eq("projectId", project._id).eq("authorKeyHash", me.key)
       )
       .order("desc")
       .take(SERVER_LIMITS.yoursLimit)
@@ -294,80 +148,26 @@ export const listForSite = query({
   },
 })
 
-/** Pages with open comments, for the widget list. Reads maintained counts. */
+function openPages(ctx: QueryCtx, projectId: Id<"projects">) {
+  return ctx.db
+    .query("pageStats")
+    .withIndex("by_project_open", (q) =>
+      q.eq("projectId", projectId).gt("openCount", 0)
+    )
+    .order("desc")
+    .take(SERVER_LIMITS.pagesListMax)
+}
+
+/** For the widget list. */
 export const pagesWithComments = query({
   args: { publicId: v.string() },
   handler: async (ctx, { publicId }) => {
     const project = await projectByPublicId(ctx, publicId)
     if (!project) return []
-    const pages = await ctx.db
-      .query("pageStats")
-      .withIndex("by_project_open", (q) =>
-        q.eq("projectId", project._id).gt("openCount", 0)
-      )
-      .order("desc")
-      .take(SERVER_LIMITS.pagesListMax)
+    const pages = await openPages(ctx, project._id)
     return pages.map((p) => ({ path: p.path, count: p.openCount }))
   },
 })
-
-/** A text comment's words and the text around them, within the limits. */
-function cleanQuote(quote: AnchorQuote | undefined): AnchorQuote | undefined {
-  const exact = clampString(quote?.exact.trim() ?? "", LIMITS.quoteMaxLength)
-  if (!quote || !exact) return undefined
-  return {
-    exact,
-    prefix: clampString(quote.prefix, LIMITS.quoteContextLength),
-    suffix: clampString(quote.suffix, LIMITS.quoteContextLength),
-  }
-}
-
-/** An area inside the element, kept to 0..1 of its box. */
-function cleanRegion(r: Rect): Rect {
-  const unit = (n: number) =>
-    Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0
-  const x = unit(r.x)
-  const y = unit(r.y)
-  return { x, y, w: Math.min(unit(r.w), 1 - x), h: Math.min(unit(r.h), 1 - y) }
-}
-
-function cleanAncestor(ancestor: AnchorAncestor): AnchorAncestor {
-  return ancestor.text === undefined
-    ? ancestor
-    : {
-        ...ancestor,
-        text: clampString(ancestor.text, LIMITS.anchorAncestorTextMaxLength),
-      }
-}
-
-/** The text and ancestors of one element, as long as `@nuni/anchor` keeps them. */
-function cleanAnchor<A extends Pick<Anchor, "text" | "ancestors">>(
-  anchor: A
-): A {
-  return {
-    ...anchor,
-    text: clampString(anchor.text, LIMITS.anchorTextMaxLength),
-    ancestors: anchor.ancestors
-      .slice(0, LIMITS.anchorAncestorsMax)
-      .map(cleanAncestor),
-  }
-}
-
-/**
- * A whole anchor from the widget, with every part within its limits. Like
- * `@nuni/anchor`, a scope chain that is too deep keeps its innermost steps.
- */
-function cleanCommentAnchor(anchor: Anchor): Anchor {
-  return {
-    ...cleanAnchor(anchor),
-    scope: anchor.scope?.slice(-LIMITS.anchorScopeMaxDepth).map((step) => ({
-      kind: step.kind,
-      host: cleanAnchor(step.host),
-    })),
-    quote: cleanQuote(anchor.quote),
-    region: anchor.region && cleanRegion(anchor.region),
-  }
-}
 
 /** Called from the HTTP action, which supplies the client IP. */
 export const createFromWidget = internalMutation({
@@ -376,8 +176,7 @@ export const createFromWidget = internalMutation({
     ip: v.string(),
     body: v.string(),
     authorName: v.string(),
-    authorSecret: v.string(),
-    commenterToken: v.optional(v.string()),
+    ...widgetAuthorArgs,
     suggestion: v.optional(suggestionValidator),
     page: pageValidator,
     anchor: anchorValidator,
@@ -386,29 +185,8 @@ export const createFromWidget = internalMutation({
     userAgent: v.string(),
   },
   handler: async (ctx, args) => {
-    const origin = parseOrigin(args.page.origin)
-    if (originOf(args.page.url) !== origin) {
-      fail("invalid_page", "Page URL does not match its origin")
-    }
-    // The stored path is joined to a visitor's origin by plain string
-    // concatenation and parsed as a URL ("Other pages" links). Opaque
-    // custom keys from a site's getPageKey (e.g. "product-123") are fine:
-    // the widget only renders same-origin links. Reject the prefixes that
-    // would continue or replace the host at click time (".evil.com/x",
-    // "@evil.com/", "\\evil.com", "//evil.com/x", "/\\evil.com").
-    // Leading whitespace is stripped again by the URL parser, so check
-    // the trimmed form too ("\t@evil.example" would otherwise slip by).
-    const path = args.page.path.trimStart()
-    if (
-      path.startsWith(".") ||
-      path.startsWith("@") ||
-      path.startsWith("\\") ||
-      path.startsWith("//") ||
-      path.startsWith("/\\")
-    ) {
-      fail("invalid_page", "Page path must not continue the host")
-    }
-    const anchor = cleanCommentAnchor(args.anchor)
+    const page = cleanPage(args.page)
+    const anchor = cleanAnchor(args.anchor)
     const suggestion = cleanSuggestion(args.suggestion, anchor)
     const body = cleanCommentBody(args.body, Boolean(suggestion))
 
@@ -421,7 +199,7 @@ export const createFromWidget = internalMutation({
     })
     if (!perProject.ok) fail("rate_limited", "Too many comments right now")
 
-    const project = await ensureProject(ctx, args.publicId, origin)
+    const project = await ensureProject(ctx, args.publicId, page.origin)
     const author = await widgetAuthor(ctx, project._id, args)
     const authorName = cleanName(author.user?.name ?? args.authorName)
     if (
@@ -434,63 +212,21 @@ export const createFromWidget = internalMutation({
       )
     }
 
-    const now = Date.now()
-    const id = await ctx.db.insert("comments", {
+    return insertComment(ctx, {
       projectId: project._id,
-      status: "open",
       body,
       suggestion,
       authorName,
       authorKeyHash: author.key,
       authorId: author.user?._id,
-      searchText: searchTextFor({ body, authorName, suggestion }),
-      page: {
-        ...args.page,
-        origin,
-        title: clampString(args.page.title, SERVER_LIMITS.pageTitleMaxLength),
-        url: clampString(args.page.url, SERVER_LIMITS.pageUrlMaxLength),
-        search: clampString(args.page.search, SERVER_LIMITS.pagePartMaxLength),
-        hash: clampString(args.page.hash, SERVER_LIMITS.pagePartMaxLength),
-        path: clampString(args.page.path, SERVER_LIMITS.pagePartMaxLength),
-      },
+      page,
       anchor,
       viewport: args.viewport,
       context: cleanContext(args.context),
       userAgent: clampString(args.userAgent, SERVER_LIMITS.userAgentMaxLength),
-      createdAt: now,
     })
-    await ctx.db.patch(project._id, {
-      commentCount: project.commentCount + 1,
-      openCount: project.openCount + 1,
-      lastActivityAt: now,
-    })
-    await bumpPageOpen(
-      ctx,
-      project._id,
-      clampString(args.page.path, SERVER_LIMITS.pagePartMaxLength),
-      1
-    )
-    return id
   },
 })
-
-async function loadOwnComment(
-  ctx: MutationCtx,
-  id: string,
-  auth: WidgetAuthor
-) {
-  const comment = await rowById(ctx, "comments", id)
-  if (!comment) fail("not_found", "Comment not found")
-  const { keys } = await widgetAuthor(ctx, comment.projectId, auth)
-  if (!keys.includes(comment.authorKeyHash)) {
-    fail("forbidden", "You can only change your own comments")
-  }
-  const { ok } = await rateLimiter.limit(ctx, "editPerAuthor", {
-    key: comment.authorKeyHash,
-  })
-  if (!ok) fail("rate_limited", "Slow down a little")
-  return comment
-}
 
 export const editOwn = mutation({
   args: {
@@ -501,7 +237,12 @@ export const editOwn = mutation({
     suggestion: v.optional(v.string()),
   },
   handler: async (ctx, { id, body, suggestion: after, ...auth }) => {
-    const comment = await loadOwnComment(ctx, id, auth)
+    const comment = await requireOwnRow(
+      ctx,
+      await rowById(ctx, "comments", id),
+      auth,
+      "comments"
+    )
     const suggestion =
       comment.suggestion && after !== undefined
         ? cleanSuggestion(
@@ -509,112 +250,94 @@ export const editOwn = mutation({
             comment.anchor
           )
         : comment.suggestion
-    const clean = cleanCommentBody(body, Boolean(suggestion))
-    await ctx.db.patch(comment._id, {
-      body: clean,
+    await editComment(ctx, comment, {
+      body: cleanCommentBody(body, Boolean(suggestion)),
       suggestion,
-      searchText: searchTextFor({ ...comment, body: clean, suggestion }),
-      editedAt: Date.now(),
     })
   },
 })
-
-export async function removeComment(
-  ctx: MutationCtx,
-  comment: Doc<"comments">
-) {
-  await deleteThread(ctx, comment._id)
-  await ctx.db.delete(comment._id)
-  for (const file of commentFiles(comment)) await ctx.storage.delete(file)
-  if (comment.status === "open") {
-    await bumpPageOpen(ctx, comment.projectId, comment.page.path, -1)
-  }
-  const project = await ctx.db.get(comment.projectId)
-  if (project) {
-    await ctx.db.patch(project._id, {
-      commentCount: Math.max(0, project.commentCount - 1),
-      openCount: Math.max(
-        0,
-        project.openCount - (comment.status === "open" ? 1 : 0)
-      ),
-      lastActivityAt: Date.now(),
-    })
-  }
-}
 
 export const deleteOwn = mutation({
   args: { id: v.string(), ...widgetAuthorArgs },
   handler: async (ctx, { id, ...auth }) => {
-    const comment = await loadOwnComment(ctx, id, auth)
-    await removeComment(ctx, comment)
+    const comment = await requireOwnRow(
+      ctx,
+      await rowById(ctx, "comments", id),
+      auth,
+      "comments"
+    )
+    await deleteComments(ctx, [comment])
   },
 })
 
-type WidgetAuth = { sessionToken?: string }
+/**
+ * Owner actions on one comment take the widget's or CLI's owner session
+ * token; without one, the dashboard user must be the owner.
+ */
+const ownerArgs = { id: v.string(), sessionToken: v.optional(v.string()) }
 
-const widgetAuthArgs = { sessionToken: v.optional(v.string()) }
-
-async function setStatus(
+async function ownerComment(
   ctx: MutationCtx,
   id: string,
-  status: CommentStatus,
-  widget: WidgetAuth,
-  resolution?: Resolution
+  sessionToken: string | undefined
 ) {
   const comment = await rowById(ctx, "comments", id)
-  if (!comment) fail("not_found", "Comment not found")
-  const userId = await requireOwner(ctx, comment.projectId, widget)
-  if (comment.status === status) {
-    // Already resolved: closing it as outdated only changes the reason.
-    if (status === "resolved" && comment.resolution !== resolution) {
-      await ctx.db.patch(comment._id, { resolution })
-    }
-    return
-  }
-  await bumpPageOpen(
+  if (!comment) return null
+  const userId = await requireOwner(
     ctx,
-    comment.projectId,
-    comment.page.path,
-    status === "open" ? 1 : -1
+    await ctx.db.get(comment.projectId),
+    sessionToken
   )
-  await ctx.db.patch(comment._id, {
-    status,
-    resolvedAt: status === "resolved" ? Date.now() : undefined,
-    resolvedBy: status === "resolved" ? userId : undefined,
-    resolution: status === "resolved" ? resolution : undefined,
-  })
-  const project = await ctx.db.get(comment.projectId)
-  if (project) {
-    await ctx.db.patch(project._id, {
-      openCount: Math.max(0, project.openCount + (status === "open" ? 1 : -1)),
-      lastActivityAt: Date.now(),
-    })
-  }
+  return { comment, userId }
 }
 
 export const resolve = mutation({
   args: {
-    id: v.string(),
+    ...ownerArgs,
     /** "outdated": closed because what it was about is gone. */
     resolution: v.optional(resolutionValidator),
-    ...widgetAuthArgs,
   },
-  handler: (ctx, { id, resolution, ...widget }) =>
-    setStatus(ctx, id, "resolved", widget, resolution),
+  handler: async (ctx, { id, sessionToken, resolution }) => {
+    const found = await ownerComment(ctx, id, sessionToken)
+    if (!found) fail("not_found", "Comment not found")
+    await setStatus(ctx, [found.comment], "resolved", {
+      userId: found.userId,
+      resolution,
+    })
+  },
 })
 
 export const reopen = mutation({
-  args: { id: v.string(), ...widgetAuthArgs },
-  handler: (ctx, { id, ...widget }) => setStatus(ctx, id, "open", widget),
+  args: ownerArgs,
+  handler: async (ctx, { id, sessionToken }) => {
+    const found = await ownerComment(ctx, id, sessionToken)
+    if (!found) fail("not_found", "Comment not found")
+    await setStatus(ctx, [found.comment], "open", { userId: found.userId })
+  },
 })
 
+/** Deleting a comment that is already gone does nothing. */
 export const remove = mutation({
-  args: { id: v.string(), ...widgetAuthArgs },
-  handler: async (ctx, { id, ...widget }) => {
-    const comment = await rowById(ctx, "comments", id)
-    if (!comment) return
-    await requireOwner(ctx, comment.projectId, widget)
-    await removeComment(ctx, comment)
+  args: ownerArgs,
+  handler: async (ctx, { id, sessionToken }) => {
+    const found = await ownerComment(ctx, id, sessionToken)
+    if (found) await deleteComments(ctx, [found.comment])
+  },
+})
+
+/**
+ * The owner points a comment at another element on its page, for example
+ * after a redesign moved it. The new anchor replaces the old one.
+ */
+export const repin = mutation({
+  args: { ...ownerArgs, anchor: anchorValidator },
+  handler: async (ctx, { id, anchor, sessionToken }) => {
+    const found = await ownerComment(ctx, id, sessionToken)
+    if (!found) fail("not_found", "Comment not found")
+    await ctx.db.patch(found.comment._id, {
+      anchor: cleanAnchor(anchor),
+      pinLostAt: undefined,
+    })
   },
 })
 
@@ -636,24 +359,9 @@ async function loadBulk(ctx: MutationCtx, ids: string[]) {
   ).filter((c): c is Doc<"comments"> => c !== null)
   const projectIds = new Set(comments.map((c) => c.projectId))
   if (projectIds.size > 1) fail("invalid", "Comments from several projects")
-  const projectId = comments[0]?.projectId
-  const project = projectId ? await ctx.db.get(projectId) : null
-  if (comments.length && project?.ownerId !== user._id) {
-    fail("forbidden", "Only the project owner can do this")
-  }
-  if (project?.deletingAt) fail("not_found", "Project not found")
-  return { user, project, comments }
-}
-
-/** Open-comment counts per page, applied once for a whole batch. */
-async function applyPageDeltas(
-  ctx: MutationCtx,
-  projectId: Id<"projects">,
-  deltas: Map<string, number>
-) {
-  for (const [path, delta] of deltas) {
-    if (delta) await bumpPageOpen(ctx, projectId, path, delta)
-  }
+  const [projectId] = projectIds
+  if (projectId) await requireOwner(ctx, await ctx.db.get(projectId))
+  return { userId: user._id, comments }
 }
 
 export const bulkSetStatus = mutation({
@@ -662,66 +370,17 @@ export const bulkSetStatus = mutation({
     status: statusValidator,
     resolution: v.optional(resolutionValidator),
   },
-  handler: async (ctx, { ids, status, resolution: reason }) => {
-    const { user, project, comments } = await loadBulk(ctx, ids)
-    if (!project) return 0
-    const now = Date.now()
-    const resolution = status === "resolved" ? reason : undefined
-    const deltas = new Map<string, number>()
-    let changed = 0
-    for (const comment of comments) {
-      if (comment.status === status) {
-        if (status === "resolved" && comment.resolution !== resolution) {
-          await ctx.db.patch(comment._id, { resolution })
-        }
-        continue
-      }
-      changed++
-      const path = comment.page.path
-      deltas.set(path, (deltas.get(path) ?? 0) + (status === "open" ? 1 : -1))
-      await ctx.db.patch(comment._id, {
-        status,
-        resolvedAt: status === "resolved" ? now : undefined,
-        resolvedBy: status === "resolved" ? user._id : undefined,
-        resolution,
-      })
-    }
-    if (!changed) return 0
-    await applyPageDeltas(ctx, project._id, deltas)
-    await ctx.db.patch(project._id, {
-      openCount: Math.max(
-        0,
-        project.openCount + (status === "open" ? changed : -changed)
-      ),
-      lastActivityAt: now,
-    })
-    return changed
+  handler: async (ctx, { ids, status, resolution }) => {
+    const { userId, comments } = await loadBulk(ctx, ids)
+    return setStatus(ctx, comments, status, { userId, resolution })
   },
 })
 
 export const bulkRemove = mutation({
   args: bulkArgs,
   handler: async (ctx, { ids }) => {
-    const { project, comments } = await loadBulk(ctx, ids)
-    if (!project) return 0
-    const deltas = new Map<string, number>()
-    let open = 0
-    for (const comment of comments) {
-      await deleteThread(ctx, comment._id)
-      await ctx.db.delete(comment._id)
-      if (comment.screenshotId) await ctx.storage.delete(comment.screenshotId)
-      if (comment.status === "open") {
-        open++
-        const path = comment.page.path
-        deltas.set(path, (deltas.get(path) ?? 0) - 1)
-      }
-    }
-    await applyPageDeltas(ctx, project._id, deltas)
-    await ctx.db.patch(project._id, {
-      commentCount: Math.max(0, project.commentCount - comments.length),
-      openCount: Math.max(0, project.openCount - open),
-      lastActivityAt: Date.now(),
-    })
+    const { comments } = await loadBulk(ctx, ids)
+    await deleteComments(ctx, comments)
     return comments.length
   },
 })
@@ -770,84 +429,149 @@ function ownerComments(
           .order("desc")
   return base.filter((q) =>
     q.and(
-      args.path ? q.eq(q.field("page.path"), args.path) : true,
+      args.path ? q.eq(q.field("page.path"), pageKey(args.path)) : true,
       args.origin ? q.eq(q.field("page.origin"), args.origin) : true,
+      // The search index can't filter by `pinLostAt`.
       args.lost && search ? q.gt(q.field("pinLostAt"), 0) : true
     )
   )
 }
 
-/** Dashboard list, owner only, newest first, paginated and filtered server-side. */
+/** The dashboard's inbox tabs. */
+const VIEWS = {
+  open: { status: "open", lost: false },
+  /** Open comments whose element can't be found on the page. */
+  lost: { status: "open", lost: true },
+  resolved: { status: "resolved", lost: false },
+} as const
+
+/**
+ * Dashboard list, owner only, newest first, paginated and filtered
+ * server-side. `status` and `lost` are the older form of `view`.
+ */
 export const listForOwner = query({
   args: {
     publicId: v.string(),
-    status: statusValidator,
+    view: v.optional(
+      v.union(v.literal("open"), v.literal("lost"), v.literal("resolved"))
+    ),
+    status: v.optional(statusValidator),
+    lost: v.optional(v.boolean()),
     path: v.optional(v.string()),
     origin: v.optional(v.string()),
     search: v.optional(v.string()),
-    /** Only open comments whose element can't be found on the page. */
-    lost: v.optional(v.boolean()),
     paginationOpts: paginationOptsValidator,
   },
-  handler: async (ctx, args) => {
-    const user = await currentUser(ctx)
-    const project = await projectByPublicId(ctx, args.publicId)
-    if (!user || !project || project.ownerId !== user._id) {
-      return { page: [], isDone: true, continueCursor: "" }
-    }
-    const result = await ownerComments(ctx, project._id, args).paginate(
-      args.paginationOpts
-    )
+  handler: async (ctx, { view, status, lost, ...args }) => {
+    const project = await dashboardProject(ctx, args)
+    if (!project) return { page: [], isDone: true, continueCursor: "" }
+    const tab =
+      VIEWS[
+        view ?? (status === "resolved" ? "resolved" : lost ? "lost" : "open")
+      ]
+    const result = await ownerComments(ctx, project._id, {
+      ...args,
+      ...tab,
+    }).paginate(args.paginationOpts)
     const author = authorLookup(ctx)
     return {
       ...result,
-      // The owner sees the full page location and the captured context.
       page: await Promise.all(result.page.map((c) => toOwner(ctx, c, author))),
     }
   },
 })
 
-/**
- * The project for a CLI or MCP request. Throws when the token is not an
- * owner session for it, so the agent can tell the person to log in.
- */
-async function agentProject(
-  ctx: QueryCtx,
-  publicId: string,
-  sessionToken: string
-): Promise<Doc<"projects">> {
-  const project = await projectByPublicId(ctx, publicId)
-  if (!project || !(await actingOwner(ctx, project, { sessionToken }))) {
-    fail("unauthenticated", "Not signed in to this project")
-  }
-  return project
-}
-
-/** The CLI and MCP server: pages with open comments, most first. */
-export const pagesForAgent = query({
-  args: { publicId: v.string(), sessionToken: v.string() },
-  handler: async (ctx, { publicId, sessionToken }) => {
-    const project = await agentProject(ctx, publicId, sessionToken)
-    const pages = await ctx.db
-      .query("pageStats")
-      .withIndex("by_project_open", (q) =>
-        q.eq("projectId", project._id).gt("openCount", 0)
+/** How many open comments have lost their element, for the dashboard tab. */
+export const lostCount = query({
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const project = await dashboardProject(ctx, { publicId })
+    if (!project) return 0
+    const lost = await ctx.db
+      .query("comments")
+      .withIndex("by_project_status_lost", (q) =>
+        q.eq("projectId", project._id).eq("status", "open").gt("pinLostAt", 0)
       )
-      .order("desc")
-      .take(SERVER_LIMITS.pagesListMax)
-    return pages.map((p) => ({ path: p.path, openCount: p.openCount }))
+      .take(LIMITS.lostCountMax + 1)
+    return lost.length
+  },
+})
+
+/** Filter choices for the dashboard: every page and environment seen. */
+export const ownerFilters = query({
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const project = await dashboardProject(ctx, { publicId })
+    if (!project) return { paths: [], origins: [] }
+    const stats = await ctx.db
+      .query("pageStats")
+      .withIndex("by_project_path", (q) => q.eq("projectId", project._id))
+      .take(SERVER_LIMITS.pageFiltersMax)
+    return { paths: stats.map((p) => p.path), origins: project.origins }
   },
 })
 
 /**
- * The CLI and MCP server (`nuni login` session token): owner comments,
- * newest first, with the full context. Throws when the token is not an
- * owner session for this project, so the agent can tell the person to log in.
+ * One comment by id, for deep links to comments outside the page listing
+ * window (for example old resolved ones). Public shape only.
  */
-export const listForAgent = query({
+export const getById = query({
+  args: { publicId: v.string(), id: v.string() },
+  handler: async (ctx, { publicId, id }) => {
+    const found = await findComment(ctx, publicId, id)
+    return found ? toPublic(found.comment, authorLookup(ctx)) : null
+  },
+})
+
+/**
+ * One comment with the owner-only fields, for the owner tools in the widget
+ * (session token) and the dashboard (JWT). Null for anyone else.
+ */
+export const getForOwner = query({
   args: {
     publicId: v.string(),
-    sessionToken: v.string(),
+    id: v.string(),
+    sessionToken: v.optional(v.string()),
+  },
+  handler: async (ctx, { publicId, id, sessionToken }) => {
+    const found = await findComment(ctx, publicId, id)
+    if (!found || !(await ownerOf(ctx, found.project, sessionToken))) {
+      return null
+    }
+    return toOwner(ctx, found.comment)
+  },
+})
+
+/**
+ * The CLI and MCP server (`nuni login` session token). Every agent function
+ * throws `unauthenticated` when the token is not an owner session of this
+ * project, so the agent can tell the person to log in.
+ */
+const agentArgs = { publicId: v.string(), sessionToken: v.string() }
+
+async function agentOwner(
+  ctx: QueryCtx | MutationCtx,
+  { publicId, sessionToken }: { publicId: string; sessionToken: string }
+) {
+  const project = await projectByPublicId(ctx, publicId)
+  const userId = await requireOwner(ctx, project, sessionToken)
+  return { project: project!, userId }
+}
+
+/** Pages with open comments, most first. */
+export const pagesForAgent = query({
+  args: agentArgs,
+  handler: async (ctx, args) => {
+    const { project } = await agentOwner(ctx, args)
+    const pages = await openPages(ctx, project._id)
+    return pages.map((p) => ({ path: p.path, openCount: p.openCount }))
+  },
+})
+
+/** Owner comments, newest first, with the full context. */
+export const listForAgent = query({
+  args: {
+    ...agentArgs,
     status: v.optional(statusValidator),
     path: v.optional(v.string()),
     /** Words in the comment or its author's name; results by relevance. */
@@ -856,7 +580,7 @@ export const listForAgent = query({
     cursor: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
-    const project = await agentProject(ctx, args.publicId, args.sessionToken)
+    const { project } = await agentOwner(ctx, args)
     const numItems = Math.min(
       LIMITS.agentListMax,
       Math.max(1, Math.trunc(args.limit ?? LIMITS.agentListDefault))
@@ -876,408 +600,67 @@ export const listForAgent = query({
   },
 })
 
-/** How many open comments have lost their element, for the dashboard tab. */
-export const lostCount = query({
-  args: { publicId: v.string() },
-  handler: async (ctx, { publicId }) => {
-    const user = await currentUser(ctx)
-    const project = await projectByPublicId(ctx, publicId)
-    if (!user || !project || project.ownerId !== user._id) return 0
-    const lost = await ctx.db
-      .query("comments")
-      .withIndex("by_project_status_lost", (q) =>
-        q.eq("projectId", project._id).eq("status", "open").gt("pinLostAt", 0)
-      )
-      .take(LIMITS.lostCountMax + 1)
-    return lost.length
-  },
-})
-
-/**
- * What a visitor's widget saw on one page: open comments whose element it
- * couldn't find, and ones it found again. Called from the HTTP action, which
- * supplies the IP. Only changes are written, so a page view with nothing new
- * writes nothing.
- */
-export const reportPins = internalMutation({
-  args: {
-    publicId: v.string(),
-    ip: v.string(),
-    path: v.string(),
-    lost: v.array(v.string()),
-    found: v.array(v.string()),
-  },
+/** One comment with the full context; null when it isn't in this project. */
+export const getForAgent = query({
+  args: { ...agentArgs, id: v.string() },
   handler: async (ctx, args) => {
-    if (args.lost.length + args.found.length > LIMITS.pinReportMax) {
-      fail("too_many", "Too many pins in one report")
-    }
-    const { ok } = await rateLimiter.limit(ctx, "pinReportPerIp", {
-      key: ipKey(args.ip, args.publicId),
-    })
-    if (!ok) fail("rate_limited", "Slow down a little")
-    const project = await projectByPublicId(ctx, args.publicId)
-    if (!project || project.deletingAt) return 0
-    const now = Date.now()
-    let changed = 0
-    for (const [ids, lost] of [
-      [args.lost, true],
-      [args.found, false],
-    ] as const) {
-      for (const raw of ids) {
-        const id = ctx.db.normalizeId("comments", raw)
-        const comment = id ? await ctx.db.get(id) : null
-        if (
-          !comment ||
-          comment.projectId !== project._id ||
-          comment.page.path !== args.path ||
-          comment.status !== "open" ||
-          (comment.pinLostAt !== undefined) === lost
-        ) {
-          continue
-        }
-        await ctx.db.patch(comment._id, { pinLostAt: lost ? now : undefined })
-        changed++
-      }
-    }
-    return changed
+    const { project } = await agentOwner(ctx, args)
+    const comment = await rowById(ctx, "comments", args.id)
+    return comment?.projectId === project._id ? toOwner(ctx, comment) : null
   },
 })
+
+export type AgentStatusResult =
+  | { id: string; ok: true; changed: boolean }
+  | { id: string; ok: false; error: ErrorData }
 
 /**
- * The owner points a comment at another element on its page, for example
- * after a redesign moved it. The new anchor replaces the old one.
+ * Resolve or reopen up to `LIMITS.bulkMax` comments, each with the optional
+ * note posted as an owner reply. For each id, the status and the note are
+ * written together or not at all; one that fails doesn't stop the rest.
+ * Results are in the order of `ids`.
  */
-export const repin = mutation({
-  args: { id: v.string(), anchor: anchorValidator, ...widgetAuthArgs },
-  handler: async (ctx, { id, anchor, ...widget }) => {
-    const comment = await rowById(ctx, "comments", id)
-    if (!comment) fail("not_found", "Comment not found")
-    await requireOwner(ctx, comment.projectId, widget)
-    await ctx.db.patch(comment._id, {
-      anchor: cleanCommentAnchor(anchor),
-      pinLostAt: undefined,
-    })
-  },
-})
-
-/** Filter choices for the dashboard: every page and environment seen. */
-export const ownerFilters = query({
-  args: { publicId: v.string() },
-  handler: async (ctx, { publicId }) => {
-    const user = await currentUser(ctx)
-    const project = await projectByPublicId(ctx, publicId)
-    if (!user || !project || project.ownerId !== user._id) {
-      return { paths: [], origins: [] }
-    }
-    const stats = await ctx.db
-      .query("pageStats")
-      .withIndex("by_project_path", (q) => q.eq("projectId", project._id))
-      .take(SERVER_LIMITS.pageFiltersMax)
-    return { paths: stats.map((p) => p.path), origins: project.origins }
-  },
-})
-
-/**
- * One comment by id, for deep links to comments outside the page listing
- * window (for example old resolved ones). Public shape only.
- */
-export const getById = query({
-  args: { publicId: v.string(), id: v.string() },
-  handler: async (ctx, { publicId, id }) => {
-    const project = await projectByPublicId(ctx, publicId)
-    const commentId = ctx.db.normalizeId("comments", id)
-    if (!project || !commentId) return null
-    const comment = await ctx.db.get(commentId)
-    if (!comment || comment.projectId !== project._id) return null
-    return toPublic(comment, authorLookup(ctx))
-  },
-})
-
-/**
- * One comment with the owner-only fields, for the owner tools in the widget
- * (session token) and the dashboard (JWT). Null for anyone else.
- */
-export const getForOwner = query({
+export const setStatusForAgent = mutation({
   args: {
-    publicId: v.string(),
-    id: v.string(),
-    sessionToken: v.optional(v.string()),
+    ...agentArgs,
+    ids: v.array(v.string()),
+    status: statusValidator,
+    note: v.optional(v.string()),
   },
-  handler: async (ctx, { publicId, id, sessionToken }) => {
-    const project = await projectByPublicId(ctx, publicId)
-    const commentId = ctx.db.normalizeId("comments", id)
-    if (!project || !commentId) return null
-    if (!(await actingOwner(ctx, project, { sessionToken }))) return null
-    const comment = await ctx.db.get(commentId)
-    if (!comment || comment.projectId !== project._id) return null
-    return toOwner(ctx, comment)
-  },
-})
-
-/**
- * What the author uploads right after posting: the element's screenshot
- * (owner-only context) or an image for everyone (their own, or the
- * screenshot they marked up).
- */
-const uploadKindValidator = v.union(v.literal("screenshot"), v.literal("image"))
-
-const UPLOAD_RULES = {
-  screenshot: {
-    maxBytes: LIMITS.screenshotMaxBytes,
-    limit: "screenshotPerIp",
-    noun: "Screenshots",
-  },
-  image: {
-    maxBytes: LIMITS.imageMaxBytes,
-    limit: "imagePerIp",
-    noun: "Images",
-  },
-} as const satisfies Record<UploadKind, unknown>
-
-const uploadArgs = {
-  kind: uploadKindValidator,
-  publicId: v.string(),
-  commentId: v.string(),
-  ...widgetAuthorArgs,
-}
-
-/**
- * Upload, step 1, before the file is stored: is the file acceptable, and
- * may this author still add it to this comment?
- */
-export const checkUpload = internalMutation({
-  args: {
-    ...uploadArgs,
-    ip: v.string(),
-    contentType: v.string(),
-    size: v.number(),
-  },
-  handler: async (ctx, args) => {
-    const rules = UPLOAD_RULES[args.kind]
-    if (!isImageType(args.contentType)) {
-      fail("invalid_type", `${rules.noun} must be ${IMAGE_TYPES_TEXT}`)
+  handler: async (ctx, args): Promise<AgentStatusResult[]> => {
+    if (args.ids.length > LIMITS.bulkMax) {
+      fail("too_many", `Pick up to ${LIMITS.bulkMax} comments at a time`)
     }
-    if (args.size <= 0 || args.size > rules.maxBytes) {
-      fail("too_large", "The image is too large")
-    }
-    const { ok } = await rateLimiter.limit(ctx, rules.limit, {
-      key: ipKey(args.ip, args.publicId),
-    })
-    if (!ok) fail("rate_limited", "Slow down a little")
-    const comment = await uploadTarget(ctx, args)
-    return comment._id
-  },
-})
-
-/** Upload, step 2: attach the stored file, or report why not. */
-export const attachUpload = internalMutation({
-  args: { ...uploadArgs, storageId: v.id("_storage") },
-  handler: async (ctx, args) => {
-    const comment = await uploadTarget(ctx, args)
-    await ctx.db.patch(
-      comment._id,
-      args.kind === "screenshot"
-        ? { screenshotId: args.storageId }
-        : { images: [...(comment.images ?? []), args.storageId] }
-    )
-  },
-})
-
-/** The author's own, recent comment that can still take this upload. */
-async function uploadTarget(
-  ctx: MutationCtx,
-  args: {
-    kind: UploadKind
-    publicId: string
-    commentId: string
-  } & WidgetAuthor
-) {
-  const project = await projectByPublicId(ctx, args.publicId)
-  const id = ctx.db.normalizeId("comments", args.commentId)
-  const comment = id ? await ctx.db.get(id) : null
-  if (!project || !comment || comment.projectId !== project._id) {
-    fail("not_found", "Comment not found")
-  }
-  const { keys } = await widgetAuthor(ctx, project._id, args)
-  if (!keys.includes(comment.authorKeyHash)) {
-    fail("forbidden", "You can only add images to your own comment")
-  }
-  if (args.kind === "screenshot" && comment.screenshotId) {
-    fail("conflict", "This comment has a screenshot")
-  }
-  if (args.kind === "image") {
-    // Images are public, so an unclaimed project can't be used to host them.
-    if (!project.ownerId) {
-      fail("forbidden", "Images can be added once the site is claimed")
-    }
-    if ((comment.images?.length ?? 0) >= LIMITS.imagesPerComment) {
-      fail(
-        "conflict",
-        `A comment can have up to ${LIMITS.imagesPerComment} images`
-      )
-    }
-  }
-  if (Date.now() - comment.createdAt > SERVER_LIMITS.uploadWindowMs) {
-    fail("expired", "Too late to add an image")
-  }
-  return comment
-}
-
-/**
- * Most open comments the rebuild reads for one page, to stay well inside
- * transaction limits. At the cap the count is only a lower bound.
- */
-const REBUILD_PATH_CAP = 4000
-
-/**
- * One-off maintenance: recompute per-page open counts and backfill search
- * text. Work is split into small scheduled steps so no transaction hits
- * Convex's read limits. Each page's count is read and written in a single
- * transaction, so concurrent comment writes are never counted twice.
- *   npx convex run comments:rebuildPageStats
- */
-export const rebuildPageStats = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    await ctx.scheduler.runAfter(0, internal.comments.rebuildSearchText, {})
-    await ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {})
-  },
-})
-
-export const rebuildSearchText = internalMutation({
-  args: { cursor: v.optional(v.union(v.string(), v.null())) },
-  handler: async (ctx, { cursor }) => {
-    const batch = await ctx.db
-      .query("comments")
-      .paginate({ numItems: 200, cursor: cursor ?? null })
-    for (const c of batch.page) {
-      if (c.searchText === undefined) {
-        await ctx.db.patch(c._id, {
-          searchText: searchTextFor(c),
+    const { project, userId } = await agentOwner(ctx, args)
+    const note = args.note?.trim() ? cleanBody(args.note) : undefined
+    const results = new Map<string, AgentStatusResult>()
+    const ready: Doc<"comments">[] = []
+    const failed = (id: string, error: ErrorData) =>
+      results.set(id, { id, ok: false, error })
+    for (const id of new Set(args.ids)) {
+      const comment = await rowById(ctx, "comments", id)
+      if (comment?.projectId !== project._id) {
+        failed(id, { code: "not_found", message: "Comment not found" })
+      } else if (note && threadIsFull(comment)) {
+        failed(id, {
+          code: "cap_reached",
+          message: "This thread has reached its reply limit",
+        })
+      } else {
+        ready.push(comment)
+        results.set(id, {
+          id,
+          ok: true,
+          changed: comment.status !== args.status,
         })
       }
     }
-    if (!batch.isDone) {
-      await ctx.scheduler.runAfter(0, internal.comments.rebuildSearchText, {
-        cursor: batch.continueCursor,
-      })
-    }
-  },
-})
-
-/**
- * Walks projects one by one. Within a project, the "paths" stage visits each
- * distinct comment path (one path per step) and recounts it exactly; the
- * "stale" stage then zeroes pageStats rows whose page has no comments left.
- */
-export const rebuildProjectStats = internalMutation({
-  args: {
-    projectCursor: v.optional(v.union(v.string(), v.null())),
-    projectId: v.optional(v.id("projects")),
-    stage: v.optional(v.union(v.literal("paths"), v.literal("stale"))),
-    afterPath: v.optional(v.string()),
-    statsCursor: v.optional(v.union(v.string(), v.null())),
-    /** Overrides REBUILD_PATH_CAP (tests only). */
-    pathCap: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    const next = (rest: Record<string, unknown>) =>
-      ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {
-        projectCursor: args.projectCursor ?? null,
-        pathCap: args.pathCap,
-        ...rest,
-      })
-
-    if (!args.projectId) {
-      const batch = await ctx.db
-        .query("projects")
-        .paginate({ numItems: 1, cursor: args.projectCursor ?? null })
-      const project = batch.page[0]
-      if (!project) return
-      await ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {
-        projectCursor: batch.isDone ? undefined : batch.continueCursor,
-        pathCap: args.pathCap,
-        projectId: project._id,
-        stage: "paths",
-      })
-      return
-    }
-    const projectId = args.projectId
-    const cap = args.pathCap ?? REBUILD_PATH_CAP
-
-    if (args.stage !== "stale") {
-      const { afterPath } = args
-      const first = await ctx.db
-        .query("comments")
-        .withIndex("by_project_path_status", (q) =>
-          afterPath === undefined
-            ? q.eq("projectId", projectId)
-            : q.eq("projectId", projectId).gt("page.path", afterPath)
-        )
-        .first()
-      if (!first) {
-        await next({ projectId, stage: "stale", statsCursor: null })
-        return
+    await setStatus(ctx, ready, args.status, { userId })
+    if (note) {
+      for (const comment of ready) {
+        await insertOwnerReply(ctx, comment, userId, note)
       }
-      const path = first.page.path
-      const open = await ctx.db
-        .query("comments")
-        .withIndex("by_project_path_status", (q) =>
-          q
-            .eq("projectId", projectId)
-            .eq("page.path", path)
-            .eq("status", "open")
-        )
-        .take(cap)
-      await setPageOpen(ctx, projectId, path, open.length, open.length >= cap)
-      await next({ projectId, stage: "paths", afterPath: path })
-      return
     }
-
-    const rows = await ctx.db
-      .query("pageStats")
-      .withIndex("by_project_path", (q) => q.eq("projectId", projectId))
-      .paginate({ numItems: 100, cursor: args.statsCursor ?? null })
-    for (const row of rows.page) {
-      if (row.openCount === 0) continue
-      const any = await ctx.db
-        .query("comments")
-        .withIndex("by_project_path_status", (q) =>
-          q.eq("projectId", projectId).eq("page.path", row.path)
-        )
-        .first()
-      if (!any) await ctx.db.patch(row._id, { openCount: 0 })
-    }
-    if (!rows.isDone) {
-      await next({
-        projectId,
-        stage: "stale",
-        statsCursor: rows.continueCursor,
-      })
-    } else if (args.projectCursor) {
-      await ctx.scheduler.runAfter(0, internal.comments.rebuildProjectStats, {
-        projectCursor: args.projectCursor,
-        pathCap: args.pathCap,
-      })
-    }
+    return args.ids.map((id) => results.get(id)!)
   },
 })
-
-async function setPageOpen(
-  ctx: MutationCtx,
-  projectId: Id<"projects">,
-  path: string,
-  openCount: number,
-  capped: boolean
-) {
-  const row = await ctx.db
-    .query("pageStats")
-    .withIndex("by_project_path", (q) =>
-      q.eq("projectId", projectId).eq("path", path)
-    )
-    .unique()
-  if (!row) await ctx.db.insert("pageStats", { projectId, path, openCount })
-  // A capped read is only a lower bound, so it may raise a count, never lower it.
-  else if (capped ? row.openCount < openCount : row.openCount !== openCount)
-    await ctx.db.patch(row._id, { openCount })
-}
