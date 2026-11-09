@@ -1,33 +1,18 @@
 import { generateProjectId, generateSecret } from "@nuni/shared"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { api } from "../convex/_generated/api"
-import { addComment, setup, type T } from "./helpers"
+import {
+  addComment,
+  ORIGIN,
+  postJson,
+  setup,
+  signInToComment,
+  type T,
+} from "./helpers"
 
-const ORIGIN = "http://localhost:3000"
-
-/** A visitor signs in with GitHub (via the dashboard) to comment on the site. */
-async function signInToComment(t: T, publicId: string, subject = "user_ada") {
-  const user = t.withIdentity({
-    subject,
-    name: "Ada Lovelace",
-    pictureUrl: "https://avatars.githubusercontent.com/u/1",
-  })
-  await user.mutation(api.users.store, {})
-  const { token } = await user.mutation(api.commenters.create, {
-    publicId,
-    origin: ORIGIN,
-  })
-  return token
-}
-
-function postReply(t: T, body: Record<string, unknown>) {
-  return t.fetch("/widget/replies", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Real-IP": "5.5.5.5" },
-    body: JSON.stringify(body),
-  })
-}
+const postReply = (t: T, body: Record<string, unknown>) =>
+  postJson(t, "/widget/replies", body)
 
 const listPage = (t: T, publicId: string) =>
   t.query(api.comments.listForPage, { publicId, path: "/pricing" })
@@ -42,7 +27,12 @@ describe("commenter sign-in", () => {
       publicId,
       commenterToken: token,
     })
-    expect(me).toMatchObject({ valid: true, name: "Ada Lovelace" })
+    expect(me).toMatchObject({
+      valid: true,
+      name: "Ada Lovelace",
+      authorKey: expect.stringMatching(/^user:/),
+    })
+    const { authorKey } = me as { authorKey: string }
 
     const laptop = generateSecret()
     const id = await addComment(t, publicId, {
@@ -55,7 +45,7 @@ describe("commenter sign-in", () => {
       authorName: "Ada Lovelace",
       signedIn: true,
       avatarUrl: "https://avatars.githubusercontent.com/u/1",
-      authorKeyHash: me.valid ? me.authorKey : "",
+      authorKeyHash: authorKey,
     })
     const guest = (await listPage(t, publicId)).find((c) => c._id !== id)
     expect(guest?.signedIn).toBeUndefined()
@@ -121,7 +111,7 @@ describe("commenter sign-in", () => {
       thread.replies[0]?.authorKeyHash,
     ])
     await t.mutation(api.replies.editOwn, {
-      id: replyId as never,
+      id: replyId,
       authorSecret: generateSecret(),
       commenterToken: token,
       body: "Edited",
@@ -220,6 +210,41 @@ describe("commenter sign-in", () => {
     await expect(
       addComment(t, elsewhere, { commenterToken: token })
     ).rejects.toThrow(/signed out/)
+  })
+
+  it("stores the account with the name read fresh from WorkOS, in one call", async () => {
+    const t = setup()
+    const ada = t.withIdentity({ subject: "user_ada", name: "ada-gh" })
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          first_name: "Ada",
+          last_name: "Lovelace",
+          profile_picture_url: "https://avatars.example/ada.png",
+        })
+      )
+    )
+    try {
+      expect(await ada.action(api.users.storeFresh, {})).toMatchObject({
+        name: "Ada Lovelace",
+        avatarUrl: "https://avatars.example/ada.png",
+      })
+      // When WorkOS can't be reached, the sign-in token's name is used.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(null, { status: 503 }))
+      )
+      const bob = t.withIdentity({ subject: "user_bob", name: "Bob" })
+      expect(await bob.action(api.users.storeFresh, {})).toMatchObject({
+        name: "Bob",
+      })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    await expect(t.action(api.users.storeFresh, {})).rejects.toThrow(
+      /Sign in first/
+    )
   })
 
   it("signs out", async () => {

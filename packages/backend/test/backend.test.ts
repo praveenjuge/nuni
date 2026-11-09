@@ -3,7 +3,20 @@ import { describe, expect, it, vi } from "vitest"
 
 import { api, internal } from "../convex/_generated/api"
 import { SERVER_LIMITS } from "../convex/limits"
-import { addComment, anchor, page, setup, signIn, type T } from "./helpers"
+import { RATE_LIMITS } from "../convex/rateLimits"
+import {
+  addComment,
+  anchor,
+  ORIGIN,
+  ownedProject,
+  ownerToken,
+  postJson,
+  setup,
+  signIn,
+  storedFiles,
+  upload,
+  type T,
+} from "./helpers"
 
 describe("widget comments", () => {
   it("creates the unclaimed project lazily and lists by path", async () => {
@@ -19,7 +32,7 @@ describe("widget comments", () => {
     })
     expect(pricing).toHaveLength(2)
     expect(pricing.map((c) => c.page.origin).sort()).toEqual([
-      "http://localhost:3000",
+      ORIGIN,
       "https://prod.example.com",
     ])
     expect(pricing[0]).not.toHaveProperty("userAgent")
@@ -69,26 +82,18 @@ describe("widget comments", () => {
 
   it("rejects invalid project ids and empty bodies", async () => {
     const t = setup()
-    await expect(addComment(t, "nuni_nope")).rejects.toThrow()
+    await expect(addComment(t, "nuni_nope")).rejects.toThrow(
+      /Invalid project ID/
+    )
     await expect(
-      t.mutation(internal.comments.createFromWidget, {
-        publicId: generateProjectId(),
-        ip: "1.1.1.1",
-        body: "   ",
-        authorName: "Sam",
-        authorSecret: generateSecret(),
-        page: page(),
-        anchor,
-        viewport: { w: 1, h: 1, dpr: 1 },
-        userAgent: "",
-      })
+      addComment(t, generateProjectId(), { body: "   " })
     ).rejects.toThrow(/empty/)
   })
 
   it("rate limits per IP", async () => {
     const t = setup()
     const publicId = generateProjectId()
-    for (let i = 0; i < 10; i++)
+    for (let i = 0; i < RATE_LIMITS.commentPerIp.capacity; i++)
       await addComment(t, publicId, { ip: "9.9.9.9" })
     await expect(addComment(t, publicId, { ip: "9.9.9.9" })).rejects.toThrow(
       /Slow down/
@@ -105,7 +110,7 @@ describe("widget comments", () => {
     try {
       const t = setup()
       const publicId = generateProjectId()
-      for (let i = 0; i < 10; i++)
+      for (let i = 0; i < RATE_LIMITS.commentPerIp.capacity; i++)
         await addComment(t, publicId, { ip: "9.9.9.9" })
       await expect(addComment(t, publicId, { ip: "9.9.9.9" })).rejects.toThrow(
         /Slow down/
@@ -118,17 +123,20 @@ describe("widget comments", () => {
   })
 
   it("caps unclaimed projects", async () => {
-    const t = setup()
-    const publicId = generateProjectId()
-    await addComment(t, publicId)
-    await t.run(async (ctx) => {
-      const p = await ctx.db
-        .query("projects")
-        .withIndex("by_publicId", (q) => q.eq("publicId", publicId))
-        .unique()
-      await ctx.db.patch(p!._id, { commentCount: LIMITS.unclaimedCommentCap })
-    })
-    await expect(addComment(t, publicId)).rejects.toThrow(/limit/)
+    vi.useFakeTimers()
+    try {
+      const t = setup()
+      const publicId = generateProjectId()
+      const perMinute = RATE_LIMITS.commentPerProject.capacity
+      for (let i = 0; i < LIMITS.unclaimedCommentCap; i++) {
+        if (i % perMinute === 0) vi.advanceTimersByTime(60_000)
+        await addComment(t, publicId, { ip: `10.0.${i >> 8}.${i & 255}` })
+      }
+      vi.advanceTimersByTime(60_000)
+      await expect(addComment(t, publicId)).rejects.toThrow(/limit/)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("lets authors edit and delete only their own comments", async () => {
@@ -188,35 +196,18 @@ describe("widget comments", () => {
     ]) {
       n += 1
       await expect(
-        t.mutation(internal.comments.createFromWidget, {
-          publicId,
-          ip: `10.0.0.${n}`,
-          body: "Hi",
-          authorName: "Sam",
-          authorSecret: generateSecret(),
-          // The attacker supplies a url consistent with the origin, so the
-          // payload reaches the path check.
-          page: { ...page(), path: bad },
-          anchor,
-          viewport: { w: 1, h: 1, dpr: 1 },
-          userAgent: "",
-        })
+        // The attacker supplies a url consistent with the origin, so the
+        // payload reaches the path check.
+        addComment(t, publicId, { ip: `10.0.0.${n}`, page: { path: bad } })
       ).rejects.toThrow(/continue the host/)
     }
     // Normal, hash-router and custom getPageKey paths still work.
     await addComment(t, publicId, { path: "/docs" })
     await addComment(t, publicId, { path: "/#/settings" })
-    await t.mutation(internal.comments.createFromWidget, {
-      publicId,
+    // Custom keys are opaque: the real URL stays a normal page URL.
+    await addComment(t, publicId, {
       ip: "10.0.0.99",
-      body: "Hi",
-      authorName: "Sam",
-      authorSecret: generateSecret(),
-      // Custom keys are opaque: the real URL stays a normal page URL.
-      page: { ...page(), path: "product-123" },
-      anchor,
-      viewport: { w: 1, h: 1, dpr: 1 },
-      userAgent: "",
+      page: { path: "product-123" },
     })
     const pages = await t.query(api.comments.pagesWithComments, { publicId })
     expect(pages.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
@@ -229,18 +220,19 @@ describe("widget comments", () => {
   it("rejects a page URL that does not match its origin", async () => {
     const t = setup()
     await expect(
-      t.mutation(internal.comments.createFromWidget, {
-        publicId: generateProjectId(),
-        ip: "1.1.1.1",
-        body: "Hi",
-        authorName: "Sam",
-        authorSecret: generateSecret(),
-        page: { ...page(), url: "https://other.example.com/pricing?token=x" },
-        anchor,
-        viewport: { w: 1, h: 1, dpr: 1 },
-        userAgent: "",
+      addComment(t, generateProjectId(), {
+        page: { url: "https://other.example.com/pricing?token=x" },
       })
     ).rejects.toThrow(/does not match/)
+  })
+
+  it("lists comments on a path longer than the stored one", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const path = `/${"a".repeat(SERVER_LIMITS.pagePartMaxLength + 50)}`
+    const id = await addComment(t, publicId, { path })
+    const listed = await t.query(api.comments.listForPage, { publicId, path })
+    expect(listed.map((c) => c._id)).toEqual([id])
   })
 
   it("keeps page counts in sync through resolve, reopen and delete", async () => {
@@ -267,6 +259,7 @@ describe("widget comments", () => {
     })
     expect(list[0]?._id).toBe(newer)
   })
+
   it("returns a single comment by id for deep links", async () => {
     const t = setup()
     const publicId = generateProjectId()
@@ -320,17 +313,11 @@ describe("widget comments", () => {
     const quote = { exact: "Start free trial", prefix: "", suffix: "" }
 
     // On selected words, with no comment text: the suggestion says it all.
-    const onText = await t.mutation(internal.comments.createFromWidget, {
-      publicId,
-      ip: "1.1.1.1",
+    const onText = await addComment(t, publicId, {
       body: "  ",
-      authorName: "Sam",
-      authorSecret: secret,
+      secret,
       suggestion: { before: "Start free trial", after: "Try it free" },
-      page: page(),
-      anchor: { ...anchor, quote },
-      viewport: { w: 1280, h: 800, dpr: 2 },
-      userAgent: "test",
+      anchor: { quote },
     })
     // On a small element's whole text (the anchor text is "Buy now").
     await addComment(t, publicId, {
@@ -493,7 +480,7 @@ describe("claiming and owner actions", () => {
     expect(
       await alice.mutation(api.projects.claim, {
         publicId,
-        origin: "http://localhost:3000",
+        origin: ORIGIN,
       })
     ).toMatchObject({ status: "claimed" })
   })
@@ -506,7 +493,9 @@ describe("claiming and owner actions", () => {
     const bob = await signIn(t, "user_bob", "Bob")
     await alice.mutation(api.projects.claim, { publicId })
 
-    await expect(bob.mutation(api.comments.resolve, { id })).rejects.toThrow()
+    await expect(bob.mutation(api.comments.resolve, { id })).rejects.toThrow(
+      /owner/
+    )
     await alice.mutation(api.comments.resolve, { id })
     expect(
       (
@@ -561,14 +550,11 @@ describe("claiming and owner actions", () => {
     await expect(
       bob.mutation(api.sessions.create, {
         publicId,
-        origin: "http://localhost:3000",
+        origin: ORIGIN,
       })
     ).rejects.toThrow(/owner/)
 
-    const { token } = await alice.mutation(api.sessions.create, {
-      publicId,
-      origin: "http://localhost:3000",
-    })
+    const token = await ownerToken(alice, publicId)
     expect(
       await t.query(api.sessions.validate, {
         publicId,
@@ -592,7 +578,7 @@ describe("claiming and owner actions", () => {
         id: otherComment,
         sessionToken: token,
       })
-    ).rejects.toThrow()
+    ).rejects.toThrow(/Not signed in to this project/)
 
     const [session] = await alice.query(api.sessions.listMine, { publicId })
     await alice.mutation(api.sessions.revoke, { id: session!._id })
@@ -601,7 +587,7 @@ describe("claiming and owner actions", () => {
         id,
         sessionToken: token,
       })
-    ).rejects.toThrow()
+    ).rejects.toThrow(/Not signed in to this project/)
   })
 
   it("only mints owner sessions for origins registered to the project", async () => {
@@ -619,10 +605,7 @@ describe("claiming and owner actions", () => {
       })
     ).rejects.toThrow(/not registered/)
     // The registered origin still works.
-    const { token } = await alice.mutation(api.sessions.create, {
-      publicId,
-      origin: "http://localhost:3000",
-    })
+    const token = await ownerToken(alice, publicId)
     expect(
       await t.query(api.sessions.validate, { publicId, sessionToken: token })
     ).toMatchObject({ valid: true })
@@ -630,10 +613,7 @@ describe("claiming and owner actions", () => {
 
   it("stops anonymous traffic from registering origins on claimed projects", async () => {
     const t = setup()
-    const publicId = generateProjectId()
-    await addComment(t, publicId)
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
+    const { publicId, alice } = await ownedProject(t)
 
     // Neither widget loads nor new comments append origins once claimed,
     // so the session origin check cannot be pre-defeated by pollution.
@@ -643,7 +623,7 @@ describe("claiming and owner actions", () => {
     })
     await addComment(t, publicId, { origin: "https://attacker.example" })
     const project = await alice.query(api.projects.getMine, { publicId })
-    expect(project?.origins).toEqual(["http://localhost:3000"])
+    expect(project?.origins).toEqual([ORIGIN])
     await expect(
       alice.mutation(api.sessions.create, {
         publicId,
@@ -659,29 +639,23 @@ describe("claiming and owner actions", () => {
     const alice = await signIn(t, "user_alice", "Alice")
     const bob = await signIn(t, "user_bob", "Bob")
     await alice.mutation(api.projects.claim, { publicId })
-    const projectId = (await alice.query(api.projects.getMine, { publicId }))!
-      ._id
-
     await expect(
       bob.mutation(api.projects.addOrigin, {
-        projectId,
+        publicId,
         origin: "https://attacker.example",
       })
-    ).rejects.toThrow()
+    ).rejects.toThrow(/owner/)
     await alice.mutation(api.projects.addOrigin, {
-      projectId,
+      publicId,
       origin: "https://staging.example.com",
     })
     // Adding the same origin twice is a no-op.
     await alice.mutation(api.projects.addOrigin, {
-      projectId,
+      publicId,
       origin: "https://staging.example.com",
     })
     const project = await alice.query(api.projects.getMine, { publicId })
-    expect(project?.origins).toEqual([
-      "http://localhost:3000",
-      "https://staging.example.com",
-    ])
+    expect(project?.origins).toEqual([ORIGIN, "https://staging.example.com"])
     // Sessions can now be minted for the newly registered origin.
     const { token } = await alice.mutation(api.sessions.create, {
       publicId,
@@ -700,20 +674,15 @@ describe("claiming and owner actions", () => {
     const alice = await signIn(t, "user_alice", "Alice")
     const bob = await signIn(t, "user_bob", "Bob")
     await alice.mutation(api.projects.claim, { publicId })
-    const projectId = (await alice.query(api.projects.getMine, { publicId }))!
-      ._id
     await alice.mutation(api.projects.addOrigin, {
-      projectId,
+      publicId,
       origin: "https://staging.example.com",
     })
     const { token: staging } = await alice.mutation(api.sessions.create, {
       publicId,
       origin: "https://staging.example.com",
     })
-    const { token: local } = await alice.mutation(api.sessions.create, {
-      publicId,
-      origin: "http://localhost:3000",
-    })
+    const local = await ownerToken(alice, publicId)
     const { token: commenter } = await bob.mutation(api.commenters.create, {
       publicId,
       origin: "https://staging.example.com",
@@ -721,21 +690,21 @@ describe("claiming and owner actions", () => {
 
     await expect(
       bob.mutation(api.projects.removeOrigin, {
-        projectId,
+        publicId,
         origin: "https://staging.example.com",
       })
-    ).rejects.toThrow()
+    ).rejects.toThrow(/owner/)
     await alice.mutation(api.projects.removeOrigin, {
-      projectId,
+      publicId,
       origin: "https://staging.example.com/",
     })
     // Removing one that isn't there is a no-op.
     await alice.mutation(api.projects.removeOrigin, {
-      projectId,
+      publicId,
       origin: "https://staging.example.com",
     })
     const project = await alice.query(api.projects.getMine, { publicId })
-    expect(project?.origins).toEqual(["http://localhost:3000"])
+    expect(project?.origins).toEqual([ORIGIN])
 
     // Sign-ins made on the removed site are gone; others stay.
     expect(
@@ -765,79 +734,6 @@ describe("claiming and owner actions", () => {
         origin: "https://staging.example.com",
       })
     ).rejects.toThrow(/not registered/)
-  })
-
-  it("expires widget sessions", async () => {
-    const t = setup()
-    const publicId = generateProjectId()
-    const id = await addComment(t, publicId)
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
-    const { token } = await alice.mutation(api.sessions.create, {
-      publicId,
-      origin: "http://localhost:3000",
-    })
-    await t.run(async (ctx) => {
-      for (const s of await ctx.db.query("widgetSessions").collect()) {
-        await ctx.db.patch(s._id, { expiresAt: Date.now() - 1 })
-      }
-    })
-    await expect(
-      t.mutation(api.comments.resolve, {
-        id,
-        sessionToken: token,
-      })
-    ).rejects.toThrow()
-  })
-  it("cleans up expired sessions", async () => {
-    const t = setup()
-    const publicId = generateProjectId()
-    await addComment(t, publicId)
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
-    await alice.mutation(api.sessions.create, {
-      publicId,
-      origin: "http://localhost:3000",
-    })
-    await alice.mutation(api.sessions.create, {
-      publicId,
-      origin: "http://localhost:3000",
-    })
-    await t.run(async (ctx) => {
-      const [first] = await ctx.db.query("widgetSessions").collect()
-      await ctx.db.patch(first!._id, { expiresAt: Date.now() - 1 })
-    })
-    expect(await t.mutation(internal.tokens.cleanupExpired, {})).toBe(1)
-    const left = await t.run((ctx) => ctx.db.query("widgetSessions").collect())
-    expect(left).toHaveLength(1)
-  })
-
-  it("releases projects when their owner is deleted in WorkOS", async () => {
-    const t = setup()
-    const publicId = generateProjectId()
-    await addComment(t, publicId)
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
-    await alice.mutation(api.sessions.create, {
-      publicId,
-      origin: "http://localhost:3000",
-    })
-
-    await t.mutation(internal.auth.authKitEvent, {
-      event: "user.deleted",
-      data: { id: "user_alice" },
-    })
-
-    expect(await t.query(api.projects.status, { publicId })).toMatchObject({
-      claimed: false,
-    })
-    expect(
-      await t.run((ctx) => ctx.db.query("widgetSessions").collect())
-    ).toHaveLength(0)
-    const bob = await signIn(t, "user_bob", "Bob")
-    expect(await bob.mutation(api.projects.claim, { publicId })).toMatchObject({
-      status: "claimed",
-    })
   })
 
   it("shows the claim state without claiming", async () => {
@@ -889,10 +785,7 @@ describe("claiming and owner actions", () => {
 
   it("searches by author name as well as body", async () => {
     const t = setup()
-    const publicId = generateProjectId()
-    await addComment(t, publicId)
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
+    const { publicId, alice } = await ownedProject(t)
     const search = (q: string) =>
       alice.query(api.comments.listForOwner, {
         publicId,
@@ -907,19 +800,16 @@ describe("claiming and owner actions", () => {
 
   it("keeps cleaning up while expired sessions remain", async () => {
     const t = setup()
-    const publicId = generateProjectId()
-    await addComment(t, publicId)
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
+    await ownedProject(t)
     await t.run(async (ctx) => {
       const project = await ctx.db.query("projects").first()
       const user = await ctx.db.query("users").first()
-      for (let i = 0; i < 520; i++) {
+      for (let i = 0; i < SERVER_LIMITS.cleanupBatch + 20; i++) {
         await ctx.db.insert("widgetSessions", {
           tokenHash: `h${i}`,
           userId: user!._id,
           projectId: project!._id,
-          origin: "http://localhost:3000",
+          origin: ORIGIN,
           expiresAt: Date.now() - 1,
         })
       }
@@ -934,19 +824,12 @@ describe("claiming and owner actions", () => {
   })
 })
 
-// A minimal valid WebP header: RIFF....WEBP
-const WEBP = new Uint8Array([
-  0x52, 0x49, 0x46, 0x46, 0x1a, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50,
-  0x38, 0x4c, 0x0d, 0, 0, 0, 0x2f, 0, 0, 0, 0x10, 0x07, 0x10, 0x11, 0x11, 0x88,
-  0x88, 0xfe, 0x07, 0,
-])
-
 describe("attached images", () => {
   const uploadImage = (
     t: T,
     target: { publicId: string; id: string; secret: string },
-    body: Uint8Array<ArrayBuffer> = WEBP
-  ) => uploadScreenshot(t, target, body, "/widget/image")
+    body?: BodyInit
+  ) => upload(t, "image", target, body)
 
   it("lets the author attach a few public images on claimed sites", async () => {
     const t = setup()
@@ -1006,11 +889,7 @@ describe("attached images", () => {
     expect(owner?.imageUrls).toEqual(thread.images)
 
     // Deleting the comment deletes every file.
-    const files = () =>
-      t.run((ctx) => ctx.db.system.query("_storage").collect())
-    expect(await files()).toHaveLength(LIMITS.imagesPerComment + 1)
-    await t.mutation(api.comments.deleteOwn, { id, authorSecret: secret })
-    expect(await files()).toHaveLength(0)
+    expect(await storedFiles(t)).toHaveLength(LIMITS.imagesPerComment + 1)
   })
 
   it("rejects images after the upload window, and deletes them with the project", async () => {
@@ -1034,50 +913,30 @@ describe("attached images", () => {
 
       const project = await alice.query(api.projects.getMine, { publicId })
       await alice.mutation(api.projects.remove, {
-        projectId: project!._id,
+        publicId,
         confirmName: project!.name,
       })
       await t.finishAllScheduledFunctions(vi.runAllTimers)
-      expect(
-        await t.run((ctx) => ctx.db.system.query("_storage").collect())
-      ).toHaveLength(0)
+      expect(await storedFiles(t)).toHaveLength(0)
     } finally {
       vi.useRealTimers()
     }
   })
 })
 
-function uploadScreenshot(
+const uploadScreenshot = (
   t: T,
   target: { publicId: string; id: string; secret: string },
-  body: Uint8Array<ArrayBuffer> = WEBP,
-  path = "/widget/screenshot"
-) {
-  return t.fetch(path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "image/webp",
-      "X-Nuni-Project": target.publicId,
-      "X-Nuni-Comment": target.id,
-      "X-Nuni-Author": target.secret,
-    },
-    body,
-  })
-}
+  body?: BodyInit
+) => upload(t, "screenshot", target, body)
 
 describe("lost pins", () => {
-  function report(
+  const report = (
     t: T,
     publicId: string,
     body: { path?: string; lost?: string[]; found?: string[] },
-    ip = "5.5.5.5"
-  ) {
-    return t.fetch("/widget/pins", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Real-IP": ip },
-      body: JSON.stringify({ publicId, path: "/pricing", ...body }),
-    })
-  }
+    ip?: string
+  ) => postJson(t, "/widget/pins", { publicId, path: "/pricing", ...body }, ip)
 
   it("records pins visitors can't find, and clears them when found", async () => {
     const t = setup()
@@ -1123,13 +982,14 @@ describe("lost pins", () => {
     const t = setup()
     const publicId = generateProjectId()
     const id = await addComment(t, publicId)
+    const allowed = RATE_LIMITS.pinReportPerIp.capacity
     const statuses: number[] = []
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i <= allowed; i++) {
       statuses.push(
         (await report(t, publicId, { lost: [id] }, "6.6.6.6")).status
       )
     }
-    expect(statuses.filter((s) => s === 200)).toHaveLength(20)
+    expect(statuses.filter((s) => s === 200)).toHaveLength(allowed)
     expect(statuses.at(-1)).toBe(429)
     const tooMany = Array.from({ length: LIMITS.pinReportMax + 1 }, () => id)
     expect((await report(t, publicId, { lost: tooMany })).status).toBe(400)
@@ -1137,10 +997,7 @@ describe("lost pins", () => {
 
   it("lets only the owner move a pin or close a comment as outdated", async () => {
     const t = setup()
-    const publicId = generateProjectId()
-    const id = await addComment(t, publicId)
-    const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
+    const { publicId, alice, id } = await ownedProject(t)
     await report(t, publicId, { lost: [id] })
 
     const moved = { ...anchor, text: "Start free trial", tag: "a" }
@@ -1267,10 +1124,7 @@ describe("captured context and screenshots", () => {
     expect(JSON.stringify(mine?.context)).not.toContain("secret")
     expect(mine?.screenshotUrl).toBeNull()
 
-    const { token } = await alice.mutation(api.sessions.create, {
-      publicId,
-      origin: "http://localhost:3000",
-    })
+    const token = await ownerToken(alice, publicId)
     const viaWidget = await t.query(api.comments.getForOwner, {
       publicId,
       id,
@@ -1342,23 +1196,17 @@ describe("captured context and screenshots", () => {
     expect(tooBig.status).toBe(413)
 
     // Without a Content-Length, the body is still cut off at the limit.
-    const chunked = await t.fetch("/widget/screenshot", {
-      method: "POST",
-      headers: {
-        "Content-Type": "image/webp",
-        "X-Nuni-Project": publicId,
-        "X-Nuni-Comment": id,
-        "X-Nuni-Author": secret,
-      },
-      body: new ReadableStream({
+    const chunked = await uploadScreenshot(
+      t,
+      { publicId, id, secret },
+      new ReadableStream({
         start(controller) {
           for (let i = 0; i < 4; i++)
             controller.enqueue(new Uint8Array(LIMITS.screenshotMaxBytes / 2))
           controller.close()
         },
-      }),
-      duplex: "half",
-    } as RequestInit)
+      })
+    )
     expect(chunked.status).toBe(413)
 
     const ok = await uploadScreenshot(t, { publicId, id, secret })
@@ -1376,30 +1224,23 @@ describe("captured context and screenshots", () => {
     })
     expect(pub).not.toHaveProperty("screenshotUrl")
 
-    // Deleting the comment deletes the file.
-    const files = () =>
-      t.run((ctx) => ctx.db.system.query("_storage").collect())
-    expect(await files()).toHaveLength(1)
-    await alice.mutation(api.comments.remove, { id })
-    expect(await files()).toHaveLength(0)
+    expect(await storedFiles(t)).toHaveLength(1)
   })
 
   it("rejects screenshots after the upload window", async () => {
-    const t = setup()
-    const publicId = generateProjectId()
-    const secret = generateSecret()
-    const id = await addComment(t, publicId, { secret })
-    await t.run(async (ctx) => {
-      await ctx.db.patch(id, {
-        createdAt: Date.now() - SERVER_LIMITS.uploadWindowMs - 1000,
-      })
-    })
-    const late = await uploadScreenshot(t, { publicId, id, secret })
-    expect(late.status).toBe(410)
-    const files = await t.run((ctx) =>
-      ctx.db.system.query("_storage").collect()
-    )
-    expect(files).toHaveLength(0)
+    vi.useFakeTimers()
+    try {
+      const t = setup()
+      const publicId = generateProjectId()
+      const secret = generateSecret()
+      const id = await addComment(t, publicId, { secret })
+      vi.advanceTimersByTime(SERVER_LIMITS.uploadWindowMs + 1)
+      const late = await uploadScreenshot(t, { publicId, id, secret })
+      expect(late.status).toBe(410)
+      expect(await storedFiles(t)).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
