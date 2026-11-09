@@ -69,6 +69,36 @@ describe("widget", () => {
     expect(root.querySelector("[data-card]")).toBeNull()
   })
 
+  it("asks for a name before posting, and offers to change a remembered one", async () => {
+    const root = await mount()
+    const compose = () => {
+      press("c")
+      document.getElementById("title")!.click()
+    }
+    compose()
+    type(root.querySelector('[data-focus-key="body"]')!, "Too small")
+    root
+      .querySelector<HTMLFormElement>('[data-card="composer"]')!
+      .requestSubmit()
+    expect(root.querySelector('[role="alert"]')?.textContent).toBe(
+      "Enter your name"
+    )
+    press("Escape")
+
+    localStorage.setItem("nuni:name", "Sam")
+    instance?.destroy()
+    const again = await mount()
+    press("c")
+    document.getElementById("title")!.click()
+    expect(again.querySelector('[data-focus-key="name"]')).toBeNull()
+    expect(again.querySelector(".cmp-head .author")?.textContent).toBe("Sam")
+    const notYou = [...again.querySelectorAll("button")].find(
+      (b) => b.textContent === "Not you?"
+    )!
+    notYou.click()
+    expect(again.querySelector('[data-focus-key="name"]')).toBeTruthy()
+  })
+
   it("cancels picking and closes the card with Escape", async () => {
     const root = await mount()
     press("c")

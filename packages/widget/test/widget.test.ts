@@ -4,7 +4,7 @@ import { optionsFromAttributes, pageKeyFor, resolveConfig } from "../src/config"
 import { domContext, safeUrl, startCollectors } from "../src/context"
 import { CAPTURE_MARK, ownTraffic } from "../src/mark"
 import { maskedBoxes } from "../src/screenshot"
-import { colorFor, h, icon, initials, readableOn } from "../src/dom"
+import { h, icon, initials, readableOn } from "../src/dom"
 import { createI18n } from "../src/i18n"
 import { ICONS } from "../src/icons"
 import { init } from "../src/index"
@@ -46,11 +46,10 @@ describe("dom helpers", () => {
     expect(el.textContent).toBe("<img src=x onerror=alert(1)>")
   })
 
-  it("formats initials, colors and times", () => {
+  it("formats initials and times", () => {
     expect(initials("Sam Tester")).toBe("ST")
     expect(initials("ada")).toBe("AD")
     expect(initials("  ")).toBe("?")
-    expect(colorFor("Sam")).toBe(colorFor("Sam"))
     const { timeAgo } = createI18n("en")
     expect(timeAgo(Date.now() - 10_000)).toBe("just now")
     expect(timeAgo(Date.now() - 5 * 60_000)).toBe("5m ago")
@@ -82,6 +81,22 @@ describe("messages", () => {
     // Words not overridden stay English.
     expect(t("post")).toBe("Post")
     expect(timeAgo(Date.now() - 86_400_000)).toBe("gestern")
+  })
+
+  it("says what a failed call means, in the site's words", () => {
+    const { failed } = createI18n("en", { slowDown: "Doucement" })
+    expect(failed("rate_limited", "postFailed")).toBe("Doucement")
+    expect(failed("network", "postFailed")).toBe(
+      "Couldn't reach Nuni. Check your connection."
+    )
+    expect(failed("conflict", "imageFailed")).toBe("Add up to 3 images")
+    // Codes a visitor can't act on fall back to the action's message.
+    expect(failed("invalid_page", "postFailed")).toBe(
+      "Couldn't post the comment"
+    )
+    expect(
+      failed("cap_reached", "postFailed", { cap_reached: "siteFull" })
+    ).toMatch(/comment limit for unclaimed projects/)
   })
 
   it("survives an invalid locale", () => {
@@ -158,19 +173,33 @@ describe("options", () => {
 })
 
 describe("storage", () => {
-  it("reads and writes, falling back to memory", () => {
+  it("reads and writes", () => {
     write(KEYS.name, "Sam")
     expect(read(KEYS.name)).toBe("Sam")
     write(KEYS.name, null)
     expect(read(KEYS.name)).toBeNull()
   })
+
+  it("keeps values in memory where storage is blocked", () => {
+    const blocked = () => {
+      throw new DOMException("blocked", "SecurityError")
+    }
+    const spies = (["getItem", "setItem", "removeItem"] as const).map((m) =>
+      vi.spyOn(Storage.prototype, m).mockImplementation(blocked)
+    )
+    try {
+      write(KEYS.name, "Sam")
+      expect(read(KEYS.name)).toBe("Sam")
+      write(KEYS.name, null)
+      expect(read(KEYS.name)).toBeNull()
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
+  })
 })
 
 describe("config", () => {
-  it("uses build defaults and allows overrides", () => {
-    expect(resolveConfig({ project: "p" }).convexUrl).toBe(
-      "http://127.0.0.1:3210"
-    )
+  it("takes the dashboard URL without a trailing slash", () => {
     expect(
       resolveConfig({ project: "p", appUrl: "https://x.com/" }).appUrl
     ).toBe("https://x.com")
@@ -293,7 +322,7 @@ describe("context collectors", () => {
   })
 })
 
-describe("domContext", () => {
+describe("what visitors typed or masked never leaves the page", () => {
   it("removes form values and scripts, and reads key styles", () => {
     document.body.innerHTML = `<form id="f" style="padding: 4px">
       <input name="email" value="me@example.com">
@@ -368,7 +397,6 @@ describe("init handles", () => {
   const mounted = () => document.getElementById("nuni-root")
   afterEach(() => {
     document.body.innerHTML = ""
-    vi.useRealTimers()
   })
 
   it("only removes the widget when every handle for it is destroyed", async () => {

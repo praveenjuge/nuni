@@ -148,7 +148,6 @@ export function createPicker(ctx: Ctx) {
     const node = range.commonAncestorContainer
     const el = node.nodeType === 1 ? (node as Element) : node.parentElement
     if (!el || ctx.host.contains(el)) return null
-    // Text being typed (a field, an editor) is not page content.
     if (isEditable(el)) return null
     return range.toString().trim() ? range : null
   }

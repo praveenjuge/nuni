@@ -14,7 +14,6 @@ export { optionsFromAttributes, VERSION } from "./config"
  */
 export function init(options: NuniOptions): NuniInstance {
   return mount(options, {
-    // A separate chunk, fetched only when someone comments.
     loadScreenshot: () =>
       import("./screenshot-tools").then((m) => m.screenshotTools),
   })

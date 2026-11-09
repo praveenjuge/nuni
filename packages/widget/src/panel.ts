@@ -86,7 +86,6 @@ export function createPanel(ctx: Ctx) {
     const status = tab === "resolved" ? "resolved" : "open"
     const here = (s: WidgetComment["status"]) =>
       page.comments.filter((c) => c.status === s)
-    // Other pages' comments, grouped by page, newest page first.
     const elsewhere = (s: WidgetComment["status"]) =>
       (site ?? []).filter((c) => c.page.path !== page.key && c.status === s)
     const list = (tab === "mine" ? (mine ?? []) : here(status)).filter(found)

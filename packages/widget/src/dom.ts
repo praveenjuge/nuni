@@ -61,12 +61,11 @@ export function colorFor(name: string): string {
 
 /** Copy text, falling back to execCommand where the async clipboard is off (plain http previews). */
 export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    // fall through
-  }
+  const copied = await navigator.clipboard
+    ?.writeText(text)
+    .then(() => true)
+    .catch(() => false)
+  if (copied) return true
   const area = document.createElement("textarea")
   area.value = text
   area.setAttribute("readonly", "")
