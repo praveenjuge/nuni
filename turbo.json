@@ -6,10 +6,12 @@
     "build": {
       "dependsOn": ["^build"],
       "env": [
+        "NUNI_RELEASE",
         "NUNI_CONVEX_URL",
         "NUNI_CONVEX_SITE_URL",
         "NUNI_APP_URL",
         "NEXT_PUBLIC_*",
+        "PUBLIC_NUNI_*",
         "WORKOS_*",
         "CONVEX_*"
       ],
@@ -46,7 +48,6 @@
     "CHROMIUM_PATH",
     "PLAYWRIGHT_*",
     "CONVEX_AGENT_MODE",
-    "VITE_*",
     "NODE_EXTRA_CA_CERTS",
     "SSL_CERT_FILE",
     "HTTPS_PROXY",

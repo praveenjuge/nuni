@@ -21,9 +21,11 @@
     "version-packages": "bun scripts/sync-package-versions.ts",
     "readmes": "bun scripts/sync-readmes.ts",
     "readmes:check": "bun scripts/sync-readmes.ts --check",
+    "publish-packages": "bun scripts/publish.ts",
     "e2e": "turbo run e2e"
   },
   "devDependencies": {
+    "@nuni/shared": "workspace:*",
     "prettier": "^3.9.9",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "turbo": "^2.11.5",

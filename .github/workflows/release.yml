@@ -16,43 +16,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: ./.github/actions/setup
         with:
-          bun-version: 1.4.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      - run: bun install --frozen-lockfile
+          # npm trusted publishing needs npm 11.5.1+, which ships with Node 24.
+          node-version: "24"
       - name: Sync package versions from root
         run: |
           bun run version-packages
           bun install
-          if ! git diff --quiet -- package.json packages/widget/package.json packages/react/package.json packages/cli/package.json bun.lock; then
+          if ! git diff --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add package.json packages/widget/package.json packages/react/package.json packages/cli/package.json bun.lock
-            git commit -m "Sync Nuni package versions"
+            git commit -am "Sync Nuni package versions"
             git push
           fi
       - name: Build public packages
-        run: bunx turbo run build --filter=@nuniapp/widget --filter=@nuniapp/react --filter=@nuniapp/cli
+        run: bunx turbo run build $(bun scripts/public-packages.ts --filters)
         env:
           NUNI_RELEASE: "1"
           NUNI_CONVEX_URL: ${{ vars.NUNI_CONVEX_URL }}
           NUNI_CONVEX_SITE_URL: ${{ vars.NUNI_CONVEX_SITE_URL }}
           NUNI_APP_URL: https://nuni.praveenjuge.com
       - name: Publish new versions with npm trusted publishing
-        run: |
-          for package_dir in packages/widget packages/react packages/cli; do
-            package_name=$(node -p "require('./${package_dir}/package.json').name")
-            package_version=$(node -p "require('./${package_dir}/package.json').version")
-            if lookup_output=$(npm view "$package_name@$package_version" version 2>&1); then
-              echo "$package_name@$package_version is already published"
-            elif [[ "$lookup_output" == *"npm error code E404"* ]]; then
-              (cd "$package_dir" && npm publish --access public)
-            else
-              printf '%s\n' "$lookup_output" >&2
-              exit 1
-            fi
-          done
+        run: bun run publish-packages
