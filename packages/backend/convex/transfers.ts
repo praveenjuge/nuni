@@ -7,7 +7,6 @@ import { fail, type Ctx } from "./lib"
 import {
   clearTransfers,
   dashboardProject,
-  projectRef,
   requireDashboardProject,
   setOwner,
 } from "./ownership"
@@ -36,9 +35,9 @@ async function linkedProject(ctx: Ctx, token: string) {
  * earlier link stops working. The token is returned once.
  */
 export const create = mutation({
-  args: projectRef,
-  handler: async (ctx, ref) => {
-    const { userId, project } = await requireDashboardProject(ctx, ref)
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const { userId, project } = await requireDashboardProject(ctx, publicId)
     await clearTransfers(ctx, project._id)
     const { token, hash } = await mintToken("transfers")
     const expiresAt = Date.now() + LIMITS.transferTtlMs
@@ -53,18 +52,18 @@ export const create = mutation({
 })
 
 export const cancel = mutation({
-  args: projectRef,
-  handler: async (ctx, ref) => {
-    const { project } = await requireDashboardProject(ctx, ref)
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
     await clearTransfers(ctx, project._id)
   },
 })
 
 /** The owner's open transfer link, if any (its expiry; not the token). */
 export const active = query({
-  args: projectRef,
-  handler: async (ctx, ref) => {
-    const project = await dashboardProject(ctx, ref)
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const project = await dashboardProject(ctx, publicId)
     if (!project) return null
     const transfers = await ctx.db
       .query("transfers")

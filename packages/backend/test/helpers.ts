@@ -85,32 +85,48 @@ export async function addComment(
   })
 }
 
+/**
+ * A dashboard sign-in, storing the user as `users.storeFresh` does when
+ * WorkOS can't be reached (from the sign-in token).
+ */
 export async function signIn(t: T, subject: string, name: string) {
   const user = t.withIdentity({ subject, name })
-  await user.mutation(api.users.store, {})
+  await user.mutation(internal.users.storeProfile, {})
   return user
 }
 
-/** A project with a comment on each of `paths`, claimed by Alice. */
+type User = Awaited<ReturnType<typeof signIn>>
+
+/**
+ * The claim popup on the project's site: claims it unless someone else
+ * owns it, and gives the owner a widget session there.
+ */
+export function claim(user: User, publicId: string, origin = ORIGIN) {
+  return user.mutation(api.sessions.allowOwnerTools, { publicId, origin })
+}
+
+/**
+ * A project with a comment on each of `paths`, claimed by Alice on its site
+ * (`token` is the widget session that gives her).
+ */
 export async function ownedProject(t: T, paths = ["/pricing"]) {
   const publicId = generateProjectId()
   const ids: Awaited<ReturnType<typeof addComment>>[] = []
   for (const path of paths) ids.push(await addComment(t, publicId, { path }))
   const alice = await signIn(t, "user_alice", "Alice")
-  await alice.mutation(api.projects.claim, { publicId, origin: ORIGIN })
-  return { publicId, alice, ids, id: ids[0]! }
+  const token = await ownerToken(alice, publicId)
+  return { publicId, alice, ids, id: ids[0]!, token }
 }
 
 /** An owner session for the project's site, as the widget gets it. */
 export async function ownerToken(
-  owner: Awaited<ReturnType<typeof signIn>>,
-  publicId: string
+  owner: User,
+  publicId: string,
+  origin = ORIGIN
 ) {
-  const { token } = await owner.mutation(api.sessions.create, {
-    publicId,
-    origin: ORIGIN,
-  })
-  return token
+  const allowed = await claim(owner, publicId, origin)
+  if (allowed.status === "claimed_by_other") throw new Error("Not the owner")
+  return allowed.token
 }
 
 /** A visitor signs in with GitHub (via the dashboard) to comment on the site. */
@@ -124,7 +140,7 @@ export async function signInToComment(
     name: "Ada Lovelace",
     pictureUrl: "https://avatars.githubusercontent.com/u/1",
   })
-  await user.mutation(api.users.store, {})
+  await user.mutation(internal.users.storeProfile, {})
   const { token } = await user.mutation(api.commenters.create, {
     publicId,
     origin: ORIGIN,

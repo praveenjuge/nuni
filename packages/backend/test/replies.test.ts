@@ -6,6 +6,7 @@ import { SERVER_LIMITS } from "../convex/limits"
 import { RATE_LIMITS } from "../convex/rateLimits"
 import {
   addComment,
+  claim,
   ownerToken,
   postJson,
   setup,
@@ -81,7 +82,7 @@ describe("replies", () => {
     const publicId = generateProjectId()
     const id = await addComment(t, publicId)
     const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
+    await claim(alice, publicId)
     const token = await ownerToken(alice, publicId)
 
     await reply(t, publicId, id, { sessionToken: token, body: "On it" })
@@ -154,7 +155,7 @@ describe("replies", () => {
 
     await t.mutation(api.replies.deleteOwn, { id: mine, authorSecret: secret })
     const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
+    await claim(alice, publicId)
     await alice.mutation(api.replies.remove, { id: theirs })
     ;({ replies } = await thread(t, publicId, id))
     expect(replies).toEqual([])

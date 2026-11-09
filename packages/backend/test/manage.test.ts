@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import { api, internal } from "../convex/_generated/api"
 import {
   addComment,
+  claim,
   ORIGIN,
   ownedProject,
   ownerToken,
@@ -252,7 +253,7 @@ describe("sessions", () => {
   it("revokes every session of a project at once", async () => {
     const t = setup()
     const { publicId, alice } = await ownedProject(t)
-    for (let i = 0; i < 3; i++) await ownerToken(alice, publicId)
+    for (let i = 0; i < 2; i++) await ownerToken(alice, publicId)
     expect(await alice.query(api.sessions.listMine, { publicId })).toHaveLength(
       3
     )
@@ -268,8 +269,7 @@ describe("sessions", () => {
     vi.useFakeTimers()
     try {
       const t = setup()
-      const { publicId, alice, id } = await ownedProject(t)
-      const old = await ownerToken(alice, publicId)
+      const { publicId, alice, id, token: old } = await ownedProject(t)
       vi.advanceTimersByTime(LIMITS.sessionTtlMs / 2)
       const fresh = await ownerToken(alice, publicId)
       vi.advanceTimersByTime(LIMITS.sessionTtlMs / 2 + 1)
@@ -375,7 +375,7 @@ describe("release and delete", () => {
     ).toEqual({ valid: false })
     // Anyone can claim it again.
     const bob = await signIn(t, "user_bob", "Bob")
-    expect(await bob.mutation(api.projects.claim, { publicId })).toMatchObject({
+    expect(await claim(bob, publicId)).toMatchObject({
       status: "claimed",
     })
   })
@@ -401,7 +401,7 @@ describe("release and delete", () => {
     ).toEqual({ valid: false })
     const bob = await signIn(t, "user_bob", "Bob")
     expect(await bob.query(api.transfers.get, { token: link })).toBeNull()
-    expect(await bob.mutation(api.projects.claim, { publicId })).toMatchObject({
+    expect(await claim(bob, publicId)).toMatchObject({
       status: "claimed",
     })
   })

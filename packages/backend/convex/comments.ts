@@ -445,33 +445,22 @@ const VIEWS = {
   resolved: { status: "resolved", lost: false },
 } as const
 
-/**
- * Dashboard list, owner only, newest first, paginated and filtered
- * server-side. `status` and `lost` are the older form of `view`.
- */
+/** Dashboard list, owner only, newest first, paginated and filtered server-side. */
 export const listForOwner = query({
   args: {
     publicId: v.string(),
-    view: v.optional(
-      v.union(v.literal("open"), v.literal("lost"), v.literal("resolved"))
-    ),
-    status: v.optional(statusValidator),
-    lost: v.optional(v.boolean()),
+    view: v.union(v.literal("open"), v.literal("lost"), v.literal("resolved")),
     path: v.optional(v.string()),
     origin: v.optional(v.string()),
     search: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
   },
-  handler: async (ctx, { view, status, lost, ...args }) => {
-    const project = await dashboardProject(ctx, args)
+  handler: async (ctx, { view, ...args }) => {
+    const project = await dashboardProject(ctx, args.publicId)
     if (!project) return { page: [], isDone: true, continueCursor: "" }
-    const tab =
-      VIEWS[
-        view ?? (status === "resolved" ? "resolved" : lost ? "lost" : "open")
-      ]
     const result = await ownerComments(ctx, project._id, {
       ...args,
-      ...tab,
+      ...VIEWS[view],
     }).paginate(args.paginationOpts)
     const author = authorLookup(ctx)
     return {
@@ -485,7 +474,7 @@ export const listForOwner = query({
 export const lostCount = query({
   args: { publicId: v.string() },
   handler: async (ctx, { publicId }) => {
-    const project = await dashboardProject(ctx, { publicId })
+    const project = await dashboardProject(ctx, publicId)
     if (!project) return 0
     const lost = await ctx.db
       .query("comments")
@@ -497,17 +486,17 @@ export const lostCount = query({
   },
 })
 
-/** Filter choices for the dashboard: every page and environment seen. */
+/** Page filter choices for the dashboard: every page with comments. */
 export const ownerFilters = query({
   args: { publicId: v.string() },
   handler: async (ctx, { publicId }) => {
-    const project = await dashboardProject(ctx, { publicId })
-    if (!project) return { paths: [], origins: [] }
+    const project = await dashboardProject(ctx, publicId)
+    if (!project) return { paths: [] }
     const stats = await ctx.db
       .query("pageStats")
       .withIndex("by_project_path", (q) => q.eq("projectId", project._id))
       .take(SERVER_LIMITS.pageFiltersMax)
-    return { paths: stats.map((p) => p.path), origins: project.origins }
+    return { paths: stats.map((p) => p.path) }
   },
 })
 
