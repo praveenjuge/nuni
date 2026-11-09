@@ -37,6 +37,7 @@ import {
   type Thread,
   type WidgetAuthor,
   type WidgetComment,
+  WIDGET_ATTRIBUTE,
 } from "@nuni/shared"
 
 import {
@@ -404,7 +405,7 @@ export class NuniWidget {
 
     this.host = document.createElement("div")
     this.host.id = "nuni-root"
-    this.host.setAttribute("data-nuni", "")
+    this.host.setAttribute(WIDGET_ATTRIBUTE, "")
     this.applyAppearance()
     this.root = this.host.attachShadow({ mode: "open" })
     const style = document.createElement("style")
@@ -1277,7 +1278,6 @@ export class NuniWidget {
     if (!el || el === this.host || this.host.contains(el)) return null
     // Text being typed (a field, an editor) is not page content.
     if (el.closest("input, textarea, select, [contenteditable]")) return null
-    if (el.closest("[data-nuni]")) return null
     return collapse(range.toString()) ? range : null
   }
 
