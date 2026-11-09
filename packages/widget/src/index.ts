@@ -4,7 +4,7 @@ import { mount, type NuniInstance } from "./mount"
 export type { NuniOptions, PageKey, Position, Theme } from "./config"
 export { EN as messages, type Messages } from "./i18n"
 export type { NuniInstance } from "./mount"
-export { VERSION } from "./config"
+export { optionsFromAttributes, VERSION } from "./config"
 
 /**
  * Mount Nuni on the page. Call once on the client. Calling it again with the

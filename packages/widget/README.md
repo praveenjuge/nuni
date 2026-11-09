@@ -72,7 +72,7 @@ Using React? Use [`@nuniapp/react`](https://www.npmjs.com/package/@nuniapp/react
 | `label`, `hotkey`, `zIndex`            | Optional. Comment button text, shortcut key (`false` turns it off) and stacking order.                     |
 | `locale`, `messages`                   | Optional. Language for times and counts, and replacements for any of the widget's words.                   |
 
-`init` returns `{ destroy() }`.
+`init` returns `{ destroy() }`. On the script tag, each option is a `data-*` attribute (`data-accent-color`, `data-capture-screenshot="false"`); `optionsFromAttributes(element.dataset)` reads them the same way.
 
 ## Using it
 

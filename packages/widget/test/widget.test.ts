@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { pageKeyFor, resolveConfig } from "../src/config"
+import { optionsFromAttributes, pageKeyFor, resolveConfig } from "../src/config"
 import { domContext, safeUrl, startCollectors } from "../src/context"
-import { CAPTURE_MARK } from "../src/mark"
+import { CAPTURE_MARK, ownTraffic } from "../src/mark"
 import { maskedBoxes } from "../src/screenshot"
 import { colorFor, h, icon, initials, readableOn } from "../src/dom"
 import { createI18n } from "../src/i18n"
@@ -132,6 +132,29 @@ describe("options", () => {
       "/#/settings"
     )
   })
+
+  it("reads options from a script tag's data attributes", () => {
+    const script = document.createElement("script")
+
+    Object.assign(script.dataset, {
+      project: "nuni_x",
+      accentColor: "#facc15",
+      zIndex: "0",
+      hotkey: "off",
+      images: "no",
+      captureScreenshot: "false",
+      captureDom: "yes",
+    })
+    expect(optionsFromAttributes(script.dataset)).toEqual({
+      project: "nuni_x",
+      accentColor: "#facc15",
+      zIndex: 0,
+      hotkey: false,
+      images: false,
+      capture: { screenshot: false, dom: true },
+    })
+    expect(optionsFromAttributes({ hotkey: "f" }).hotkey).toBe("f")
+  })
 })
 
 describe("storage", () => {
@@ -193,7 +216,7 @@ describe("context collectors", () => {
     console.error = originalError
   })
 
-  it("records failed requests without query strings, skipping ignored ones", async () => {
+  it("records failed requests without query strings, skipping Nuni's own", async () => {
     const originalFetch = window.fetch
     const mock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -203,7 +226,7 @@ describe("context collectors", () => {
     window.fetch = mock
     const collectors = startCollectors(
       { console: false, network: true },
-      (url) => url.includes("convex")
+      ownTraffic(["https://x.convex.cloud"])
     )
     await fetch("https://api.example.com/missing?token=secret")
     await fetch("https://api.example.com/ok")

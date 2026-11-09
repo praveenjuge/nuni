@@ -9,7 +9,6 @@ import {
   type NetworkEntry,
 } from "@nuni/shared"
 
-import { CAPTURE_MARK } from "./mark"
 import { isMasked, scrub } from "./privacy"
 
 export interface CaptureOptions {
@@ -65,11 +64,11 @@ class Ring<T> {
 /**
  * Keep the latest console errors and failed requests, so a comment can carry
  * what went wrong on the page. Installed once per mount, removed on destroy.
- * `ignore` skips Nuni's own traffic.
+ * `ignore` skips Nuni's own traffic (see mark.ts).
  */
 export function startCollectors(
   options: CaptureOptions,
-  ignore: (url: string) => boolean
+  ignore: (url: string, init?: RequestInit) => boolean
 ): Collectors {
   const logs = new Ring<ConsoleEntry>()
   const requests = new Ring<NetworkEntry>()
@@ -126,15 +125,13 @@ export function startCollectors(
     const originalFetch = window.fetch
     if (typeof originalFetch === "function") {
       const wrappedFetch: typeof fetch = async (input, init) => {
-        // Nuni's own screenshot requests (see mark.ts) are not the page's.
-        if (init && (init as Record<symbol, unknown>)[CAPTURE_MARK])
-          return originalFetch.call(window, input, init)
         const url =
           typeof input === "string"
             ? input
             : input instanceof URL
               ? input.href
               : input.url
+        if (ignore(url, init)) return originalFetch.call(window, input, init)
         const method =
           init?.method ??
           (typeof input === "object" && "method" in input
