@@ -3,7 +3,6 @@ import { useEffect, useState } from "react"
 
 export const client = "only"
 
-/** Generates a fresh project ID in the browser and bakes it into the prompt. */
 export default function CopyPrompt() {
   const [projectId, setProjectId] = useState("")
   const [copied, setCopied] = useState(false)
@@ -23,8 +22,9 @@ export default function CopyPrompt() {
         </div>
         <button
           type="button"
-          className="rounded-lg bg-[var(--color-accent,#d6246e)] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
-          style={{ background: "#d6246e" }}
+          className="rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+          // Blume's theme color, from `theme.accent` in blume.config.ts.
+          style={{ background: "var(--color-accent)" }}
           disabled={!prompt}
           onClick={async () => {
             await navigator.clipboard.writeText(prompt)

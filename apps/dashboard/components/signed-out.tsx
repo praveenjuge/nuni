@@ -1,11 +1,20 @@
-import Image from "next/image"
+"use client"
 
+import { usePathname, useSearchParams } from "next/navigation"
+
+import { NuniMark } from "@/components/logo"
 import { buttonVariants } from "@/components/ui/button"
+import { signInUrl } from "@/lib/config"
 
-export function SignedOut({ returnTo = "/dashboard" }: { returnTo?: string }) {
+export function SignedOut() {
+  const pathname = usePathname()
+  // Back to this page as it was opened: a claim, CLI or transfer link is
+  // nothing without its query.
+  const query = Object.fromEntries(useSearchParams())
+  const route = pathname === "/" ? "" : pathname
   return (
     <div className="mx-auto grid max-w-sm justify-items-center gap-8 py-16 text-center">
-      <Image src="/dashboard/icon.svg" alt="" width={44} height={44} />
+      <NuniMark size={44} />
       <div className="grid gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">
           Your Nuni projects
@@ -17,7 +26,7 @@ export function SignedOut({ returnTo = "/dashboard" }: { returnTo?: string }) {
       </div>
       <a
         className={buttonVariants({ size: "lg", className: "w-full" })}
-        href={`/dashboard/sign-in?returnTo=${encodeURIComponent(returnTo)}`}
+        href={signInUrl(route, query)}
       >
         Sign in to Nuni
       </a>

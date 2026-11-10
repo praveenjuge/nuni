@@ -152,6 +152,17 @@ export const EN = {
   replyFailed: "Couldn't post the reply",
   reactFailed: "Couldn't react",
   failed: "Something went wrong",
+  offline: "Couldn't reach Nuni. Check your connection.",
+  slowDown: "Slow down a little",
+  signInAgain: "You've been signed out. Sign in again.",
+  notAllowed: "You can't change this",
+  gone: "This was deleted",
+  projectDeleting: "This project is being deleted",
+  siteFull:
+    "This site has reached the comment limit for unclaimed projects. The owner can claim it to continue.",
+  threadFull: "This thread has reached its limit",
+  imageTooLarge: "The image is too large",
+  tooLate: "Too late to add an image",
 
   justNow: "just now",
 }

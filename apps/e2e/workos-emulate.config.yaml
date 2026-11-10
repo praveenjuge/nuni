@@ -17,7 +17,3 @@ users:
     last_name: Commenter
     password: nuni-local-password
     email_verified: true
-webhookEndpoints:
-  - endpoint_url: http://127.0.0.1:3311/workos/webhook
-    secret: whsec_nuni_local
-    events: [user.created, user.updated, user.deleted]

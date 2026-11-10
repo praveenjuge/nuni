@@ -1,4 +1,4 @@
-export interface PageLocation {
+interface PageLocation {
   origin: string
   path: string
   search: string
@@ -47,34 +47,36 @@ export function describeLocation(input: string | URL): PageLocation {
   }
 }
 
-export function isLocalOrigin(origin: string): boolean {
-  try {
-    const { hostname } = new URL(origin)
-    return (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "[::1]" ||
-      hostname.endsWith(".localhost")
-    )
-  } catch {
-    return false
-  }
-}
+/** The query parameter the widget opens a comment from: `?nuni=<id>`. */
+export const COMMENT_PARAM = "nuni"
 
-/** URL that opens the page with the comment focused by the widget. */
-export function commentUrl(
+/**
+ * A link to a page of the site, opening the comment `commentId` when given.
+ * `search` is the query to keep (the comment's, or the current page's): a
+ * stored path with its own query keeps that one instead. Null when the link
+ * would leave the site.
+ *
+ * Stored paths come from anonymous comment submissions, so the path is
+ * appended to the origin as text, never resolved against it: one that
+ * doesn't start with "/" (".evil.com/x", "@evil.com/") would extend or
+ * replace the host and send the visitor, with the query, to another site.
+ */
+export function pageLink(
   page: { origin: string; path: string; search?: string },
-  id: string
-): string {
-  const [pathname, hashRoute] = page.path.split("#")
-  const origin = new URL(page.origin).origin
-  let url = new URL(pathname ?? "/", origin)
-  // Paths come from visitors: "//other.host/x" must not leave the page's origin.
-  if (url.origin !== origin) url = new URL("/", origin)
-  const params = new URLSearchParams(page.search ?? "")
-  params.set("nuni", id)
-  url.search = params.toString()
-  if (hashRoute) url.hash = hashRoute
+  commentId?: string
+): string | null {
+  let url: URL
+  let origin: string
+  try {
+    origin = new URL(page.origin).origin
+    url = new URL(origin + page.path)
+  } catch {
+    return null
+  }
+  if (url.origin !== origin) return null
+  const [ownPath = ""] = page.path.split("#")
+  if (!ownPath.includes("?")) url.search = page.search ?? ""
+  if (commentId) url.searchParams.set(COMMENT_PARAM, commentId)
   return url.toString()
 }
 
@@ -92,17 +94,24 @@ export function withoutQuery(input: string, base?: string): string {
  * Cut a word of free text at the query or hash of the URL in it: after a
  * path ("/reset?token=1", "https://a.com/x#t") or before a key=value pair
  * ("?token=1", "#access_token=1"). One pass, so long words stay cheap.
+ * Punctuation that closes the word stays: the `)` of a CSS `url(...)` or
+ * of a URL in parentheses, a full stop after it.
  */
 function stripWord(word: string): string {
   const slash = word.indexOf("/")
   const equals = word.lastIndexOf("=")
   for (let i = 0; i < word.length - 1; i++) {
     const c = word[i]
-    if ((c === "?" || c === "#") && ((slash >= 0 && slash < i) || equals > i))
-      return word.slice(0, i)
+    if ((c === "?" || c === "#") && ((slash >= 0 && slash < i) || equals > i)) {
+      let end = word.length
+      while (end > i + 1 && CLOSING.includes(word[end - 1]!)) end--
+      return word.slice(0, i) + word.slice(end)
+    }
   }
   return word
 }
+
+const CLOSING = ")];,."
 
 /**
  * Remove query strings and hashes from every URL inside free text (log

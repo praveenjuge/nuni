@@ -61,12 +61,11 @@ export function colorFor(name: string): string {
 
 /** Copy text, falling back to execCommand where the async clipboard is off (plain http previews). */
 export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    // fall through
-  }
+  const copied = await navigator.clipboard
+    ?.writeText(text)
+    .then(() => true)
+    .catch(() => false)
+  if (copied) return true
   const area = document.createElement("textarea")
   area.value = text
   area.setAttribute("readonly", "")
@@ -119,4 +118,65 @@ export function readableOn([r, g, b]: [number, number, number]): string {
   const l = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
   // Contrast with white is 1.05 / (l + 0.05); with black, (l + 0.05) / 0.05.
   return 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 ? "#ffffff" : "#111111"
+}
+
+/** Phones: cards open as bottom sheets and the panel gives way to them. */
+export const MOBILE_MAX_WIDTH = 640
+
+export function isMobile(): boolean {
+  return window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`).matches
+}
+
+/** Run when the browser is idle, or after `timeout` ms at the latest. */
+export function whenIdle(fn: () => void, timeout: number) {
+  const idle = (
+    window as {
+      requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number
+    }
+  ).requestIdleCallback
+  if (idle) idle(fn, { timeout })
+  else setTimeout(fn, 0)
+}
+
+/**
+ * Keep the mouseup and click that end a drag from reaching the page or a
+ * button: the browser sends them with the same press, in this task. No
+ * event says that no click is coming, so the guard ends with the task.
+ */
+export function swallowClick(target: EventTarget) {
+  const stop = (e: Event) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.stopImmediatePropagation()
+  }
+  for (const type of ["mouseup", "click"]) {
+    target.addEventListener(type, stop, true)
+    setTimeout(() => target.removeEventListener(type, stop, true))
+  }
+}
+
+/** A text box that grows with its text, up to the max height in the styles. */
+export function autoGrow(field: HTMLTextAreaElement, extra = 0) {
+  field.style.height = "auto"
+  field.style.height = `${field.scrollHeight + extra}px`
+}
+
+/** The rectangles of a range that have a size (lines of text). */
+export function lineRects(range: Range): DOMRect[] {
+  return Array.from(range.getClientRects()).filter(
+    (r) => r.width > 0 && r.height > 0
+  )
+}
+
+/** Place a fixed box: `left`, `top`, `width` and `height` in px. */
+export function placeBox(
+  el: HTMLElement,
+  box: { left: number; top: number; width: number; height: number }
+) {
+  Object.assign(el.style, {
+    left: `${box.left}px`,
+    top: `${box.top}px`,
+    width: `${box.width}px`,
+    height: `${box.height}px`,
+  })
 }

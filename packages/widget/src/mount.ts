@@ -1,7 +1,9 @@
-import { isProjectId } from "@nuni/shared"
+import { cliCommand, isProjectId } from "@nuni/shared"
 
-import { resolveConfig, type NuniOptions, type ResolvedConfig } from "./config"
+import { resolveConfig, type NuniOptions } from "./config"
 import { startCollectors, type Collectors } from "./context"
+import { whenIdle } from "./dom"
+import { ownTraffic } from "./mark"
 import type { ScreenshotTools } from "./screenshot-tools"
 import { NuniWidget } from "./widget"
 
@@ -18,26 +20,7 @@ interface Mounted {
   project: string
   widget: NuniWidget | null
   collectors: Collectors
-  timer: number
   handles: number
-}
-
-/** Nuni's own requests are not the page's problem. */
-function isNuniUrl(config: ResolvedConfig) {
-  const origins = [config.convexUrl, config.convexSiteUrl].flatMap((url) => {
-    try {
-      return [new URL(url).origin]
-    } catch {
-      return []
-    }
-  })
-  return (url: string) => {
-    try {
-      return origins.includes(new URL(url, location.href).origin)
-    } catch {
-      return false
-    }
-  }
 }
 
 let active: Mounted | null = null
@@ -49,7 +32,7 @@ export function mount(options: NuniOptions, runtime: Runtime): NuniInstance {
     return noop
   if (!isProjectId(options.project)) {
     console.warn(
-      `[nuni] "${options.project}" is not a valid project ID. Run \`npx @nuniapp/cli@latest init\` to get one.`
+      `[nuni] "${options.project}" is not a valid project ID. Run \`${cliCommand("init")}\` to get one.`
     )
     return noop
   }
@@ -61,16 +44,18 @@ export function mount(options: NuniOptions, runtime: Runtime): NuniInstance {
     project: options.project,
     widget: null,
     // Started right away, so errors during the first render are kept too.
-    collectors: startCollectors(config.capture, isNuniUrl(config)),
-    timer: 0,
+    collectors: startCollectors(
+      config.capture,
+      ownTraffic([config.convexUrl, config.convexSiteUrl])
+    ),
     handles: 0,
   }
   active = state
 
   const start = () => {
-    if (active !== state) return
+    if (active !== state || state.widget) return
     if (!document.body) {
-      state.timer = window.setTimeout(start, 50)
+      document.addEventListener("DOMContentLoaded", start, { once: true })
       return
     }
     state.widget = new NuniWidget(config, {
@@ -80,13 +65,7 @@ export function mount(options: NuniOptions, runtime: Runtime): NuniInstance {
     state.widget.start()
   }
   // Stay out of the way of the host page's first render.
-  const idle = (
-    window as {
-      requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number
-    }
-  ).requestIdleCallback
-  if (idle) idle(start, { timeout: 1500 })
-  else state.timer = window.setTimeout(start, 1)
+  whenIdle(start, 1500)
 
   return handleFor(state)
 }
@@ -105,7 +84,6 @@ function handleFor(state: Mounted): NuniInstance {
 }
 
 function unmount(state: Mounted) {
-  clearTimeout(state.timer)
   state.widget?.destroy()
   state.widget = null
   state.collectors.stop()

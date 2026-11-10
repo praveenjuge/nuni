@@ -1,24 +1,31 @@
 import {
+  cliCommand,
   generateUserCode,
+  HTTP_ROUTES,
   isUserCode,
-  LIMITS,
-  randomBase58,
+  LOGIN_POLL_STATUS,
+  normalizeUserCode,
+  type LoginPoll,
+  type LoginStart,
 } from "@nuni/shared"
+import type { HttpRouter } from "convex/server"
 import { v } from "convex/values"
 
 import { internal } from "./_generated/api"
-import type { MutationCtx, QueryCtx } from "./_generated/server"
 import { internalMutation, mutation, query } from "./_generated/server"
+import { currentUser, nameOf, requireUser } from "./accounts"
+import { clientIp, json, jsonRoute, text } from "./httpRoutes"
 import {
   assertProjectId,
-  claimFor,
-  currentUser,
   fail,
+  liveProject,
   projectByPublicId,
-  requireUser,
-  sha256Hex,
+  type Ctx,
 } from "./lib"
+import { SERVER_LIMITS } from "./limits"
+import { claimFor } from "./ownership"
 import { ipKey, rateLimiter } from "./rateLimits"
+import { hashOf, issueSession, mintToken } from "./tokens"
 
 /**
  * `nuni login` is a device-code sign-in, so it also works for agents in
@@ -33,8 +40,8 @@ import { ipKey, rateLimiter } from "./rateLimits"
  *    hashed at rest, revocable from the dashboard).
  */
 
-async function loginByCode(ctx: QueryCtx | MutationCtx, userCode: string) {
-  const code = userCode.trim().toUpperCase()
+async function loginByCode(ctx: Ctx, userCode: string) {
+  const code = normalizeUserCode(userCode)
   if (!isUserCode(code)) return null
   return ctx.db
     .query("cliLogins")
@@ -45,7 +52,7 @@ async function loginByCode(ctx: QueryCtx | MutationCtx, userCode: string) {
 /** Step 1, from the HTTP action. */
 export const start = internalMutation({
   args: { publicId: v.string(), client: v.string(), ip: v.string() },
-  handler: async (ctx, { publicId, client, ip }) => {
+  handler: async (ctx, { publicId, client, ip }): Promise<LoginStart> => {
     assertProjectId(publicId)
     const { ok } = await rateLimiter.limit(ctx, "cliLoginPerIp", {
       key: ipKey(ip, publicId),
@@ -62,14 +69,14 @@ export const start = internalMutation({
     let userCode = generateUserCode()
     // Codes are short: make sure no other login is waiting with this one.
     while (await loginByCode(ctx, userCode)) userCode = generateUserCode()
-    const deviceSecret = `nuni_d_${randomBase58(40)}`
-    const expiresAt = Date.now() + LIMITS.cliLoginTtlMs
+    const { token: deviceSecret, hash } = await mintToken("cliLogins")
+    const expiresAt = Date.now() + SERVER_LIMITS.cliLoginTtlMs
     await ctx.db.insert("cliLogins", {
-      secretHash: await sha256Hex(deviceSecret),
+      secretHash: hash,
       userCode,
       publicId,
       status: "pending",
-      client: client.slice(0, 200) || "Nuni CLI",
+      client: client.slice(0, SERVER_LIMITS.cliClientMaxLength) || "Nuni CLI",
       expiresAt,
     })
     return { deviceSecret, userCode, expiresAt }
@@ -82,51 +89,40 @@ export const start = internalMutation({
  */
 export const poll = internalMutation({
   args: { deviceSecret: v.string(), ip: v.string() },
-  handler: async (ctx, { deviceSecret, ip }) => {
+  handler: async (ctx, { deviceSecret, ip }): Promise<LoginPoll> => {
     const { ok } = await rateLimiter.limit(ctx, "cliPollPerIp", { key: ip })
     if (!ok) fail("rate_limited", "Polling too fast")
-    const secretHash = await sha256Hex(deviceSecret)
-    const login = deviceSecret
+    const secretHash = await hashOf("cliLogins", deviceSecret)
+    const login = secretHash
       ? await ctx.db
           .query("cliLogins")
           .withIndex("by_secretHash", (q) => q.eq("secretHash", secretHash))
           .unique()
       : null
-    if (!login) return { status: "expired" as const }
+    if (!login) return { status: "expired" }
     if (login.expiresAt < Date.now()) {
       await ctx.db.delete(login._id)
-      return { status: "expired" as const }
+      return { status: "expired" }
     }
-    if (login.status === "pending") return { status: "pending" as const }
+    if (login.status === "pending") return { status: "pending" }
     await ctx.db.delete(login._id)
-    if (login.status === "denied") return { status: "denied" as const }
+    if (login.status === "denied" || !login.userId) return { status: "denied" }
 
-    const project = await projectByPublicId(ctx, login.publicId)
-    if (
-      !project ||
-      project.deletingAt ||
-      !login.userId ||
-      project.ownerId !== login.userId
-    ) {
-      return { status: "denied" as const }
+    const project = await liveProject(ctx, login.publicId)
+    if (!project || project.ownerId !== login.userId) {
+      return { status: "denied" }
     }
-    const token = `nuni_s_${randomBase58(40)}`
-    const expiresAt = Date.now() + LIMITS.cliSessionTtlMs
-    await ctx.db.insert("widgetSessions", {
-      tokenHash: await sha256Hex(token),
+    const { token, expiresAt } = await issueSession(ctx, "cli", {
       userId: login.userId,
       projectId: project._id,
-      kind: "cli",
       origin: "cli",
       userAgent: login.client,
-      expiresAt,
     })
-    const owner = await ctx.db.get(login.userId)
     return {
-      status: "approved" as const,
+      status: "approved",
       token,
       expiresAt,
-      ownerName: owner?.name ?? "Owner",
+      ownerName: await nameOf(ctx, login.userId),
       projectName: project.name,
     }
   },
@@ -143,7 +139,8 @@ export const pending = query({
       return { state: "expired" as const }
     }
     if (login.status !== "pending") return { state: login.status }
-    const project = await projectByPublicId(ctx, login.publicId)
+    // A project being deleted can't be approved: see `approve`.
+    const project = await liveProject(ctx, login.publicId)
     if (!project) return { state: "expired" as const }
     const owner = project.ownerId ? await ctx.db.get(project.ownerId) : null
     return {
@@ -169,12 +166,15 @@ export const approve = mutation({
     const user = await requireUser(ctx)
     const login = await loginByCode(ctx, userCode)
     if (!login || login.expiresAt < Date.now() || login.status !== "pending") {
-      fail("expired", "This code has expired. Run nuni login again.")
+      fail(
+        "expired",
+        `This code has expired. Run ${cliCommand("login")} again.`
+      )
     }
-    const project = await projectByPublicId(ctx, login.publicId)
-    if (!project || project.deletingAt) fail("not_found", "Project not found")
-    if (!project.ownerId) await claimFor(ctx, project, user._id)
-    else if (project.ownerId !== user._id) {
+    const project = await liveProject(ctx, login.publicId)
+    if (!project) fail("not_found", "Project not found")
+    const claim = await claimFor(ctx, project, user._id)
+    if (claim.status === "claimed_by_other") {
       fail("forbidden", "Only the project owner can sign in to it")
     }
     await ctx.db.patch(login._id, { status: "approved", userId: user._id })
@@ -192,20 +192,39 @@ export const deny = mutation({
   },
 })
 
-const CLEANUP_BATCH = 500
-
-/** Daily cron: delete logins nobody finished. */
-export const cleanupExpired = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const expired = await ctx.db
-      .query("cliLogins")
-      .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
-      .take(CLEANUP_BATCH)
-    for (const login of expired) await ctx.db.delete(login._id)
-    if (expired.length === CLEANUP_BATCH) {
-      await ctx.scheduler.runAfter(0, internal.cliAuth.cleanupExpired, {})
+export function cliLoginRoutes(http: HttpRouter) {
+  /** `nuni login`, step 1: see cliAuth.ts. */
+  jsonRoute<{ publicId: string; client: string }>(
+    http,
+    HTTP_ROUTES.cliLoginStart,
+    {
+      maxBytes: SERVER_LIMITS.cliLoginBodyMax,
+      invalid: "Invalid sign-in request",
+    },
+    async (ctx, body, request) => {
+      const login = await ctx.runMutation(internal.cliAuth.start, {
+        publicId: text(body.publicId),
+        client: text(body.client),
+        ip: clientIp(request),
+      })
+      return json(request, 201, login)
     }
-    return expired.length
-  },
-})
+  )
+
+  /** `nuni login`, step 3: the CLI waits for the owner to approve. */
+  jsonRoute<{ deviceSecret: string }>(
+    http,
+    HTTP_ROUTES.cliLoginPoll,
+    {
+      maxBytes: SERVER_LIMITS.cliLoginBodyMax,
+      invalid: "Invalid sign-in request",
+    },
+    async (ctx, body, request) => {
+      const result = await ctx.runMutation(internal.cliAuth.poll, {
+        deviceSecret: text(body.deviceSecret),
+        ip: clientIp(request),
+      })
+      return json(request, LOGIN_POLL_STATUS[result.status], result)
+    }
+  )
+}

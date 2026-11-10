@@ -1,45 +1,33 @@
-import { LIMITS, randomBase58 } from "@nuni/shared"
+import { LIMITS } from "@nuni/shared"
 import { v } from "convex/values"
 
-import { internal } from "./_generated/api"
-import type { Doc } from "./_generated/dataModel"
+import { mutation, query } from "./_generated/server"
+import { currentUser, requireUser } from "./accounts"
+import { fail, type Ctx } from "./lib"
 import {
-  internalMutation,
-  mutation,
-  query,
-  type MutationCtx,
-  type QueryCtx,
-} from "./_generated/server"
-import {
-  currentUser,
-  fail,
-  requireDashboardOwner,
-  requireUser,
-  revokeSessions,
-  sha256Hex,
-} from "./lib"
+  clearTransfers,
+  dashboardProject,
+  requireDashboardProject,
+  setOwner,
+} from "./ownership"
+import { findByToken, mintToken } from "./tokens"
 
-const TOKEN_PREFIX = "nuni_t_"
-
-async function transferByToken(
-  ctx: QueryCtx | MutationCtx,
-  token: string
-): Promise<Doc<"transfers"> | null> {
-  if (!token.startsWith(TOKEN_PREFIX) || token.length > 200) return null
-  const tokenHash = await sha256Hex(token)
-  const transfer = await ctx.db
-    .query("transfers")
-    .withIndex("by_tokenHash", (q) => q.eq("tokenHash", tokenHash))
-    .unique()
-  return transfer && transfer.expiresAt > Date.now() ? transfer : null
-}
-
-async function clearTransfers(ctx: MutationCtx, project: Doc<"projects">) {
-  const old = await ctx.db
-    .query("transfers")
-    .withIndex("by_project", (q) => q.eq("projectId", project._id))
-    .collect()
-  for (const transfer of old) await ctx.db.delete(transfer._id)
+/**
+ * A link's project, while the person who made the link still owns it (not
+ * released, deleted or handed on).
+ */
+async function linkedProject(ctx: Ctx, token: string) {
+  const transfer = await findByToken(ctx, "transfers", token)
+  const project = transfer ? await ctx.db.get(transfer.projectId) : null
+  if (
+    !transfer ||
+    !project ||
+    project.deletingAt ||
+    project.ownerId !== transfer.fromUserId
+  ) {
+    return null
+  }
+  return { transfer, project }
 }
 
 /**
@@ -47,16 +35,16 @@ async function clearTransfers(ctx: MutationCtx, project: Doc<"projects">) {
  * earlier link stops working. The token is returned once.
  */
 export const create = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, { projectId }) => {
-    const { user, project } = await requireDashboardOwner(ctx, projectId)
-    await clearTransfers(ctx, project)
-    const token = `${TOKEN_PREFIX}${randomBase58(32)}`
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const { userId, project } = await requireDashboardProject(ctx, publicId)
+    await clearTransfers(ctx, project._id)
+    const { token, hash } = await mintToken("transfers")
     const expiresAt = Date.now() + LIMITS.transferTtlMs
     await ctx.db.insert("transfers", {
-      projectId,
-      fromUserId: user._id,
-      tokenHash: await sha256Hex(token),
+      projectId: project._id,
+      fromUserId: userId,
+      tokenHash: hash,
       expiresAt,
     })
     return { token, expiresAt }
@@ -64,23 +52,22 @@ export const create = mutation({
 })
 
 export const cancel = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, { projectId }) => {
-    const { project } = await requireDashboardOwner(ctx, projectId)
-    await clearTransfers(ctx, project)
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
+    await clearTransfers(ctx, project._id)
   },
 })
 
 /** The owner's open transfer link, if any (its expiry; not the token). */
 export const active = query({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, { projectId }) => {
-    const user = await currentUser(ctx)
-    const project = await ctx.db.get(projectId)
-    if (!user || project?.ownerId !== user._id) return null
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const project = await dashboardProject(ctx, publicId)
+    if (!project) return null
     const transfers = await ctx.db
       .query("transfers")
-      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .withIndex("by_project", (q) => q.eq("projectId", project._id))
       .collect()
     const open = transfers.find((t) => t.expiresAt > Date.now())
     return open ? { expiresAt: open.expiresAt } : null
@@ -91,17 +78,9 @@ export const active = query({
 export const get = query({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
-    const transfer = await transferByToken(ctx, token)
-    if (!transfer) return null
-    const project = await ctx.db.get(transfer.projectId)
-    // The sender no longer owns it (released, deleted or handed on).
-    if (
-      !project ||
-      project.deletingAt ||
-      project.ownerId !== transfer.fromUserId
-    ) {
-      return null
-    }
+    const linked = await linkedProject(ctx, token)
+    if (!linked) return null
+    const { transfer, project } = linked
     const [from, user] = await Promise.all([
       ctx.db.get(transfer.fromUserId),
       currentUser(ctx),
@@ -125,45 +104,13 @@ export const accept = mutation({
   args: { token: v.string() },
   handler: async (ctx, { token }) => {
     const user = await requireUser(ctx)
-    const transfer = await transferByToken(ctx, token)
-    if (!transfer) fail("not_found", "This transfer link expired or was used")
-    const project = await ctx.db.get(transfer.projectId)
-    if (
-      !project ||
-      project.deletingAt ||
-      project.ownerId !== transfer.fromUserId
-    ) {
-      fail("not_found", "This transfer link expired or was used")
-    }
+    const linked = await linkedProject(ctx, token)
+    if (!linked) fail("not_found", "This transfer link expired or was used")
+    const { project } = linked
     if (project.ownerId === user._id) {
       fail("already_owner", "You already own this project")
     }
-    await ctx.db.patch(project._id, {
-      ownerId: user._id,
-      claimedAt: Date.now(),
-      lastActivityAt: Date.now(),
-    })
-    await revokeSessions(ctx, project._id)
-    await clearTransfers(ctx, project)
-    await ctx.db.insert("claims", { projectId: project._id, userId: user._id })
+    await setOwner(ctx, project, user._id)
     return { publicId: project.publicId }
-  },
-})
-
-const CLEANUP_BATCH = 500
-
-/** Daily cron: delete expired transfer links. */
-export const cleanupExpired = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const expired = await ctx.db
-      .query("transfers")
-      .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
-      .take(CLEANUP_BATCH)
-    for (const transfer of expired) await ctx.db.delete(transfer._id)
-    if (expired.length === CLEANUP_BATCH) {
-      await ctx.scheduler.runAfter(0, internal.transfers.cleanupExpired, {})
-    }
-    return expired.length
   },
 })

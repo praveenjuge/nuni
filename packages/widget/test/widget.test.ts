@@ -1,34 +1,16 @@
+import { LIMITS } from "@nuni/shared"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { pageKeyFor, resolveConfig } from "../src/config"
+import { optionsFromAttributes, pageKeyFor, resolveConfig } from "../src/config"
 import { domContext, safeUrl, startCollectors } from "../src/context"
-import { CAPTURE_MARK } from "../src/mark"
+import { CAPTURE_MARK, ownTraffic } from "../src/mark"
 import { maskedBoxes } from "../src/screenshot"
-import { colorFor, h, icon, initials, readableOn } from "../src/dom"
+import { h, icon, initials, readableOn } from "../src/dom"
+import { failed as messageFor } from "../src/failures"
 import { createI18n } from "../src/i18n"
 import { ICONS } from "../src/icons"
 import { init } from "../src/index"
-import { commentHref, otherPageHref } from "../src/widget"
-import { sha256 } from "../src/sha256"
 import { KEYS, read, write } from "../src/storage"
-
-const hex = (bytes: Uint8Array) =>
-  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
-
-describe("sha256 fallback", () => {
-  it("matches known test vectors", () => {
-    expect(hex(sha256(new TextEncoder().encode("")))).toBe(
-      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    )
-    expect(hex(sha256(new TextEncoder().encode("abc")))).toBe(
-      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    )
-    const long = "a".repeat(1000)
-    expect(hex(sha256(new TextEncoder().encode(long)))).toBe(
-      "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3"
-    )
-  })
-})
 
 describe("dom helpers", () => {
   it("creates renderable SVG icons", () => {
@@ -47,11 +29,10 @@ describe("dom helpers", () => {
     expect(el.textContent).toBe("<img src=x onerror=alert(1)>")
   })
 
-  it("formats initials, colors and times", () => {
+  it("formats initials and times", () => {
     expect(initials("Sam Tester")).toBe("ST")
     expect(initials("ada")).toBe("AD")
     expect(initials("  ")).toBe("?")
-    expect(colorFor("Sam")).toBe(colorFor("Sam"))
     const { timeAgo } = createI18n("en")
     expect(timeAgo(Date.now() - 10_000)).toBe("just now")
     expect(timeAgo(Date.now() - 5 * 60_000)).toBe("5m ago")
@@ -83,6 +64,23 @@ describe("messages", () => {
     // Words not overridden stay English.
     expect(t("post")).toBe("Post")
     expect(timeAgo(Date.now() - 86_400_000)).toBe("gestern")
+  })
+
+  it("says what a failed call means, in the site's words", () => {
+    const { t } = createI18n("en", { slowDown: "Doucement" })
+    const failed = messageFor.bind(null, t)
+    expect(failed("rate_limited", "postFailed")).toBe("Doucement")
+    expect(failed("network", "postFailed")).toBe(
+      "Couldn't reach Nuni. Check your connection."
+    )
+    expect(failed("conflict", "imageFailed")).toBe("Add up to 3 images")
+    // Codes a visitor can't act on fall back to the action's message.
+    expect(failed("invalid_page", "postFailed")).toBe(
+      "Couldn't post the comment"
+    )
+    expect(
+      failed("cap_reached", "postFailed", { cap_reached: "siteFull" })
+    ).toMatch(/comment limit for unclaimed projects/)
   })
 
   it("survives an invalid locale", () => {
@@ -133,73 +131,59 @@ describe("options", () => {
       "/#/settings"
     )
   })
-})
 
-describe("other page links", () => {
-  const loc = { origin: "https://acme.example", search: "?token=secret" }
+  it("reads options from a script tag's data attributes", () => {
+    const script = document.createElement("script")
 
-  it("builds same-origin links, keeping hash routes search-free", () => {
-    expect(otherPageHref("/pricing", loc)).toBe(
-      "https://acme.example/pricing?token=secret"
-    )
-    expect(otherPageHref("/pricing?plan=pro", loc)).toBe(
-      "https://acme.example/pricing?plan=pro"
-    )
-    expect(otherPageHref("/#/settings", loc)).toBe(
-      "https://acme.example/#/settings"
-    )
-  })
-
-  it("links to one comment on another page", () => {
-    const page = { path: "/pricing" }
-    expect(commentHref({ _id: "c1", page } as never, loc)).toBe(
-      "https://acme.example/pricing?token=secret&nuni=c1"
-    )
-    expect(
-      commentHref({ _id: "c1", page: { path: "/#/settings" } } as never, loc)
-    ).toBe("https://acme.example/?nuni=c1#/settings")
-    expect(
-      commentHref({ _id: "c1", page: { path: "@evil.example/" } } as never, loc)
-    ).toBeNull()
-  })
-
-  it("drops stored paths that would leave the origin", () => {
-    for (const bad of [
-      ".evil.example/verify",
-      "@evil.example/",
-      "-evil.example/",
-      "\t@evil.example/login",
-    ]) {
-      expect(otherPageHref(bad, loc)).toBeNull()
-    }
-  })
-
-  it("keeps leading-slash forms on the origin once concatenated", () => {
-    // origin + path concatenation means "//" or "/\\" land inside the
-    // path; they cannot become protocol-relative. The backend still
-    // rejects them at ingestion as junk, but the widget is safe either way.
-    expect(otherPageHref("//evil.example/x", loc)).not.toBeNull()
-  })
-
-  it("treats custom getPageKey keys as non-links, never as off-site links", () => {
-    expect(otherPageHref("product-123", loc)).toBeNull()
+    Object.assign(script.dataset, {
+      project: "nuni_x",
+      accentColor: "#facc15",
+      zIndex: "0",
+      hotkey: "off",
+      images: "no",
+      captureScreenshot: "false",
+      captureDom: "yes",
+    })
+    expect(optionsFromAttributes(script.dataset)).toEqual({
+      project: "nuni_x",
+      accentColor: "#facc15",
+      zIndex: 0,
+      hotkey: false,
+      images: false,
+      capture: { screenshot: false, dom: true },
+    })
+    expect(optionsFromAttributes({ hotkey: "f" }).hotkey).toBe("f")
   })
 })
 
 describe("storage", () => {
-  it("reads and writes, falling back to memory", () => {
+  it("reads and writes", () => {
     write(KEYS.name, "Sam")
     expect(read(KEYS.name)).toBe("Sam")
     write(KEYS.name, null)
     expect(read(KEYS.name)).toBeNull()
   })
+
+  it("keeps values in memory where storage is blocked", () => {
+    const blocked = () => {
+      throw new DOMException("blocked", "SecurityError")
+    }
+    const spies = (["getItem", "setItem", "removeItem"] as const).map((m) =>
+      vi.spyOn(Storage.prototype, m).mockImplementation(blocked)
+    )
+    try {
+      write(KEYS.name, "Sam")
+      expect(read(KEYS.name)).toBe("Sam")
+      write(KEYS.name, null)
+      expect(read(KEYS.name)).toBeNull()
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
+  })
 })
 
 describe("config", () => {
-  it("uses build defaults and allows overrides", () => {
-    expect(resolveConfig({ project: "p" }).convexUrl).toBe(
-      "http://127.0.0.1:3210"
-    )
+  it("takes the dashboard URL without a trailing slash", () => {
     expect(
       resolveConfig({ project: "p", appUrl: "https://x.com/" }).appUrl
     ).toBe("https://x.com")
@@ -245,7 +229,7 @@ describe("context collectors", () => {
     console.error = originalError
   })
 
-  it("records failed requests without query strings, skipping ignored ones", async () => {
+  it("records failed requests without query strings, skipping Nuni's own", async () => {
     const originalFetch = window.fetch
     const mock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -255,7 +239,7 @@ describe("context collectors", () => {
     window.fetch = mock
     const collectors = startCollectors(
       { console: false, network: true },
-      (url) => url.includes("convex")
+      ownTraffic(["https://x.convex.cloud"])
     )
     await fetch("https://api.example.com/missing?token=secret")
     await fetch("https://api.example.com/ok")
@@ -322,7 +306,7 @@ describe("context collectors", () => {
   })
 })
 
-describe("domContext", () => {
+describe("what visitors typed or masked never leaves the page", () => {
   it("removes form values and scripts, and reads key styles", () => {
     document.body.innerHTML = `<form id="f" style="padding: 4px">
       <input name="email" value="me@example.com">
@@ -376,7 +360,7 @@ describe("domContext", () => {
   it("keeps big elements within the snippet limit", () => {
     document.body.innerHTML = `<ul id="l">${"<li><span>item</span></li>".repeat(2000)}</ul>`
     const { html } = domContext(document.getElementById("l")!)
-    expect(html.length).toBeLessThanOrEqual(4000)
+    expect(html.length).toBeLessThanOrEqual(LIMITS.domSnippetMaxLength)
     expect(html.startsWith("<ul")).toBe(true)
   })
 })
@@ -397,7 +381,6 @@ describe("init handles", () => {
   const mounted = () => document.getElementById("nuni-root")
   afterEach(() => {
     document.body.innerHTML = ""
-    vi.useRealTimers()
   })
 
   it("only removes the widget when every handle for it is destroyed", async () => {

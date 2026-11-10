@@ -3,16 +3,24 @@ import { describe, expect, it } from "vitest"
 import {
   buildAgentPrompt,
   buildCommentPrompt,
-  commentUrl,
+  pageLink,
   describeLocation,
   stripHtmlUrlQueries,
   stripUrlQueries,
   withoutQuery,
+  dashboardUrl,
+  errorMessage,
   generateProjectId,
-  isLocalOrigin,
+  generateUserCode,
+  handoffMessage,
   isProjectId,
+  isUserCode,
   normalizePath,
+  normalizeUserCode,
+  projectIdsIn,
+  readHandoff,
 } from "../src"
+import { sha256 } from "../src/sha256"
 
 describe("project ids", () => {
   it("generates valid, unique ids", () => {
@@ -26,6 +34,65 @@ describe("project ids", () => {
     expect(isProjectId("nuni_0OIl000000000000000000")).toBe(false)
     expect(isProjectId(42)).toBe(false)
     expect(isProjectId("proj_" + "a".repeat(22))).toBe(false)
+  })
+})
+
+describe("user codes", () => {
+  it("generates codes it accepts, once typed back any way", () => {
+    const code = generateUserCode()
+    expect(isUserCode(code)).toBe(true)
+    expect(isUserCode(normalizeUserCode(` ${code.toLowerCase()}\n`))).toBe(true)
+    expect(isUserCode("BCDF-GHJA")).toBe(false)
+  })
+})
+
+describe("projectIdsIn", () => {
+  it("finds every id in source text", () => {
+    const [a, b] = [generateProjectId(), generateProjectId()]
+    expect(
+      projectIdsIn(`init({ project: "${a}" })\n<x data-project='${b}'>`)
+    ).toEqual([a, b])
+    expect(projectIdsIn("nuni_short")).toEqual([])
+  })
+})
+
+describe("dashboard handoff", () => {
+  it("builds dashboard links on any app URL", () => {
+    expect(
+      dashboardUrl("https://app.example/", "/claim", {
+        project: "nuni_x",
+        origin: "http://127.0.0.1:5173",
+      })
+    ).toBe(
+      "https://app.example/dashboard/claim?project=nuni_x&origin=http%3A%2F%2F127.0.0.1%3A5173"
+    )
+    expect(dashboardUrl("https://app.example", "/sign-out")).toBe(
+      "https://app.example/dashboard/sign-out"
+    )
+  })
+
+  it("hands a token only to its project, with the right kind", () => {
+    const session = handoffMessage("session", "p1", "nuni_s_abc")
+    expect(readHandoff(session, "p1")).toEqual({
+      kind: "session",
+      token: "nuni_s_abc",
+    })
+    expect(readHandoff(session, "p2")).toBeNull()
+    expect(
+      readHandoff(handoffMessage("commenter", "p1", "nuni_s_abc"), "p1")
+    ).toBeNull()
+    expect(readHandoff("nuni:session", "p1")).toBeNull()
+  })
+})
+
+describe("errorMessage", () => {
+  it("prefers the backend's message, then the error's, then the fallback", () => {
+    const convex = Object.assign(new Error("[CONVEX] raw"), {
+      data: { code: "not_found", message: "Comment not found" },
+    })
+    expect(errorMessage(convex, "x")).toBe("Comment not found")
+    expect(errorMessage(new Error("Offline"), "x")).toBe("Offline")
+    expect(errorMessage("weird", "Try again")).toBe("Try again")
   })
 })
 
@@ -63,16 +130,6 @@ describe("normalizePath", () => {
   })
 })
 
-describe("isLocalOrigin", () => {
-  it("detects local origins", () => {
-    expect(isLocalOrigin("http://localhost:3000")).toBe(true)
-    expect(isLocalOrigin("http://127.0.0.1:5173")).toBe(true)
-    expect(isLocalOrigin("http://app.localhost")).toBe(true)
-    expect(isLocalOrigin("https://example.com")).toBe(false)
-    expect(isLocalOrigin("not a url")).toBe(false)
-  })
-})
-
 describe("buildAgentPrompt", () => {
   it("embeds the project id when given", () => {
     const id = generateProjectId()
@@ -84,25 +141,51 @@ describe("buildAgentPrompt", () => {
   })
 })
 
-describe("commentUrl", () => {
-  it("adds the deep link and keeps the query and hash route", () => {
+describe("pageLink", () => {
+  const origin = "https://acme.example"
+
+  it("opens the comment and keeps the query, or the path's own", () => {
+    expect(pageLink({ origin, path: "/pricing", search: "?ref=x" }, "c1")).toBe(
+      "https://acme.example/pricing?ref=x&nuni=c1"
+    )
     expect(
-      commentUrl(
-        { origin: "https://a.com", path: "/pricing", search: "?ref=x" },
-        "c1"
-      )
-    ).toBe("https://a.com/pricing?ref=x&nuni=c1")
-    expect(
-      commentUrl({ origin: "https://a.com", path: "/#/settings" }, "c2")
-    ).toBe("https://a.com/?nuni=c2#/settings")
+      pageLink({ origin, path: "/pricing?plan=pro", search: "?ref=x" })
+    ).toBe("https://acme.example/pricing?plan=pro")
+    expect(pageLink({ origin, path: "/pricing" })).toBe(
+      "https://acme.example/pricing"
+    )
   })
 
-  it("never leaves the page's origin", () => {
-    for (const path of ["//evil.example/login", "https://evil.example/x"]) {
-      expect(commentUrl({ origin: "https://a.com", path }, "c3")).toBe(
-        "https://a.com/?nuni=c3"
-      )
+  it("keeps the query before a hash route", () => {
+    expect(pageLink({ origin, path: "/#/settings" }, "c2")).toBe(
+      "https://acme.example/?nuni=c2#/settings"
+    )
+    expect(pageLink({ origin, path: "/#/settings", search: "?ref=x" })).toBe(
+      "https://acme.example/?ref=x#/settings"
+    )
+  })
+
+  it("is null for stored paths that would leave the origin", () => {
+    for (const path of [
+      ".evil.example/verify",
+      "@evil.example/",
+      "-evil.example/",
+      "\t@evil.example/login",
+      "https://evil.example/x",
+    ]) {
+      expect(pageLink({ origin, path, search: "?token=1" }, "c3")).toBeNull()
     }
+  })
+
+  it("keeps leading-slash forms on the origin", () => {
+    // The backend rejects them at ingestion; the link is safe either way.
+    expect(pageLink({ origin, path: "//evil.example/x" })).toBe(
+      "https://acme.example//evil.example/x"
+    )
+  })
+
+  it("treats custom getPageKey keys as non-links", () => {
+    expect(pageLink({ origin, path: "product-123" })).toBeNull()
   })
 })
 
@@ -212,6 +295,14 @@ describe("URL secrets", () => {
     )
   })
 
+  it("keeps the punctuation that closes a URL", () => {
+    expect(
+      stripUrlQueries(
+        "background: url(/bg.png?t=2); (see https://a.com/x?key=3). Done"
+      )
+    ).toBe("background: url(/bg.png); (see https://a.com/x). Done")
+  })
+
   it("stays fast on long words", () => {
     const long = `src="data:image/png;base64,${"ab/c".repeat(250_000)}"`
     const started = performance.now()
@@ -237,7 +328,25 @@ describe("stripHtmlUrlQueries", () => {
         `<img data-src="i.png?sig=1" data-lazy-srcset="a.png?x=1 1x" style="background: url(/bg.png?t=2)"><p>See https://a.com/x?key=3</p>`
       )
     ).toBe(
-      `<img data-src="i.png" data-lazy-srcset="a.png 1x" style="background: url(/bg.png"><p>See https://a.com/x</p>`
+      `<img data-src="i.png" data-lazy-srcset="a.png 1x" style="background: url(/bg.png)"><p>See https://a.com/x</p>`
+    )
+  })
+})
+
+const hex = (bytes: Uint8Array) =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+
+describe("sha256 fallback", () => {
+  it("matches known test vectors", () => {
+    expect(hex(sha256(new TextEncoder().encode("")))).toBe(
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    )
+    expect(hex(sha256(new TextEncoder().encode("abc")))).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    )
+    const long = "a".repeat(1000)
+    expect(hex(sha256(new TextEncoder().encode(long)))).toBe(
+      "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3"
     )
   })
 })

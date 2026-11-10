@@ -1,17 +1,16 @@
-import type { Anchor } from "@nuni/shared"
+import { LIMITS, WIDGET_SELECTOR, type Anchor } from "@nuni/shared"
 
 import { reactComponentName } from "./component"
-import { attributeAllowed, type AnchorOptions } from "./options"
 import {
   frameDocument,
   isShadowRoot,
   scopeDocument,
   type ScopeRoot,
 } from "./scope"
-import { findQuote } from "./quote"
-import { cssEscape, queryPath } from "./selector"
+import { findQuote, quoteText, rangeText } from "./quote"
+import { attrSelector, parseTestId, queryAll, queryPath } from "./selector"
 import { stableClasses } from "./stable"
-import { elementText, normalizeText, textSimilarity } from "./text"
+import { elementText, textSimilarity } from "./text"
 
 export type Confidence = "exact" | "high" | "low" | "lost"
 
@@ -49,8 +48,12 @@ export function createResolveCache(): ResolveCache {
   }
 }
 
-function textOf(el: Element, max: number, cache?: ResolveCache): string {
-  if (!cache) return elementText(el, max)
+export interface ResolveOptions {
+  /** Shared by every anchor resolved over the same DOM. */
+  cache?: ResolveCache
+}
+
+function textOf(el: Element, max: number, cache: ResolveCache): string {
   let byMax = cache.text.get(el)
   if (!byMax) cache.text.set(el, (byMax = new Map()))
   let text = byMax.get(max)
@@ -58,8 +61,7 @@ function textOf(el: Element, max: number, cache?: ResolveCache): string {
   return text
 }
 
-function contentOf(el: Element, cache?: ResolveCache): string {
-  if (!cache) return el.textContent ?? ""
+function contentOf(el: Element, cache: ResolveCache): string {
   let content = cache.content.get(el)
   if (content === undefined) {
     cache.content.set(el, (content = el.textContent ?? ""))
@@ -67,26 +69,22 @@ function contentOf(el: Element, cache?: ResolveCache): string {
   return content
 }
 
-/** All of an element's text with whitespace collapsed, for quote checks. */
-function wordsOf(el: Element, cache?: ResolveCache): string {
-  let words = cache?.words.get(el)
-  if (words === undefined) {
-    words = normalizeText(contentOf(el, cache))
-    cache?.words.set(el, words)
-  }
+/** All of an element's words, read the way quotes are taken from them. */
+function wordsOf(el: Element, cache: ResolveCache): string {
+  let words = cache.words.get(el)
+  if (words === undefined) cache.words.set(el, (words = quoteText(el)))
   return words
 }
 
 function elementsByTag(
   root: ScopeRoot,
   tag: string,
-  cache?: ResolveCache
-): ArrayLike<Element> {
+  cache: ResolveCache
+): Element[] {
   const find = () =>
     isShadowRoot(root)
       ? root.querySelectorAll(tag)
       : root.getElementsByTagName(tag)
-  if (!cache) return find()
   let tags = cache.byTag.get(root)
   if (!tags) cache.byTag.set(root, (tags = new Map()))
   let list = tags.get(tag)
@@ -98,9 +96,9 @@ function elementsByTag(
 function allElements(
   root: ScopeRoot,
   limit: number,
-  cache?: ResolveCache
+  cache: ResolveCache
 ): Element[] {
-  const cached = cache?.elements.get(root)
+  const cached = cache.elements.get(root)
   if (cached) return cached
   const doc = scopeDocument(root)
   const start = isShadowRoot(root) ? root : (doc.body ?? doc.documentElement)
@@ -112,7 +110,7 @@ function allElements(
     n = walker.nextNode()
   )
     out.push(n as Element)
-  cache?.elements.set(root, out)
+  cache.elements.set(root, out)
   return out
 }
 
@@ -120,17 +118,12 @@ const THRESHOLD = { exact: 0.9, high: 0.72, low: 0.55 } as const
 const AMBIGUITY_MARGIN = 0.03
 const MAX_SCAN = 3000
 
-function safeQueryAll(
+function firstMatches(
   root: ParentNode,
   selector: string | undefined,
   limit = 20
 ): Element[] {
-  if (!selector) return []
-  try {
-    return Array.from(root.querySelectorAll(selector)).slice(0, limit)
-  } catch {
-    return []
-  }
+  return Array.from(queryAll(root, selector)).slice(0, limit)
 }
 
 function safeMatches(el: Element, selector: string | undefined): boolean {
@@ -148,15 +141,6 @@ function jaccard(a: string[], b: string[]): number {
   let inter = 0
   for (const x of new Set(b)) if (setA.has(x)) inter++
   return inter / (setA.size + new Set(b).size - inter)
-}
-
-function splitTestId(testId: string): [string, string] | null {
-  const i = testId.indexOf("=")
-  return i > 0 ? [testId.slice(0, i), testId.slice(i + 1)] : null
-}
-
-function attrQuery(name: string, value: string) {
-  return `[${name}="${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`
 }
 
 function normalizeHref(value: string, doc: Document): string {
@@ -212,8 +196,7 @@ function scoreCandidate(
     /** The only candidate (innermost) that still holds the quoted words. */
     quoteOnly: Element | null
   },
-  options: AnchorOptions,
-  cache?: ResolveCache
+  cache: ResolveCache
 ): Scored {
   let total = 0
   let weights = 0
@@ -232,8 +215,8 @@ function scoreCandidate(
     add(3, hit ? 1 : 0)
   }
   if (anchor.selectors.testId) {
-    const parts = splitTestId(anchor.selectors.testId)
-    const hit = Boolean(parts && el.getAttribute(parts[0]) === parts[1])
+    const testId = parseTestId(anchor.selectors.testId)
+    const hit = Boolean(testId && el.getAttribute(testId.attr) === testId.value)
     strong ||= hit
     add(4, hit ? 1 : 0)
   }
@@ -246,9 +229,7 @@ function scoreCandidate(
     add(1.5, jaccard(stableClasses(el), anchor.classes))
   }
 
-  const attrNames = Object.keys(anchor.attrs).filter((n) =>
-    attributeAllowed(n, options)
-  )
+  const attrNames = Object.keys(anchor.attrs)
   let identifyingAttrsMatch = false
   if (attrNames.length) {
     let matched = 0
@@ -281,7 +262,7 @@ function scoreCandidate(
     add(0.5, reactComponentName(el) === anchor.componentName ? 1 : 0)
   }
 
-  const text = textOf(el, 120, cache)
+  const text = textOf(el, LIMITS.anchorTextMaxLength, cache)
   const textSim = anchor.text
     ? textSimilarity(text, anchor.text)
     : text
@@ -313,7 +294,10 @@ function scoreCandidate(
     s += 0.25 * jaccard(stableClasses(node), expected.classes)
     ancTotal += weight * s
     if (context === null && expected.text && expected.text !== anchor.text) {
-      context = textSimilarity(textOf(node, 80, cache), expected.text)
+      context = textSimilarity(
+        textOf(node, LIMITS.anchorAncestorTextMaxLength, cache),
+        expected.text
+      )
     }
     node = node.parentElement
   })
@@ -379,13 +363,12 @@ function scoreCandidate(
 function collectCandidates(
   anchor: Anchor,
   root: ScopeRoot,
-  options: AnchorOptions,
-  cache?: ResolveCache
+  cache: ResolveCache
 ): { candidates: Set<Element>; pathMatch: Element | null } {
   const doc = scopeDocument(root)
   const candidates = new Set<Element>()
   const ignored = (el: Element) =>
-    el === doc.documentElement || (options.isIgnored?.(el) ?? false)
+    el === doc.documentElement || el.closest(WIDGET_SELECTOR) !== null
   const add = (el: Element | null | undefined) => {
     if (el && !ignored(el)) candidates.add(el)
   }
@@ -393,15 +376,17 @@ function collectCandidates(
   if (anchor.selectors.id) {
     add(
       isShadowRoot(root)
-        ? safeQueryAll(root, `#${cssEscape(anchor.selectors.id)}`, 1)[0]
+        ? firstMatches(root, `#${CSS.escape(anchor.selectors.id)}`, 1)[0]
         : root.getElementById(anchor.selectors.id)
     )
   }
   if (anchor.selectors.testId) {
-    const parts = splitTestId(anchor.selectors.testId)
-    if (parts) safeQueryAll(root, attrQuery(parts[0], parts[1])).forEach(add)
+    const testId = parseTestId(anchor.selectors.testId)
+    if (testId) {
+      firstMatches(root, attrSelector(testId.attr, testId.value)).forEach(add)
+    }
   }
-  safeQueryAll(root, anchor.selectors.css).forEach(add)
+  firstMatches(root, anchor.selectors.css).forEach(add)
   const pathMatch = queryPath(root, anchor.selectors.path)
   add(pathMatch)
 
@@ -425,10 +410,37 @@ function collectCandidates(
       if (el.tagName.toLowerCase() === anchor.tag) continue
       const content = contentOf(el, cache)
       if (!content || content.length > exact.length * 3 + 20) continue
-      if (textOf(el, 120, cache).toLowerCase() === exact) add(el)
+      if (
+        textOf(el, LIMITS.anchorTextMaxLength, cache).toLowerCase() === exact
+      ) {
+        add(el)
+      }
     }
   }
   return { candidates, pathMatch }
+}
+
+/**
+ * Whether a pin placed earlier is still right after the page changed: its
+ * element is still attached and still looks like what was captured, and a
+ * text comment's words are still where its range is (a range over removed
+ * text collapses). When it is not, resolve the anchor again.
+ */
+export function stillMatches(
+  anchor: Anchor,
+  placement: Pick<ResolveResult, "element" | "range">
+): boolean {
+  const { element, range } = placement
+  if (!element?.isConnected) return false
+  if (anchor.quote) {
+    return range !== undefined && rangeText(range) === anchor.quote.exact
+  }
+  const text = elementText(element)
+  return (
+    !anchor.text ||
+    text === anchor.text ||
+    textSimilarity(text, anchor.text) > 0.8
+  )
 }
 
 const RANK: Record<Confidence, number> = { lost: 0, low: 1, high: 2, exact: 3 }
@@ -440,15 +452,13 @@ const RANK: Record<Confidence, number> = { lost: 0, low: 1, high: 2, exact: 3 }
  */
 export function resolveAnchor(
   anchor: Anchor,
-  doc: Document = document,
-  options: AnchorOptions = {},
-  cache?: ResolveCache
+  { cache = createResolveCache() }: ResolveOptions = {}
 ): ResolveResult {
-  let root: ScopeRoot = doc
+  let root: ScopeRoot = document
   let floor: Confidence = "exact"
   const lost: ResolveResult = { element: null, confidence: "lost", score: 0 }
   for (const step of anchor.scope ?? []) {
-    const host = resolveIn(step.host, root, options, cache)
+    const host = resolveIn(step.host, root, cache)
     if (!host.element) return lost
     let confidence = host.confidence
     if (step.host.text) {
@@ -469,11 +479,12 @@ export function resolveAnchor(
     if (RANK[confidence] < RANK[floor]) floor = confidence
     root = next
   }
-  const {
-    text: _text,
-    margin: _margin,
-    ...result
-  } = resolveIn(anchor, root, options, cache)
+  const match = resolveIn(anchor, root, cache)
+  const result: ResolveResult = {
+    element: match.element,
+    confidence: match.confidence,
+    score: match.score,
+  }
   if (result.element && RANK[floor] < RANK[result.confidence]) {
     result.confidence = floor
   }
@@ -489,7 +500,10 @@ export function resolveAnchor(
   return result
 }
 
-interface Match extends ResolveResult {
+interface Match {
+  element: Element | null
+  confidence: Confidence
+  score: number
   /** Text similarity of the best candidate. */
   text: number
   /** Its lead over the next candidate. */
@@ -499,8 +513,7 @@ interface Match extends ResolveResult {
 function resolveIn(
   anchor: Anchor,
   root: ScopeRoot,
-  options: AnchorOptions,
-  cache?: ResolveCache
+  cache: ResolveCache
 ): Match {
   const doc = scopeDocument(root)
   if (!isShadowRoot(root) && (anchor.tag === "body" || anchor.tag === "html")) {
@@ -513,12 +526,7 @@ function resolveIn(
     }
   }
 
-  const { candidates, pathMatch } = collectCandidates(
-    anchor,
-    root,
-    options,
-    cache
-  )
+  const { candidates, pathMatch } = collectCandidates(anchor, root, cache)
   if (!candidates.size) {
     return { element: null, confidence: "lost", score: 0, text: 0, margin: 0 }
   }
@@ -549,7 +557,6 @@ function resolveIn(
         el,
         doc,
         { pathMatch, viewportRatio, quoteOnly },
-        options,
         cache
       )
     )
@@ -575,8 +582,9 @@ function resolveIn(
   }
   scored.sort((a, b) => b.score - a.score)
 
-  // Prefer the innermost of nested candidates with equal text (a <span> in a
-  // <button> vs the button itself are both plausible; keep the better tag).
+  // The runner-up, for the ambiguity margin. A candidate inside the best one
+  // or around it (a <span> in the <button>) points at the same spot, so it
+  // is no rival.
   const best = scored[0]!
   const second = scored.find(
     (s) =>

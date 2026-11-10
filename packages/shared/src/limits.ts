@@ -1,8 +1,14 @@
+/**
+ * Limits more than one package has to agree on: the client checks or shows
+ * them and the backend enforces them, or the docs and dashboard state them.
+ * Limits only the backend knows about live in `packages/backend/convex/limits.ts`.
+ */
 export const LIMITS = {
   bodyMaxLength: 2000,
   nameMaxLength: 50,
+  projectNameMaxLength: 100,
   unclaimedCommentCap: 500,
-  maxOriginsPerProject: 20,
+  /** Widget owner sessions and commenter sign-ins. */
   sessionTtlMs: 30 * 24 * 60 * 60 * 1000,
   /** CLI and MCP sessions, created by `nuni login`. */
   cliSessionTtlMs: 90 * 24 * 60 * 60 * 1000,
@@ -14,20 +20,19 @@ export const LIMITS = {
   pinReportMax: 200,
   /** The dashboard's "Not found" count stops here ("99+"). */
   lostCountMax: 99,
-  /** How long a `nuni login` code waits for approval in the dashboard. */
-  cliLoginTtlMs: 10 * 60 * 1000,
+  /** Comments an agent (CLI or MCP) lists at once: by default, and at most. */
+  agentListDefault: 20,
+  agentListMax: 50,
+  /** The text kept for the commented element, and for its ancestors. */
   anchorTextMaxLength: 120,
+  anchorAncestorTextMaxLength: 80,
+  /** Ancestors kept for the commented element, closest first. */
+  anchorAncestorsMax: 5,
+  /** Shadow roots and iframes the element can be nested in. */
+  anchorScopeMaxDepth: 8,
   /** Selected text kept with a text comment, and the context around it. */
   quoteMaxLength: 500,
   quoteContextLength: 32,
-  /** Per page, the widget loads this many newest open and resolved comments. */
-  pageOpenLimit: 1000,
-  pageResolvedLimit: 200,
-  /** The widget's panel lists this many newest comments from every page. */
-  siteOpenLimit: 300,
-  siteResolvedLimit: 100,
-  /** The newest of a commenter's own comments, across pages. */
-  yoursLimit: 100,
   /** Most console or network entries kept with one comment. */
   contextEntryMax: 20,
   contextMessageMaxLength: 500,
@@ -37,17 +42,7 @@ export const LIMITS = {
   /** Images a commenter attaches to one comment (their own or marked up). */
   imagesPerComment: 3,
   imageMaxBytes: 600_000,
-  /** Longest side of an attached image, in pixels. */
-  imageMaxSide: 1600,
-  /** Replies kept per comment thread. */
-  repliesPerComment: 200,
-  /** Reactions kept per thread (the comment and its replies). */
-  reactionsPerComment: 2000,
-  /** How long after posting the author can still attach the screenshot. */
-  screenshotUploadWindowMs: 5 * 60 * 1000,
 } as const
 
 /** The reactions anyone can add to a comment or reply. */
 export const REACTIONS = ["👍", "❤️", "🎉", "👀", "✅", "😄"] as const
-
-export type Reaction = (typeof REACTIONS)[number]

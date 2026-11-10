@@ -1,3 +1,5 @@
+import { LIMITS } from "@nuni/shared"
+
 /**
  * Elements inside open shadow roots and same-origin iframes. A "scope" is
  * the root an element lives in: the page's document, a shadow root, or an
@@ -21,7 +23,7 @@ export function scopeDocument(root: ScopeRoot): Document {
 }
 
 /** The <iframe> showing this document, when the parent is same-origin. */
-export function frameElementOf(doc: Document): Element | null {
+function frameElementOf(doc: Document): Element | null {
   try {
     return doc.defaultView?.frameElement ?? null
   } catch {
@@ -41,30 +43,50 @@ export function frameDocument(el: Element): Document | null {
 
 export interface ScopeStep {
   kind: "shadow" | "frame"
+  /** The shadow host or <iframe>, in the scope around it. */
   host: Element
+  /** Its shadow root or document: the scope one level further in. */
+  root: ScopeRoot
 }
 
 /**
  * Shadow hosts and iframes between the page's document and the element,
- * outermost first.
+ * outermost first. Every walk out of shadow roots and iframes goes through
+ * this, so they all stop at the same depth.
  */
-export function scopeChain(el: Element, top: Document): ScopeStep[] {
+export function scopeChain(el: Element, top: Document = document): ScopeStep[] {
   const chain: ScopeStep[] = []
   let node = el
-  for (let depth = 0; depth < 8; depth++) {
+  for (let depth = 0; depth < LIMITS.anchorScopeMaxDepth; depth++) {
     const root = node.getRootNode()
     if (isShadowRoot(root)) {
-      chain.unshift({ kind: "shadow", host: root.host })
+      chain.unshift({ kind: "shadow", host: root.host, root })
       node = root.host
       continue
     }
     if (node.ownerDocument === top) break
     const frame = frameElementOf(node.ownerDocument)
     if (!frame) break
-    chain.unshift({ kind: "frame", host: frame })
+    chain.unshift({ kind: "frame", host: frame, root: node.ownerDocument })
     node = frame
   }
   return chain
+}
+
+/**
+ * Same-origin iframe documents inside `doc`, nested ones too, as deep as an
+ * anchor's scope can go.
+ */
+export function frameDocuments(doc: Document, depth = 1): Document[] {
+  if (depth > LIMITS.anchorScopeMaxDepth) return []
+  const out: Document[] = []
+  for (const frame of Array.from(doc.querySelectorAll("iframe"))) {
+    const inner = frameDocument(frame)
+    if (inner?.documentElement) {
+      out.push(inner, ...frameDocuments(inner, depth + 1))
+    }
+  }
+  return out
 }
 
 export interface ViewportRect {
@@ -80,16 +102,17 @@ export interface ViewportRect {
  * The element's box in the page's viewport: getBoundingClientRect plus the
  * offset of every iframe it is inside.
  */
-export function viewportRect(el: Element, top?: Document): ViewportRect {
+export function viewportRect(
+  el: Element,
+  top: Document = document
+): ViewportRect {
   const r = el.getBoundingClientRect()
   let left = r.left
   let topPx = r.top
   let clipped = false
-  let doc = el.ownerDocument
-  for (let depth = 0; depth < 8 && doc !== top; depth++) {
-    const frame = frameElementOf(doc)
-    if (!frame) break
-    const view = doc.defaultView
+  const frames = scopeChain(el, top).filter((s) => s.kind === "frame")
+  for (const { host: frame, root } of frames.reverse()) {
+    const view = scopeDocument(root).defaultView
     if (
       view &&
       (left + r.width < 0 ||
@@ -102,7 +125,6 @@ export function viewportRect(el: Element, top?: Document): ViewportRect {
     const f = frame.getBoundingClientRect()
     left += f.left + frame.clientLeft
     topPx += f.top + frame.clientTop
-    doc = frame.ownerDocument
   }
   return { left, top: topPx, width: r.width, height: r.height, clipped }
 }

@@ -1,32 +1,28 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
-import { LIMITS } from "@nuni/shared"
-import { useMutation, usePaginatedQuery, useQuery } from "convex/react"
+import { LIMITS, type OwnerComment } from "@nuni/shared"
+import { cn } from "cn"
+import { usePaginatedQuery, useQuery } from "convex/react"
+import type { FunctionArgs } from "convex/server"
 import {
-  ArchiveIcon,
-  CheckIcon,
   FileIcon,
   InboxIcon,
   MessageSquareIcon,
-  RotateCcwIcon,
   SearchIcon,
   TrashIcon,
   XIcon,
 } from "vadivam-react"
-import Link from "next/link"
-import {
-  useEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-  type KeyboardEvent,
-} from "react"
-import { toast } from "sonner"
+import { useMemo, useState, type KeyboardEvent } from "react"
 
-import { CommentDetail, type OwnerComment } from "@/components/comment-detail"
+import {
+  COMMENT_ACTIONS,
+  useCommentActions,
+  type CommentAction,
+} from "@/components/comment-actions"
+import { CommentDetail } from "@/components/comment-detail"
 import { ConfirmDialog } from "@/components/confirm-dialog"
-import { ProjectHeader } from "@/components/project-header"
+import { useProject } from "@/components/project-shell"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -53,147 +49,246 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useStoreUser } from "@/components/use-store-user"
-import { errorMessage, hostOf, initials, plural, timeAgo } from "@/lib/format"
-import { cn } from "@/lib/utils"
+import { useDebounced } from "@/hooks/use-debounced"
+import { useMediaQuery } from "@/hooks/use-media-query"
+import { hostOf, initials, plural, timeAgo } from "@/lib/format"
 
-/** Open comments, the open ones whose element is gone, or resolved ones. */
-type View = "open" | "lost" | "resolved"
+type View = FunctionArgs<typeof api.comments.listForOwner>["view"]
 
-export function ProjectView({ publicId }: { publicId: string }) {
-  const { ready } = useStoreUser()
-  const project = useQuery(api.projects.getMine, ready ? { publicId } : "skip")
-  const lostCount = useQuery(
-    api.comments.lostCount,
-    ready ? { publicId } : "skip"
-  )
+/** The inbox tabs. */
+const VIEWS: Record<
+  View,
+  {
+    tab: string
+    list: string
+    /** The bulk action for what is picked here (delete is always offered). */
+    action: CommentAction
+    /** Show the tab only while it has comments or is open. */
+    optional?: boolean
+    /** The count is only known up to this many. */
+    countMax?: number
+    empty: { title: string; description: string }
+  }
+> = {
+  open: {
+    tab: "Open",
+    list: "Open comments",
+    action: "resolve",
+    empty: {
+      title: "All caught up",
+      description: "New comments from your site show up here as they come in.",
+    },
+  },
+  lost: {
+    tab: "Not found",
+    list: "Comments not found on their page",
+    action: "outdated",
+    optional: true,
+    countMax: LIMITS.lostCountMax,
+    empty: {
+      title: "Every pin was found",
+      description:
+        "Open comments whose element is no longer on the page show up here.",
+    },
+  },
+  resolved: {
+    tab: "Resolved",
+    list: "Resolved comments",
+    action: "reopen",
+    empty: {
+      title: "Nothing resolved yet",
+      description: "Comments you resolve are kept here.",
+    },
+  },
+}
+
+const PAGE_SIZE = 50
+
+type Filters = { path?: string; origin?: string; search?: string }
+
+export function ProjectView() {
+  const project = useProject()
+  const { publicId } = project
+  const lostCount = useQuery(api.comments.lostCount, { publicId })
+  const choices = useQuery(api.comments.ownerFilters, { publicId })
   const [view, setView] = useState<View>("open")
+  const [query, setQuery] = useState("")
+  const [pageInput, setPageInput] = useState("")
+  const [origin, setOrigin] = useState("")
+  const search = useDebounced(query.trim(), 250)
+  const path = useDebounced(pageInput.trim(), 250)
+  const pages = useMemo(() => [...(choices?.paths ?? [])].sort(), [choices])
+  const origins = useMemo(() => [...project.origins].sort(), [project.origins])
 
-  if (!ready || project === undefined) return <ProjectSkeleton />
-  if (project === null) return <ProjectNotFound />
+  const counts: Record<View, number> = {
+    open: project.openCount,
+    lost: lostCount ?? 0,
+    resolved: Math.max(0, project.commentCount - project.openCount),
+  }
+  const tabs = (Object.keys(VIEWS) as View[]).filter(
+    (key) => !VIEWS[key].optional || counts[key] > 0 || key === view
+  )
+  const filters: Filters = {
+    ...(path ? { path } : {}),
+    ...(origin ? { origin } : {}),
+    ...(search ? { search } : {}),
+  }
 
-  const resolvedCount = Math.max(0, project.commentCount - project.openCount)
   return (
-    <div className="grid gap-6">
-      <ProjectHeader project={project} current="comments" />
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Tabs value={view} onValueChange={(v) => setView(v as View)}>
+          <TabsList>
+            {tabs.map((key) => {
+              const { tab, countMax = Infinity } = VIEWS[key]
+              return (
+                <TabsTrigger key={key} value={key} className="px-3">
+                  {tab}{" "}
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {" "}
+                    {counts[key] > countMax ? `${countMax}+` : counts[key]}
+                  </span>
+                </TabsTrigger>
+              )
+            })}
+          </TabsList>
+        </Tabs>
+        <div className="ml-auto flex w-full flex-wrap gap-2 sm:w-auto">
+          <InputGroup className="sm:w-56">
+            <InputGroupInput
+              placeholder="Search comments"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search comments"
+            />
+            <InputGroupAddon>
+              <SearchIcon />
+            </InputGroupAddon>
+          </InputGroup>
+          {/* Free text with suggestions, so paths beyond the suggestion list still work. */}
+          <InputGroup className="flex-1 sm:w-44 sm:flex-none">
+            <InputGroupInput
+              placeholder="All pages"
+              list="nuni-pages"
+              value={pageInput}
+              onChange={(e) => setPageInput(e.target.value)}
+              aria-label="Filter by page path"
+            />
+            <InputGroupAddon>
+              <FileIcon />
+            </InputGroupAddon>
+          </InputGroup>
+          <datalist id="nuni-pages">
+            {pages.map((p) => (
+              <option key={p} value={p} />
+            ))}
+          </datalist>
+          {origins.length > 1 && (
+            <Select
+              value={origin || "all"}
+              onValueChange={(value) =>
+                setOrigin(value === "all" ? "" : (value ?? ""))
+              }
+            >
+              <SelectTrigger aria-label="Filter by site">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sites</SelectItem>
+                {origins.map((o) => (
+                  <SelectItem key={o} value={o}>
+                    {hostOf(o)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      </div>
       <CommentList
+        key={`${view}|${path}|${origin}|${search}`}
         publicId={publicId}
         view={view}
-        tabs={
-          <Tabs value={view} onValueChange={(v) => setView(v as View)}>
-            <TabsList>
-              <TabsTrigger value="open" className="px-3">
-                Open <Count n={project.openCount} />
-              </TabsTrigger>
-              {(lostCount || view === "lost") && (
-                <TabsTrigger value="lost" className="px-3">
-                  Not found{" "}
-                  <Count n={lostCount ?? 0} max={LIMITS.lostCountMax} />
-                </TabsTrigger>
-              )}
-              <TabsTrigger value="resolved" className="px-3">
-                Resolved <Count n={resolvedCount} />
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+        filters={filters}
+        showSite={origins.length > 1}
+        onClearFilters={
+          pageInput || origin || query
+            ? () => {
+                setQuery("")
+                setPageInput("")
+                setOrigin("")
+              }
+            : undefined
         }
       />
     </div>
   )
 }
 
-function Count({ n, max }: { n: number; max?: number }) {
-  return (
-    <span className="text-xs text-muted-foreground tabular-nums">
-      {" "}
-      {max !== undefined && n > max ? `${max}+` : n}
-    </span>
-  )
-}
-
-const EMPTY: Record<View, { title: string; description: string }> = {
-  open: {
-    title: "All caught up",
-    description: "New comments from your site show up here as they come in.",
-  },
-  lost: {
-    title: "Every pin was found",
-    description:
-      "Open comments whose element is no longer on the page show up here.",
-  },
-  resolved: {
-    title: "Nothing resolved yet",
-    description: "Comments you resolve are kept here.",
-  },
-}
-
-const LIST_LABEL: Record<View, string> = {
-  open: "Open comments",
-  lost: "Comments not found on their page",
-  resolved: "Resolved comments",
-}
-
+/** One tab's comments with the given filters; a new list starts fresh. */
 function CommentList({
   publicId,
   view,
-  tabs,
+  filters,
+  showSite,
+  onClearFilters,
 }: {
   publicId: string
   view: View
-  tabs: React.ReactNode
+  filters: Filters
+  showSite: boolean
+  /** Set while any filter is on. */
+  onClearFilters?: () => void
 }) {
-  const status = view === "resolved" ? "resolved" : "open"
-  const [pageInput, setPageInput] = useState("")
-  const page = useDebounced(pageInput.trim(), 250)
-  const [origin, setOrigin] = useState("")
-  const [query, setQuery] = useState("")
-  const search = useDebounced(query.trim(), 250)
   // Filtering happens on the server, so it covers comments not loaded yet.
-  const {
-    results,
-    status: loadStatus,
-    loadMore,
-  } = usePaginatedQuery(
+  const { results, status, loadMore } = usePaginatedQuery(
     api.comments.listForOwner,
-    {
-      publicId,
-      status,
-      ...(view === "lost" ? { lost: true } : {}),
-      ...(page ? { path: page } : {}),
-      ...(origin ? { origin } : {}),
-      ...(search ? { search } : {}),
-    },
-    { initialNumItems: 50 }
+    { publicId, view, ...filters },
+    { initialNumItems: PAGE_SIZE }
   )
-  const comments = loadStatus === "LoadingFirstPage" ? undefined : results
-  const filters = useQuery(api.comments.ownerFilters, { publicId })
-  const bulkSetStatus = useMutation(api.comments.bulkSetStatus)
-  const bulkRemove = useMutation(api.comments.bulkRemove)
+  const { run, busy } = useCommentActions()
   const isDesktop = useMediaQuery("(min-width: 64rem)")
-
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [bulkBusy, setBulkBusy] = useState(false)
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
-  // The comment in the detail panel. When it leaves the list (resolved,
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  // When the comment in the detail panel leaves the list (resolved,
   // deleted), the one that took its place is shown, for quick triage.
   const [active, setActive] = useState({ id: "", index: 0 })
   const [sheetOpen, setSheetOpen] = useState(false)
-  // A different list (tab or filters): start over.
-  const listKey = `${view}|${page}|${origin}|${search}`
-  const [listFor, setListFor] = useState(listKey)
-  if (listFor !== listKey) {
-    setListFor(listKey)
-    setSelected(new Set())
-    setActive({ id: "", index: 0 })
+
+  if (status === "LoadingFirstPage") {
+    return <Skeleton className="h-72 rounded-3xl" />
   }
 
-  const pages = useMemo(() => [...(filters?.paths ?? [])].sort(), [filters])
-  const origins = useMemo(() => [...(filters?.origins ?? [])].sort(), [filters])
-  const list = comments ?? []
-  const hasFilters = Boolean(pageInput || origin || query)
+  const list = results
+  if (list.length === 0) {
+    const empty = onClearFilters
+      ? {
+          title: "No comments match",
+          description: "Try another search, page or site.",
+        }
+      : VIEWS[view].empty
+    return (
+      <Card className="py-0">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              {onClearFilters ? <SearchIcon /> : <InboxIcon />}
+            </EmptyMedia>
+            <EmptyTitle className="text-base">{empty.title}</EmptyTitle>
+            <EmptyDescription>{empty.description}</EmptyDescription>
+          </EmptyHeader>
+          {onClearFilters && (
+            <Button variant="outline" size="sm" onClick={onClearFilters}>
+              Clear filters
+            </Button>
+          )}
+        </Empty>
+      </Card>
+    )
+  }
+
   // Only what is still listed counts (a comment may be gone meanwhile).
   const picked = list.filter((c) => selected.has(c._id))
-  // Bulk actions take at most LIMITS.bulkMax at once, so "all" means that many.
   const selectable = list.slice(0, LIMITS.bulkMax)
   const allPicked =
     selectable.length > 0 && selectable.every((c) => selected.has(c._id))
@@ -201,6 +296,7 @@ function CommentList({
   const activeIndex =
     found >= 0 ? found : Math.min(active.index, list.length - 1)
   const current: OwnerComment | undefined = list[activeIndex]
+  const bulk = COMMENT_ACTIONS[VIEWS[view].action]
 
   function show(index: number) {
     const c = list[index]
@@ -218,34 +314,11 @@ function CommentList({
     })
   }
 
-  async function runBulk(action: "resolve" | "outdated" | "reopen" | "delete") {
+  async function runBulk(action: CommentAction) {
     const ids = picked.slice(0, LIMITS.bulkMax).map((c) => c._id)
-    if (!ids.length) return
-    setBulkBusy(true)
-    try {
-      if (action === "delete") await bulkRemove({ ids })
-      else
-        await bulkSetStatus({
-          ids,
-          status: action === "reopen" ? "open" : "resolved",
-          ...(action === "outdated" ? { resolution: "outdated" as const } : {}),
-        })
-      setSelected(new Set())
-      const done = {
-        delete: "deleted",
-        resolve: "resolved",
-        outdated: "closed as outdated",
-        reopen: "reopened",
-      }[action]
-      toast(`${plural(ids.length, "comment")} ${done}`)
-    } catch (err) {
-      toast.error(errorMessage(err))
-    } finally {
-      setBulkBusy(false)
-    }
+    if (ids.length && (await run(action, ids))) setSelected(new Set())
   }
 
-  // Up and down move through the list, like an inbox.
   function onListKey(e: KeyboardEvent<HTMLUListElement>) {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return
     const rows = [
@@ -262,113 +335,8 @@ function CommentList({
     if (isDesktop) show(next)
   }
 
-  const toolbar = (
-    <div className="flex flex-wrap items-center gap-2">
-      {tabs}
-      <div className="ml-auto flex w-full flex-wrap gap-2 sm:w-auto">
-        <InputGroup className="sm:w-56">
-          <InputGroupInput
-            placeholder="Search comments"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search comments"
-          />
-          <InputGroupAddon>
-            <SearchIcon />
-          </InputGroupAddon>
-        </InputGroup>
-        {/* Free text with suggestions, so paths beyond the suggestion list still work. */}
-        <InputGroup className="flex-1 sm:w-44 sm:flex-none">
-          <InputGroupInput
-            placeholder="All pages"
-            list={`nuni-pages-${status}`}
-            value={pageInput}
-            onChange={(e) => setPageInput(e.target.value)}
-            aria-label="Filter by page path"
-          />
-          <InputGroupAddon>
-            <FileIcon />
-          </InputGroupAddon>
-        </InputGroup>
-        <datalist id={`nuni-pages-${status}`}>
-          {pages.map((p) => (
-            <option key={p} value={p} />
-          ))}
-        </datalist>
-        {origins.length > 1 && (
-          <Select
-            value={origin || "all"}
-            onValueChange={(value) =>
-              setOrigin(value === "all" ? "" : (value ?? ""))
-            }
-          >
-            <SelectTrigger aria-label="Filter by site">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All sites</SelectItem>
-              {origins.map((o) => (
-                <SelectItem key={o} value={o}>
-                  {hostOf(o)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-    </div>
-  )
-
-  if (comments === undefined) {
-    return (
-      <div className="grid gap-4">
-        {toolbar}
-        <Skeleton className="h-72 rounded-3xl" />
-      </div>
-    )
-  }
-
-  if (list.length === 0) {
-    return (
-      <div className="grid gap-4">
-        {toolbar}
-        <Card className="py-0">
-          <Empty>
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                {hasFilters ? <SearchIcon /> : <InboxIcon />}
-              </EmptyMedia>
-              <EmptyTitle className="text-base">
-                {hasFilters ? "No comments match" : EMPTY[view].title}
-              </EmptyTitle>
-              <EmptyDescription>
-                {hasFilters
-                  ? "Try another search, page or site."
-                  : EMPTY[view].description}
-              </EmptyDescription>
-            </EmptyHeader>
-            {hasFilters && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setQuery("")
-                  setPageInput("")
-                  setOrigin("")
-                }}
-              >
-                Clear filters
-              </Button>
-            )}
-          </Empty>
-        </Card>
-      </div>
-    )
-  }
-
   return (
-    <div className="grid gap-4">
-      {toolbar}
+    <>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <Card className="gap-0 py-0">
           <div
@@ -389,7 +357,7 @@ function CommentList({
             {picked.length === 0 ? (
               <span className="text-sm text-muted-foreground">
                 {plural(list.length, "comment")}
-                {loadStatus === "CanLoadMore" ? "+" : ""}
+                {status === "CanLoadMore" ? "+" : ""}
               </span>
             ) : (
               <>
@@ -397,41 +365,21 @@ function CommentList({
                   {picked.length} selected
                 </span>
                 <div className="ml-auto flex items-center gap-1">
-                  {view === "lost" ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={bulkBusy}
-                      onClick={() => void runBulk("outdated")}
-                    >
-                      <ArchiveIcon /> Close as outdated
-                    </Button>
-                  ) : status === "open" ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={bulkBusy}
-                      onClick={() => void runBulk("resolve")}
-                    >
-                      <CheckIcon /> Resolve
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={bulkBusy}
-                      onClick={() => void runBulk("reopen")}
-                    >
-                      <RotateCcwIcon /> Reopen
-                    </Button>
-                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => void runBulk(VIEWS[view].action)}
+                  >
+                    <bulk.icon /> {bulk.label}
+                  </Button>
                   <Button
                     size="icon-sm"
                     variant="ghost"
                     className="text-destructive hover:text-destructive"
-                    disabled={bulkBusy}
+                    disabled={busy}
                     aria-label="Delete selected"
-                    onClick={() => setConfirmBulkDelete(true)}
+                    onClick={() => setConfirmDelete(true)}
                   >
                     <TrashIcon />
                   </Button>
@@ -449,14 +397,14 @@ function CommentList({
           </div>
           <ul
             className="divide-y"
-            aria-label={LIST_LABEL[view]}
+            aria-label={VIEWS[view].list}
             onKeyDown={onListKey}
           >
             {list.map((c, index) => (
               <CommentRow
                 key={c._id}
                 comment={c}
-                showSite={origins.length > 1}
+                showSite={showSite}
                 active={isDesktop && index === activeIndex}
                 checked={selected.has(c._id)}
                 selecting={picked.length > 0}
@@ -465,19 +413,19 @@ function CommentList({
               />
             ))}
           </ul>
-          {loadStatus === "CanLoadMore" && (
+          {status === "CanLoadMore" && (
             <div className="border-t p-2">
               <Button
                 variant="ghost"
                 size="sm"
                 className="w-full"
-                onClick={() => loadMore(50)}
+                onClick={() => loadMore(PAGE_SIZE)}
               >
                 Load more
               </Button>
             </div>
           )}
-          {loadStatus === "LoadingMore" && (
+          {status === "LoadingMore" && (
             <div className="border-t p-3">
               <Skeleton className="h-7" />
             </div>
@@ -485,11 +433,7 @@ function CommentList({
         </Card>
         {isDesktop && current && (
           <Card className="sticky top-20 max-h-[calc(100svh-6rem)] overflow-y-auto px-6 py-6">
-            <CommentDetail
-              key={current._id}
-              publicId={publicId}
-              comment={current}
-            />
+            <CommentDetail key={current._id} comment={current} />
           </Card>
         )}
       </div>
@@ -500,7 +444,6 @@ function CommentList({
             {current && (
               <CommentDetail
                 key={current._id}
-                publicId={publicId}
                 comment={current}
                 onChanged={() => setSheetOpen(false)}
               />
@@ -509,15 +452,15 @@ function CommentList({
         </Sheet>
       )}
       <ConfirmDialog
-        open={confirmBulkDelete}
-        onOpenChange={setConfirmBulkDelete}
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
         title={`Delete ${plural(Math.min(picked.length, LIMITS.bulkMax), "comment")}?`}
         description={`They're deleted for everyone, with their replies and screenshots. This can't be undone.${picked.length > LIMITS.bulkMax ? ` Only the first ${LIMITS.bulkMax} are deleted at a time.` : ""}`}
         action="Delete"
         destructive
         onConfirm={() => void runBulk("delete")}
       />
-    </div>
+    </>
   )
 }
 
@@ -545,7 +488,6 @@ function CommentRow({
         active ? "bg-muted/70" : "hover:bg-muted/40"
       )}
     >
-      {/* The avatar turns into a checkbox on hover, or while selecting. */}
       <div className="relative z-10 grid size-6 shrink-0 place-items-center">
         <Avatar
           size="sm"
@@ -616,64 +558,5 @@ function CommentRow({
         </span>
       </button>
     </li>
-  )
-}
-
-function ProjectSkeleton() {
-  return (
-    <div className="grid gap-6">
-      <div className="grid gap-2">
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-4 w-40" />
-      </div>
-      <Skeleton className="h-8 w-full" />
-      <Skeleton className="h-72 rounded-3xl" />
-    </div>
-  )
-}
-
-export function ProjectNotFound() {
-  return (
-    <Empty>
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <InboxIcon />
-        </EmptyMedia>
-        <EmptyTitle>Project not found</EmptyTitle>
-        <EmptyDescription>
-          It doesn&apos;t exist, is being deleted, or belongs to someone else.
-          Claim it from the widget on your site first.
-        </EmptyDescription>
-      </EmptyHeader>
-      <Link
-        href="/"
-        className="text-sm font-medium text-primary hover:underline"
-      >
-        Back to projects
-      </Link>
-    </Empty>
-  )
-}
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), ms)
-    return () => clearTimeout(timer)
-  }, [value, ms])
-  return debounced
-}
-
-/** Whether a media query matches; the server renders the desktop layout. */
-function useMediaQuery(query: string): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      const media = window.matchMedia(query)
-      media.addEventListener("change", onChange)
-      return () => media.removeEventListener("change", onChange)
-    },
-    () => window.matchMedia(query).matches,
-    () => true
   )
 }

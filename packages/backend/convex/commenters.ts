@@ -1,21 +1,13 @@
-import { LIMITS, randomBase58 } from "@nuni/shared"
+import { sha256Hex } from "@nuni/shared"
 import { v } from "convex/values"
 
-import { internal } from "./_generated/api"
-import { internalMutation, mutation, query } from "./_generated/server"
-import { searchTextFor } from "./comments"
-import {
-  checkSecret,
-  cleanName,
-  commenterFromToken,
-  fail,
-  parseOrigin,
-  projectByPublicId,
-  requireUser,
-  sha256Hex,
-  userAuthorKey,
-} from "./lib"
-import { rateLimiter } from "./rateLimits"
+import { mutation, query } from "./_generated/server"
+import { requireUser } from "./accounts"
+import { checkSecret, commenterFromToken, userAuthorKey } from "./authors"
+import { adjustThread, reauthorComment } from "./lifecycle"
+import { cleanName, fail, liveProject, projectByPublicId } from "./lib"
+import { SERVER_LIMITS } from "./limits"
+import { createSiteSession, findByToken } from "./tokens"
 
 /**
  * Optional sign-in for people who comment. A signed-in commenter writes
@@ -26,35 +18,19 @@ import { rateLimiter } from "./rateLimits"
 
 /**
  * Called by the dashboard sign-in page. The raw token is returned once and
- * handed to the widget via postMessage; only its hash is stored.
+ * handed to the widget via postMessage.
  */
 export const create = mutation({
   args: { publicId: v.string(), origin: v.string() },
   handler: async (ctx, { publicId, origin }) => {
     const user = await requireUser(ctx)
-    const project = await projectByPublicId(ctx, publicId)
-    if (!project || project.deletingAt) fail("not_found", "Project not found")
-    // The token is postMessage'd to this origin, so it must be one the
-    // project is used on.
-    const cleanOrigin = parseOrigin(origin)
-    if (!project.origins.includes(cleanOrigin)) {
-      fail("unknown_origin", "Nuni isn't set up on this site")
-    }
-    const { ok } = await rateLimiter.limit(ctx, "sessionPerUser", {
-      key: user._id,
-    })
-    if (!ok) fail("rate_limited", "Too many sign-ins, try again later")
-
-    const token = `nuni_c_${randomBase58(40)}`
-    const expiresAt = Date.now() + LIMITS.sessionTtlMs
-    await ctx.db.insert("commenterSessions", {
-      tokenHash: await sha256Hex(token),
+    const project = await liveProject(ctx, publicId)
+    if (!project) fail("not_found", "Project not found")
+    return createSiteSession(ctx, "commenter", {
       userId: user._id,
-      projectId: project._id,
-      origin: cleanOrigin,
-      expiresAt,
+      project,
+      origin,
     })
-    return { token, expiresAt }
   },
 })
 
@@ -76,9 +52,6 @@ export const validate = query({
     }
   },
 })
-
-/** Most of a browser's guest comments, replies and reactions moved at once. */
-const LINK_LIMIT = 200
 
 /**
  * Right after signing in: this browser's guest comments, replies and
@@ -109,27 +82,26 @@ export const linkBrowser = mutation({
         .withIndex("by_project_author", (q) =>
           q.eq("projectId", project._id).eq("authorKeyHash", from)
         )
-        .take(LINK_LIMIT),
+        .take(SERVER_LIMITS.linkBrowserMax),
       ctx.db
         .query("replies")
         .withIndex("by_project_author", (q) =>
           q.eq("projectId", project._id).eq("authorKeyHash", from)
         )
-        .take(LINK_LIMIT),
+        .take(SERVER_LIMITS.linkBrowserMax),
       ctx.db
         .query("reactions")
         .withIndex("by_project_author", (q) =>
           q.eq("projectId", project._id).eq("authorKeyHash", from)
         )
-        .take(LINK_LIMIT),
+        .take(SERVER_LIMITS.linkBrowserMax),
     ])
 
     for (const comment of comments) {
-      await ctx.db.patch(comment._id, {
+      await reauthorComment(ctx, comment, {
         authorKeyHash: to,
         authorId: user._id,
         authorName,
-        searchText: searchTextFor({ ...comment, authorName }),
       })
     }
     for (const reply of replies) {
@@ -156,44 +128,15 @@ export const linkBrowser = mutation({
       }
       // The account already has this emoji here: keep one.
       await ctx.db.delete(reaction._id)
-      const comment = await ctx.db.get(reaction.commentId)
-      if (comment) {
-        await ctx.db.patch(comment._id, {
-          reactionCount: Math.max(0, (comment.reactionCount ?? 1) - 1),
-        })
-      }
+      await adjustThread(ctx, reaction.commentId, { reactions: -1 })
     }
   },
 })
 
-/** Widget sign-out: the widget revokes its own token. */
 export const signOut = mutation({
   args: { commenterToken: v.string() },
   handler: async (ctx, { commenterToken }) => {
-    if (!commenterToken || commenterToken.length > 200) return
-    const tokenHash = await sha256Hex(commenterToken)
-    const session = await ctx.db
-      .query("commenterSessions")
-      .withIndex("by_tokenHash", (q) => q.eq("tokenHash", tokenHash))
-      .unique()
+    const session = await findByToken(ctx, "commenterSessions", commenterToken)
     if (session) await ctx.db.delete(session._id)
-  },
-})
-
-const CLEANUP_BATCH = 500
-
-/** Daily cron: delete expired commenter sessions. */
-export const cleanupExpired = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const expired = await ctx.db
-      .query("commenterSessions")
-      .withIndex("by_expires", (q) => q.lt("expiresAt", Date.now()))
-      .take(CLEANUP_BATCH)
-    for (const session of expired) await ctx.db.delete(session._id)
-    if (expired.length === CLEANUP_BATCH) {
-      await ctx.scheduler.runAfter(0, internal.commenters.cleanupExpired, {})
-    }
-    return expired.length
   },
 })

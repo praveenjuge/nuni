@@ -1,7 +1,7 @@
-import { LIMITS } from "@nuni/shared"
+import { isImageType, LIMITS } from "@nuni/shared"
 
-/** The image types the backend accepts. */
-export const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"]
+/** Longest side of an attached image, in pixels. */
+const IMAGE_MAX_SIDE = 1600
 
 function toBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
   return new Promise<Blob | null>((resolve) =>
@@ -35,7 +35,7 @@ export async function encodeCanvas(
  * it isn't a readable image.
  */
 export async function imageFromFile(file: Blob): Promise<Blob | null> {
-  if (!IMAGE_TYPES.includes(file.type)) return null
+  if (!isImageType(file.type)) return null
   let bitmap: ImageBitmap
   try {
     bitmap = await createImageBitmap(file)
@@ -44,7 +44,7 @@ export async function imageFromFile(file: Blob): Promise<Blob | null> {
   }
   const scale = Math.min(
     1,
-    LIMITS.imageMaxSide / Math.max(bitmap.width, bitmap.height)
+    IMAGE_MAX_SIDE / Math.max(bitmap.width, bitmap.height)
   )
   const canvas = document.createElement("canvas")
   canvas.width = Math.max(1, Math.round(bitmap.width * scale))

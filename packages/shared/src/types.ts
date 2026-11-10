@@ -1,114 +1,36 @@
-export interface Rect {
-  x: number
-  y: number
-  w: number
-  h: number
-}
+import type { Infer, ObjectType } from "convex/values"
 
-export interface AnchorAncestor {
-  tag: string
-  id?: string
-  classes: string[]
-  text?: string
-}
+import type {
+  anchorValidator,
+  contextValidator,
+  pageValidator,
+  resolutionValidator,
+  statusValidator,
+  suggestionValidator,
+  viewportValidator,
+  widgetAuthorArgs,
+} from "./validators"
 
-/** Everything needed to find a commented element again. Version 1. */
-export interface Anchor {
-  v: 1
-  selectors: {
-    id?: string
-    testId?: string
-    css?: string
-    path: string
-  }
-  tag: string
-  /** Stable, human-authored classes on the element itself. */
-  classes?: string[]
-  role?: string
-  text: string
-  attrs: Record<string, string>
-  ancestors: AnchorAncestor[]
-  siblingIndex: number
-  siblingCount: number
-  componentName?: string
-  /** Element box in document coordinates at capture time. */
-  rect: Rect
-  /** Click point inside the element, 0..1 on each axis. */
-  offset: { x: number; y: number }
-  viewport: {
-    w: number
-    h: number
-    dpr: number
-    scrollX: number
-    scrollY: number
-  }
-  docSize: { w: number; h: number }
-  /**
-   * Shadow hosts and same-origin iframes on the way to the element,
-   * outermost first. The selectors above are relative to the innermost one.
-   */
-  scope?: AnchorScope[]
-  /** A text comment: the selected words inside the element. */
-  quote?: AnchorQuote
-  /** An area comment: a box inside the element, 0..1 of its size. */
-  region?: Rect
-}
+export type Anchor = Infer<typeof anchorValidator>
+export type AnchorAncestor = Anchor["ancestors"][number]
+export type AnchorQuote = NonNullable<Anchor["quote"]>
+export type Rect = Anchor["rect"]
+
+export type CommentStatus = Infer<typeof statusValidator>
+export type Resolution = Infer<typeof resolutionValidator>
+export type CommentContext = Infer<typeof contextValidator>
+export type ConsoleEntry = NonNullable<CommentContext["console"]>[number]
+export type NetworkEntry = NonNullable<CommentContext["network"]>[number]
+export type DomContext = NonNullable<CommentContext["dom"]>
+export type TextSuggestion = Infer<typeof suggestionValidator>
+export type PageInfo = Infer<typeof pageValidator>
+export type Viewport = Infer<typeof viewportValidator>
 
 /**
- * Selected text, found again by its exact words and the text around them
- * (like the W3C TextQuoteSelector). Whitespace is collapsed.
+ * Who is writing: this browser's key, and the commenter's sign-in when they
+ * signed in. The browser key is sent either way.
  */
-export interface AnchorQuote {
-  exact: string
-  prefix: string
-  suffix: string
-}
-
-/** One shadow host or <iframe>, captured like any element in its own scope. */
-export interface AnchorScope {
-  kind: "shadow" | "frame"
-  host: Omit<Anchor, "scope">
-}
-
-export type CommentStatus = "open" | "resolved"
-
-export interface ConsoleEntry {
-  level: "error" | "warn"
-  message: string
-  at: number
-}
-
-/** A failed request. `url` is origin + path only; `status` 0 is a network error. */
-export interface NetworkEntry {
-  method: string
-  url: string
-  status: number
-  at: number
-}
-
-export interface DomContext {
-  /** Trimmed outerHTML, with form values removed. */
-  html: string
-  /** A fixed set of computed styles. */
-  styles: Record<string, string>
-}
-
-/**
- * Extra context captured with a comment. Only the project owner can read it,
- * since comments themselves are readable by anyone with the project ID.
- */
-export interface CommentContext {
-  console?: ConsoleEntry[]
-  network?: NetworkEntry[]
-  dom?: DomContext
-}
-
-/** New words the commenter suggests for the commented text. */
-export interface TextSuggestion {
-  /** The text on the page when the comment was left. */
-  before: string
-  after: string
-}
+export type WidgetAuthor = ObjectType<typeof widgetAuthorArgs>
 
 /** Shape of a comment as the widget receives it. */
 export interface WidgetComment {
@@ -123,22 +45,20 @@ export interface WidgetComment {
   /** Written while signed in: the name and avatar come from the account. */
   signedIn?: boolean
   avatarUrl?: string
-  /** Public listings only include origin, path and title. */
-  page: {
-    origin: string
-    path: string
-    title: string
-    search?: string
-    hash?: string
-    url?: string
-  }
+  /**
+   * Public listings only include origin, path and title: they share comments
+   * across origins by path, and another environment's query string may be
+   * sensitive.
+   */
+  page: Pick<PageInfo, "origin" | "path" | "title"> &
+    Partial<Pick<PageInfo, "search" | "hash" | "url">>
   anchor: Anchor
-  viewport: { w: number; h: number; dpr: number }
+  viewport: Viewport
   createdAt: number
   editedAt?: number
   resolvedAt?: number
   /** Resolved by closing it as outdated, rather than by a fix. */
-  resolution?: "outdated"
+  resolution?: Resolution
   /** Visitors' widgets can't find the element on the page. */
   pinLost?: boolean
   /** Images the commenter attached; their links come with the thread. */
@@ -164,7 +84,7 @@ export interface ReplyView {
 }
 
 /** One emoji on a comment or reply, with who added it. */
-export interface ReactionSummary {
+interface ReactionSummary {
   /** The comment or reply id. */
   targetId: string
   emoji: string
@@ -176,17 +96,18 @@ export interface Thread {
   replies: ReplyView[]
   reactions: ReactionSummary[]
   /** Links to the comment's attached images. */
-  images?: string[]
+  images: string[]
 }
 
 /** A comment as the owner sees it (dashboard, owner widget, agents). */
 export interface OwnerComment extends WidgetComment {
+  page: PageInfo
   /** Since when the element can't be found on the page. */
   pinLostAt?: number
   userAgent?: string
   context?: CommentContext
   screenshotUrl?: string | null
   /** Images the commenter attached, public like the comment. */
-  imageUrls?: string[]
-  replies?: ReplyView[]
+  imageUrls: string[]
+  replies: ReplyView[]
 }

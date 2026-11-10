@@ -1,19 +1,26 @@
 import { mkdir } from "node:fs/promises"
-import { test, expect } from "@playwright/test"
-import { signIn } from "./helpers"
+import { dirname } from "node:path"
+
+import { DASHBOARD_ROUTES } from "@nuni/shared"
+
+import { AUTH_STATE, USERS } from "./env"
+import { expect, test } from "./fixtures"
+import { dashboard, signIn } from "./helpers"
+
 test("sign in both owners through WorkOS", async ({ browser }) => {
-  await mkdir(".auth", { recursive: true })
-  for (const [email, state] of [
-    ["owner@nuni.test", "owner"],
-    ["second-owner@nuni.test", "second-owner"],
-  ]) {
+  for (const [user, state] of [
+    [USERS.owner, AUTH_STATE.owner],
+    [USERS.secondOwner, AUTH_STATE.secondOwner],
+  ] as const) {
+    await mkdir(dirname(state), { recursive: true })
     const context = await browser.newContext()
     const page = await context.newPage()
-    await signIn(page, email)
+    await page.goto(dashboard(DASHBOARD_ROUTES.signIn))
+    await signIn(page, user)
     await expect(
       page.getByRole("heading", { name: "Projects", exact: true })
     ).toBeVisible()
-    await context.storageState({ path: `.auth/${state}.json` })
+    await context.storageState({ path: state })
     await context.close()
   }
 })

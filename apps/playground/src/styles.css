@@ -48,6 +48,11 @@ main {
   color: #555;
   font-size: 18px;
 }
+.tagline {
+  margin: 32px 0;
+  text-align: center;
+  font-size: 18px;
+}
 .hero-actions {
   display: flex;
   gap: 12px;

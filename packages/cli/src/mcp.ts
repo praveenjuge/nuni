@@ -1,12 +1,19 @@
 import { createInterface } from "node:readline"
+import type { Readable, Writable } from "node:stream"
 
-import { buildCommentPrompt, PACKAGES } from "@nuni/shared"
+import {
+  buildCommentPrompt,
+  cliCommand,
+  LIMITS,
+  MCP_SERVER_NAME,
+  MCP_TOOLS,
+  type CommentStatus,
+} from "@nuni/shared"
 
-import { credentialFor } from "./credentials"
-import { formatCommentList, formatPageList } from "./format"
-import { ProjectError, resolveProject } from "./project"
-import { RemoteError, type Remote } from "./remote"
-import { formatResolveResult, resolveComments } from "./resolve"
+import { VERSION } from "./env"
+import { describeError, NuniError } from "./errors"
+import { formatCommentList, formatPageList, formatStatusChange } from "./format"
+import { GROUPS, oneOf, positiveInteger, STATUSES, type Ops } from "./ops"
 
 /**
  * A Model Context Protocol server over stdio (newline-delimited JSON-RPC),
@@ -52,112 +59,72 @@ interface Tool {
   run(args: Json): Promise<ToolResult>
 }
 
-export interface McpOptions {
-  remote: Remote
-  version: string
-  /** --project from the command line. */
-  project?: string
-  cwd: string
-  /** Fetch a screenshot as base64. */
-  fetchImage?: (
-    url: string
-  ) => Promise<{ data: string; mimeType: string } | null>
-}
+const LOGIN_HINT = `Ask the user to run \`${cliCommand("login")}\` in this project (it opens the Nuni dashboard to approve), then try again.`
 
-const LOGIN = `npx ${PACKAGES.cli}@latest login`
-const MAX_RESOLVE = 50
+const DETAIL_HINT =
+  "Call get_comment with an id for the element, DOM, styles, console errors, failed requests and screenshot."
 
-class ToolError extends Error {}
-
-const text = (value: string): ToolResult => ({
+const text = (value: string, isError = false): ToolResult => ({
   content: [{ type: "text", text: value }],
+  ...(isError ? { isError } : {}),
 })
 
-function str(args: Json, name: string): string {
+function required(args: Json, name: string): string {
   const value = args[name]
   if (typeof value !== "string" || !value.trim()) {
-    throw new ToolError(`"${name}" is required`)
+    throw new NuniError(`"${name}" is required`)
   }
   return value.trim()
 }
 
-export async function fetchImage(
-  url: string
-): Promise<{ data: string; mimeType: string } | null> {
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return null
-    const mimeType =
-      res.headers.get("Content-Type")?.split(";")[0] ?? "image/webp"
-    const data = Buffer.from(await res.arrayBuffer()).toString("base64")
-    return { data, mimeType }
-  } catch {
-    return null
-  }
+const listSchema = {
+  status: {
+    type: "string",
+    enum: STATUSES,
+    description: "Defaults to open.",
+  },
+  page: {
+    type: "string",
+    description: "Only comments on this path, for example /pricing.",
+  },
+  group_by: {
+    type: "string",
+    enum: GROUPS,
+    description:
+      "Put related comments together: by page, or by the element they are on (several comments about the same button, heading or text).",
+  },
+  limit: { type: "integer", minimum: 1, maximum: LIMITS.agentListMax },
 }
 
-export function createMcpServer(options: McpOptions) {
-  const { remote } = options
-  let project: string | null = null
+const idSchema = { type: "string", description: "The comment id." }
 
-  function session() {
-    try {
-      project ??= resolveProject(options.project, options.cwd).id
-    } catch (error) {
-      if (error instanceof ProjectError) throw new ToolError(error.message)
-      throw error
-    }
-    const credential = credentialFor(project)
-    if (!credential) {
-      throw new ToolError(
-        `Not signed in to the Nuni project ${project}. Ask the user to run \`${LOGIN}\` in this project (it opens the Nuni dashboard to approve), then try again.`
-      )
-    }
-    return { publicId: project, token: credential.token }
-  }
-
-  const DETAIL_HINT =
-    "Call get_comment with an id for the element, DOM, styles, console errors, failed requests and screenshot."
-
-  const listSchema = {
-    status: {
-      type: "string",
-      enum: ["open", "resolved"],
-      description: "Defaults to open.",
-    },
-    page: {
-      type: "string",
-      description: "Only comments on this path, for example /pricing.",
-    },
-    group_by: {
-      type: "string",
-      enum: ["page", "element"],
-      description:
-        "Put related comments together: by page, or by the element they are on (several comments about the same button, heading or text).",
-    },
-    limit: { type: "integer", minimum: 1, maximum: 50 },
-  }
-
+export function createMcpServer(ops: Ops) {
   async function list(args: Json, search?: string): Promise<ToolResult> {
-    const { publicId, token } = session()
-    const status = args.status === "resolved" ? "resolved" : "open"
-    const page = await remote.listComments(publicId, token, {
-      status,
+    const groupBy = oneOf(args.group_by, GROUPS, "group_by")
+    const result = await ops.listComments({
+      status: oneOf(args.status, STATUSES, "status"),
       path: typeof args.page === "string" ? args.page : undefined,
       search,
-      limit: typeof args.limit === "number" ? args.limit : 20,
+      limit: positiveInteger(args.limit, "limit"),
     })
+    return text(formatCommentList(result, { groupBy, detailHint: DETAIL_HINT }))
+  }
+
+  /** Done when at least one comment changed; each failure on its own line. */
+  async function setStatus(
+    ids: string[],
+    status: CommentStatus,
+    note: unknown
+  ): Promise<ToolResult> {
+    const change = await ops.setStatus(
+      ids,
+      status,
+      typeof note === "string" ? note : undefined
+    )
+    const { text: done, problems } = formatStatusChange(change)
     return text(
-      formatCommentList(page.comments, {
-        status,
-        more: Boolean(page.cursor),
-        order: search ? "best match first" : undefined,
-        groupBy:
-          args.group_by === "page" || args.group_by === "element"
-            ? args.group_by
-            : undefined,
-        detailHint: DETAIL_HINT,
-      })
+      [...(done ? [done] : []), ...problems].join("\n"),
+      !change.done.length
     )
   }
 
@@ -190,7 +157,7 @@ export function createMcpServer(options: McpOptions) {
         additionalProperties: false,
       },
       annotations: { readOnlyHint: true },
-      run: (args) => list(args, str(args, "query")),
+      run: (args) => list(args, required(args, "query")),
     },
     {
       name: "list_pages",
@@ -203,10 +170,7 @@ export function createMcpServer(options: McpOptions) {
         additionalProperties: false,
       },
       annotations: { readOnlyHint: true },
-      async run() {
-        const { publicId, token } = session()
-        return text(formatPageList(await remote.listPages(publicId, token)))
-      },
+      run: async () => text(formatPageList(await ops.listPages())),
     },
     {
       name: "get_comment",
@@ -215,32 +179,23 @@ export function createMcpServer(options: McpOptions) {
         "One comment with everything needed to fix it: the comment, the page link, the element (text, selectors, React component), its HTML and styles, console errors, failed requests, the images the commenter attached and a screenshot.",
       inputSchema: {
         type: "object",
-        properties: { id: { type: "string", description: "The comment id." } },
+        properties: { id: idSchema },
         required: ["id"],
         additionalProperties: false,
       },
       annotations: { readOnlyHint: true },
       async run(args) {
-        const { publicId, token } = session()
-        const comment = await remote.getComment(
-          publicId,
-          token,
-          str(args, "id")
-        )
-        if (!comment)
-          throw new ToolError("No comment with that id in this project")
-        const content: Content[] = [
-          { type: "text", text: buildCommentPrompt(comment) },
-        ]
-        // The commenter's own images first, then the element's screenshot.
-        for (const url of [
-          ...(comment.imageUrls ?? []),
-          ...(comment.screenshotUrl ? [comment.screenshotUrl] : []),
-        ]) {
-          const image = await (options.fetchImage ?? fetchImage)(url)
-          if (image) content.push({ type: "image", ...image })
+        const comment = await ops.getComment(required(args, "id"))
+        const images = await ops.images(comment)
+        return {
+          content: [
+            { type: "text", text: buildCommentPrompt(comment) },
+            ...images.map(({ image }) => ({
+              type: "image" as const,
+              ...image,
+            })),
+          ],
         }
-        return { content }
       },
     },
     {
@@ -251,21 +206,20 @@ export function createMcpServer(options: McpOptions) {
       inputSchema: {
         type: "object",
         properties: {
-          id: { type: "string", description: "The comment id." },
+          id: idSchema,
           body: { type: "string", description: "The reply." },
         },
         required: ["id", "body"],
         additionalProperties: false,
       },
       async run(args) {
-        const { publicId, token } = session()
-        const id = str(args, "id")
-        await remote.reply(publicId, token, id, str(args, "body"))
+        const id = required(args, "id")
+        await ops.reply(id, required(args, "body"))
         return text(`Replied to ${id}.`)
       },
     },
     {
-      name: "resolve_comment",
+      name: MCP_TOOLS.resolveComment,
       title: "Resolve a Nuni comment",
       description:
         "Mark a comment as resolved once the change it asks for is made. Visitors see it as resolved on the site. Add a note to say what changed; it is posted as a reply.",
@@ -275,23 +229,15 @@ export function createMcpServer(options: McpOptions) {
           id: { type: "string" },
           note: {
             type: "string",
-            description: "Optional: what was changed, posted as a reply first.",
+            description:
+              "Optional: what was changed, posted as a reply. The comment is resolved and the note posted together, or neither is.",
           },
         },
         required: ["id"],
         additionalProperties: false,
       },
       annotations: { idempotentHint: true },
-      async run(args) {
-        const { publicId, token } = session()
-        const id = str(args, "id")
-        // Resolve first, so a note is never left on a comment that stayed open.
-        await remote.setStatus(token, id, "resolved")
-        if (typeof args.note === "string" && args.note.trim()) {
-          await remote.reply(publicId, token, id, args.note.trim())
-        }
-        return text(`Resolved ${id}.`)
-      },
+      run: (args) => setStatus([required(args, "id")], "resolved", args.note),
     },
     {
       name: "resolve_comments",
@@ -305,36 +251,24 @@ export function createMcpServer(options: McpOptions) {
             type: "array",
             items: { type: "string" },
             minItems: 1,
-            maxItems: MAX_RESOLVE,
+            maxItems: LIMITS.bulkMax,
           },
           note: {
             type: "string",
             description:
-              "Optional: what was changed, posted as a reply on each.",
+              "Optional: what was changed, posted as a reply on each comment that is resolved.",
           },
         },
         required: ["ids"],
         additionalProperties: false,
       },
       annotations: { idempotentHint: true },
-      async run(args) {
+      run(args) {
         const ids = Array.isArray(args.ids)
           ? args.ids.filter((id): id is string => typeof id === "string")
           : []
-        if (!ids.length) throw new ToolError(`"ids" is required`)
-        if (ids.length > MAX_RESOLVE) {
-          throw new ToolError(`Resolve up to ${MAX_RESOLVE} comments at a time`)
-        }
-        const result = await resolveComments(
-          remote,
-          session(),
-          ids,
-          typeof args.note === "string" ? args.note : undefined
-        )
-        return {
-          ...text(formatResolveResult(result)),
-          ...(result.resolved.length ? {} : { isError: true }),
-        }
+        if (!ids.length) throw new NuniError(`"ids" is required`)
+        return setStatus(ids, "resolved", args.note)
       },
     },
     {
@@ -348,12 +282,7 @@ export function createMcpServer(options: McpOptions) {
         additionalProperties: false,
       },
       annotations: { idempotentHint: true },
-      async run(args) {
-        const { token } = session()
-        const id = str(args, "id")
-        await remote.setStatus(token, id, "open")
-        return text(`Reopened ${id}.`)
-      },
+      run: (args) => setStatus([required(args, "id")], "open", undefined),
     },
   ]
 
@@ -364,18 +293,11 @@ export function createMcpServer(options: McpOptions) {
     try {
       return await tool.run((params.arguments as Json | undefined) ?? {})
     } catch (error) {
-      if (error instanceof ToolError || error instanceof RemoteError) {
-        const message =
-          error instanceof RemoteError && error.code === "unauthenticated"
-            ? `${error.message}. Ask the user to run \`${LOGIN}\` in this project, then try again.`
-            : error.message
-        return { content: [{ type: "text", text: message }], isError: true }
-      }
-      throw error
+      if (!(error instanceof NuniError)) throw error
+      return text(describeError(error, LOGIN_HINT), true)
     }
   }
 
-  /** Handle one message. Notifications get no response (null). */
   async function handle(message: Request): Promise<Json | null> {
     const id = message.id ?? null
     const isNotification = message.id === undefined
@@ -390,9 +312,9 @@ export function createMcpServer(options: McpOptions) {
               : PROTOCOL_VERSIONS[0],
             capabilities: { tools: {} },
             serverInfo: {
-              name: "nuni",
+              name: MCP_SERVER_NAME,
               title: "Nuni",
-              version: options.version,
+              version: VERSION,
             },
             instructions:
               "Nuni comments are feedback pinned to elements on the live site. List them (by page or grouped by element), search them, read one with its full context, fix the code, then resolve it. Resolve several at once when one change fixed them all.",
@@ -432,8 +354,10 @@ export function createMcpServer(options: McpOptions) {
     }
   }
 
-  return { handle, tools }
+  return { handle }
 }
+
+export type McpServer = ReturnType<typeof createMcpServer>
 
 class RpcError extends Error {
   constructor(
@@ -444,13 +368,17 @@ class RpcError extends Error {
   }
 }
 
-/** Serve on stdin/stdout until stdin closes. Logs go to stderr only. */
-export async function serveStdio(server: ReturnType<typeof createMcpServer>) {
+/** Serve newline-delimited JSON-RPC until `input` ends. */
+export async function serve(
+  server: McpServer,
+  input: Readable,
+  output: Writable
+) {
   const write = (message: Json) => {
-    process.stdout.write(`${JSON.stringify(message)}\n`)
+    output.write(`${JSON.stringify(message)}\n`)
   }
   const pending = new Set<Promise<void>>()
-  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity })
+  const lines = createInterface({ input, crlfDelay: Infinity })
   for await (const line of lines) {
     if (!line.trim()) continue
     let message: unknown
@@ -475,3 +403,7 @@ export async function serveStdio(server: ReturnType<typeof createMcpServer>) {
   }
   await Promise.all(pending)
 }
+
+/** On stdin/stdout, so logs must go to stderr only. */
+export const serveStdio = (server: McpServer) =>
+  serve(server, process.stdin, process.stdout)

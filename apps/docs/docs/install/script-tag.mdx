@@ -9,12 +9,12 @@ Add this before `</body>` on every page:
 
 ```html
 <script
-  src="https://cdn.jsdelivr.net/npm/@nuniapp/widget@latest/dist/nuni.global.js"
+  src="{{cdn-url}}"
   data-project="nuni_..."
   defer
 ></script>
 ```
 
-The script is served by jsDelivr straight from npm, about 40 KB gzipped, and loads after your page is idle. When someone comments, it also loads `nuni-screenshot.global.js` from the same folder to take the screenshot.
+The script is served by jsDelivr straight from npm, under {{cdn-budget}} compressed, and loads after your page is idle. When someone comments, it also loads `nuni-screenshot.global.js` from the same folder to take the screenshot.
 
 `window.Nuni.init(options)` is also available if you want to start it yourself.

@@ -1,16 +1,10 @@
+import { WIDGET_ATTRIBUTE, WIDGET_SELECTOR } from "@nuni/shared"
 import { beforeEach, describe, expect, it } from "vitest"
 
-import {
-  buildCssSelector,
-  buildPath,
-  captureAnchor,
-  elementText,
-  isStableClass,
-  isStableId,
-  pickTarget,
-  resolveAnchor,
-  textSimilarity,
-} from "../src"
+import { captureAnchor, elementText, pickTarget, resolveAnchor } from "../src"
+import { buildCssSelector, buildPath } from "../src/selector"
+import { isStableClass, isStableId } from "../src/stable"
+import { textSimilarity } from "../src/text"
 
 describe("stability heuristics", () => {
   it.each([
@@ -74,11 +68,19 @@ describe("selectors", () => {
       </main>`
   })
 
-  it("uses test ids and stable ids", () => {
+  it("builds selectors from test ids and names that survive reordering", () => {
     const pro = document.querySelector('[data-testid="pro"]')!
-    expect(buildCssSelector(pro)).toBe('button[data-testid="pro"]')
     const email = document.querySelector("input")!
-    expect(buildCssSelector(email)).toBe('input[name="email"]')
+    const selectors = [buildCssSelector(pro)!, buildCssSelector(email)!]
+    const plans = document.querySelector(".plans")!
+    plans.prepend(plans.lastElementChild!)
+    const form = document.querySelector("form")!
+    form.prepend(form.querySelector("button")!)
+    expect(selectors.map((s) => document.querySelectorAll(s).length)).toEqual([
+      1, 1,
+    ])
+    expect(document.querySelector(selectors[0]!)).toBe(pro)
+    expect(document.querySelector(selectors[1]!)).toBe(email)
   })
 
   it("disambiguates siblings with nth-of-type", () => {
@@ -90,17 +92,14 @@ describe("selectors", () => {
 
   it("builds a structural path from the nearest stable id", () => {
     const go = document.querySelector("#signup > button")!
-    expect(buildPath(go)).toBe("#signup > button")
+    const path = buildPath(go)
     const span = document.querySelector("span")!
     expect(document.querySelector(buildPath(span))).toBe(span)
-  })
-
-  it("ignores attributes by prefix", () => {
-    const pro = document.querySelector('[data-testid="pro"]')!
-    const selector = buildCssSelector(pro, {
-      ignoreAttributePrefixes: ["data-testid"],
-    })
-    expect(selector).not.toContain("data-testid")
+    // Markup added above the id doesn't break the path.
+    document.body.innerHTML = `<div class="layout"><section>${document.body.innerHTML}</section></div>`
+    expect(document.querySelector(path)).toBe(
+      document.querySelector("#signup > button")
+    )
   })
 })
 
@@ -124,7 +123,7 @@ describe("capture and resolve", () => {
       text: "Hello world",
       classes: ["lead"],
     })
-    const result = resolveAnchor(anchor, document)
+    const result = resolveAnchor(anchor)
     expect(result.element).toBe(el)
     expect(result.confidence).not.toBe("lost")
   })
@@ -133,34 +132,66 @@ describe("capture and resolve", () => {
     document.body.innerHTML = `<ul class="todo"><li class="item">A task</li><li class="item">B task</li><li class="item">C task</li></ul>`
     const anchor = captureAnchor(document.querySelectorAll("li")[1]!)
     document.body.innerHTML = `<ul class="todo"><li class="item">C task</li><li class="item">A task</li><li class="item">B task</li></ul>`
-    expect(resolveAnchor(anchor, document).element?.textContent).toBe("B task")
+    expect(resolveAnchor(anchor).element?.textContent).toBe("B task")
   })
 
   it("reports lost instead of guessing when the item is deleted", () => {
     document.body.innerHTML = `<ul class="todo"><li class="item">Write docs</li><li class="item">Fix login bug</li><li class="item">Plan launch</li></ul>`
     const anchor = captureAnchor(document.querySelectorAll("li")[1]!)
     document.body.innerHTML = `<ul class="todo"><li class="item">Write docs</li><li class="item">Plan launch</li></ul>`
-    const result = resolveAnchor(anchor, document)
+    const result = resolveAnchor(anchor)
     expect(result.element).toBeNull()
     expect(result.confidence).toBe("lost")
   })
 
-  it("never matches ignored elements", () => {
-    document.body.innerHTML = `<div id="nuni-root"><button>Comment</button></div><button>Comment</button>`
+  it("never matches the widget's own elements", () => {
+    document.body.innerHTML = `<div ${WIDGET_ATTRIBUTE}><button>Comment</button></div><button>Comment</button>`
     const target = document.querySelectorAll("button")[1]!
     const anchor = captureAnchor(target)
     target.remove()
-    const result = resolveAnchor(anchor, document, {
-      isIgnored: (el) => Boolean(el.closest("#nuni-root")),
-    })
-    expect(result.element).toBeNull()
+    expect(resolveAnchor(anchor).element).toBeNull()
   })
 
-  it("stores the click offset inside the element", () => {
+  it("stores the click position as a fraction of the element", () => {
     document.body.innerHTML = `<div>box</div>`
-    const anchor = captureAnchor(document.querySelector("div")!, { x: 0, y: 0 })
-    expect(anchor.offset.x).toBeGreaterThanOrEqual(0)
-    expect(anchor.offset.x).toBeLessThanOrEqual(1)
+    const el = document.querySelector("div")!
+    el.getBoundingClientRect = () =>
+      ({ left: 100, top: 50, width: 200, height: 100 }) as DOMRect
+    expect(captureAnchor(el, { x: 150, y: 125 }).offset).toEqual({
+      x: 0.25,
+      y: 0.75,
+    })
+    expect(captureAnchor(el).offset).toEqual({ x: 0.5, y: 0.5 })
+  })
+})
+
+describe("Nuni's own UI and data-nuni test ids", () => {
+  it("reads the text of elements a site marks with data-nuni", () => {
+    document.body.innerHTML = `<section class="plan" data-nuni="plan-pro"><p>Pro</p><button data-nuni="choose-pro">Choose plan</button></section>`
+    const button = document.querySelector("button")!
+    const anchor = captureAnchor(button)
+    expect(anchor.text).toBe("Choose plan")
+    expect(anchor.selectors.testId).toBe("data-nuni=choose-pro")
+    expect(anchor.ancestors[0]!.text).toBe("Pro Choose plan")
+  })
+
+  it("still finds pins stored when data-nuni elements had no text", () => {
+    document.body.innerHTML = `<main><a class="cta" data-nuni="hero-cta" href="/start">Get started</a><a class="cta" href="/demo">Book a demo</a></main>`
+    const old = { ...captureAnchor(document.querySelector("a")!), text: "" }
+    document.body.innerHTML = `<main><a class="cta" href="/demo">Book a demo</a><a class="cta" data-nuni="hero-cta" href="/start">Start your free trial</a></main>`
+    expect(resolveAnchor(old).element?.getAttribute("data-nuni")).toBe(
+      "hero-cta"
+    )
+  })
+
+  it("never reads or matches inside the widget", () => {
+    document.body.innerHTML = `<main><p>Docs</p></main><div ${WIDGET_ATTRIBUTE}><p>Docs</p></div>`
+    const host = document.querySelector(WIDGET_SELECTOR)!
+    host.attachShadow({ mode: "open" }).innerHTML = `<button>Comment</button>`
+    expect(elementText(document.body)).toBe("Docs")
+    const anchor = captureAnchor(document.querySelector("main p")!)
+    document.querySelector("main")!.remove()
+    expect(resolveAnchor(anchor).element).toBeNull()
   })
 })
 
@@ -194,14 +225,14 @@ describe("masked areas", () => {
     expect(masked.text).toBe("")
     expect(masked.attrs).toEqual({})
     expect(JSON.stringify(masked)).not.toContain("1,234")
-    expect(resolveAnchor(masked, document).element).toBe(secret)
+    expect(resolveAnchor(masked).element).toBe(secret)
   })
 
   it("keeps masked labels out of the selectors", () => {
     const refund = document.querySelectorAll("[data-nuni-mask] button")[1]!
     const anchor = captureAnchor(refund)
     expect(JSON.stringify(anchor)).not.toContain("1,234")
-    expect(resolveAnchor(anchor, document).element).toBe(refund)
+    expect(resolveAnchor(anchor).element).toBe(refund)
   })
 })
 
@@ -231,24 +262,26 @@ describe("shadow DOM", () => {
     expect(anchor.scope![0]!.host.tag).toBe("plan-card")
     // The host's text is what it shows: its shadow tree.
     expect(anchor.scope![0]!.host.text).toContain("Pro")
-    expect(anchor.selectors.path).toBe("button")
-    expect(buildPath(button("Pro"))).toBe("button")
+    const shadow = button("Pro").getRootNode() as ShadowRoot
+    expect(Array.from(shadow.querySelectorAll(anchor.selectors.path))).toEqual([
+      button("Pro"),
+    ])
   })
 
   it("finds the element again through its host, and not in another card", () => {
     const anchor = captureAnchor(button("Pro"))
-    expect(resolveAnchor(anchor, document).element).toBe(button("Pro"))
+    expect(resolveAnchor(anchor).element).toBe(button("Pro"))
 
     // A card inserted before: still the Pro card.
     const grid = document.querySelector(".grid")!
     grid.prepend(card("Free"))
-    expect(resolveAnchor(anchor, document).element).toBe(button("Pro"))
+    expect(resolveAnchor(anchor).element).toBe(button("Pro"))
 
     // The Pro card removed: lost, not the same-looking button elsewhere.
     document.querySelectorAll("plan-card").forEach((h) => {
       if (h.shadowRoot!.querySelector("h3")!.textContent === "Pro") h.remove()
     })
-    const lost = resolveAnchor(anchor, document)
+    const lost = resolveAnchor(anchor)
     expect(lost.element).toBeNull()
     expect(lost.confidence).toBe("lost")
   })

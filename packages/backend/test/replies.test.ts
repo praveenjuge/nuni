@@ -1,16 +1,22 @@
-import { generateProjectId, generateSecret, LIMITS } from "@nuni/shared"
+import { generateProjectId, generateSecret } from "@nuni/shared"
 import { describe, expect, it } from "vitest"
 
 import { api } from "../convex/_generated/api"
-import { addComment, setup, signIn, type T } from "./helpers"
+import { SERVER_LIMITS } from "../convex/limits"
+import { RATE_LIMITS } from "../convex/rateLimits"
+import {
+  addComment,
+  claim,
+  ownerToken,
+  postJson,
+  setup,
+  signIn,
+  signInToComment,
+  type T,
+} from "./helpers"
 
-function postReply(t: T, body: Record<string, unknown>, ip = "5.5.5.5") {
-  return t.fetch("/widget/replies", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Real-IP": ip },
-    body: JSON.stringify(body),
-  })
-}
+const postReply = (t: T, body: Record<string, unknown>, ip?: string) =>
+  postJson(t, "/widget/replies", body, ip)
 
 async function reply(
   t: T,
@@ -76,11 +82,8 @@ describe("replies", () => {
     const publicId = generateProjectId()
     const id = await addComment(t, publicId)
     const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
-    const { token } = await alice.mutation(api.sessions.create, {
-      publicId,
-      origin: "http://localhost:3000",
-    })
+    await claim(alice, publicId)
+    const token = await ownerToken(alice, publicId)
 
     await reply(t, publicId, id, { sessionToken: token, body: "On it" })
     await alice.mutation(api.replies.replyAsOwner, {
@@ -110,7 +113,7 @@ describe("replies", () => {
         commentId: id,
         body: "Not mine",
       })
-    ).rejects.toThrow(/owner/)
+    ).rejects.toThrow(/Sign in first/)
 
     // The owner's agent sees the thread.
     const detail = await alice.query(api.comments.getForOwner, {
@@ -129,20 +132,20 @@ describe("replies", () => {
     const theirs = await reply(t, publicId, id)
 
     await t.mutation(api.replies.editOwn, {
-      id: mine as never,
+      id: mine,
       authorSecret: secret,
       body: "Edited",
     })
     await expect(
       t.mutation(api.replies.editOwn, {
-        id: theirs as never,
+        id: theirs,
         authorSecret: secret,
         body: "Hijack",
       })
     ).rejects.toThrow(/your own/)
     await expect(
-      t.mutation(api.replies.remove, { id: theirs as never })
-    ).rejects.toThrow()
+      t.mutation(api.replies.remove, { id: theirs })
+    ).rejects.toThrow(/Sign in first/)
 
     let { replies } = await thread(t, publicId, id)
     expect(replies[0]).toMatchObject({
@@ -150,13 +153,10 @@ describe("replies", () => {
       editedAt: expect.any(Number),
     })
 
-    await t.mutation(api.replies.deleteOwn, {
-      id: mine as never,
-      authorSecret: secret,
-    })
+    await t.mutation(api.replies.deleteOwn, { id: mine, authorSecret: secret })
     const alice = await signIn(t, "user_alice", "Alice")
-    await alice.mutation(api.projects.claim, { publicId })
-    await alice.mutation(api.replies.remove, { id: theirs as never })
+    await claim(alice, publicId)
+    await alice.mutation(api.replies.remove, { id: theirs })
     ;({ replies } = await thread(t, publicId, id))
     expect(replies).toEqual([])
     const [listed] = await t.query(api.comments.listForPage, {
@@ -170,25 +170,31 @@ describe("replies", () => {
     const t = setup()
     const publicId = generateProjectId()
     const id = await addComment(t, publicId)
-    await t.run(async (ctx) => {
-      await ctx.db.patch(id, { replyCount: LIMITS.repliesPerComment })
-    })
-    const res = await postReply(t, {
-      publicId,
-      commentId: id,
-      body: "One more",
-      authorName: "x",
-      authorSecret: generateSecret(),
-    })
-    expect(res.status).toBe(403)
+    const post = (i: number) =>
+      postReply(
+        t,
+        {
+          publicId,
+          commentId: id,
+          body: `Reply ${i}`,
+          authorName: "x",
+          authorSecret: generateSecret(),
+        },
+        `10.0.${i >> 8}.${i & 255}`
+      )
+    for (let i = 0; i < SERVER_LIMITS.repliesPerComment; i++) {
+      expect((await post(i)).status).toBe(201)
+    }
+    expect((await post(SERVER_LIMITS.repliesPerComment)).status).toBe(403)
   })
 
   it("rate limits replies per IP", async () => {
     const t = setup()
     const publicId = generateProjectId()
     const id = await addComment(t, publicId)
+    const allowed = RATE_LIMITS.replyPerIp.capacity
     const statuses: number[] = []
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i <= allowed; i++) {
       const res = await postReply(t, {
         publicId,
         commentId: id,
@@ -198,7 +204,7 @@ describe("replies", () => {
       })
       statuses.push(res.status)
     }
-    expect(statuses.filter((s) => s === 201)).toHaveLength(20)
+    expect(statuses.filter((s) => s === 201)).toHaveLength(allowed)
     expect(statuses.at(-1)).toBe(429)
   })
 })
@@ -244,6 +250,26 @@ describe("reactions", () => {
         authorSecret: sam,
       })
     ).rejects.toThrow(/not found/)
+  })
+
+  it("lets a signed-in commenter take back what this browser added as a guest", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId)
+    const browser = generateSecret()
+    const react = (commenterToken?: string) =>
+      t.mutation(api.reactions.toggle, {
+        publicId,
+        commentId: id,
+        targetId: id,
+        emoji: "👍",
+        authorSecret: browser,
+        commenterToken,
+      })
+    await react()
+    const token = await signInToComment(t, publicId)
+    expect(await react(token)).toEqual({ added: false })
+    expect((await thread(t, publicId, id)).reactions).toEqual([])
   })
 
   it("deletes the whole thread with the comment", async () => {

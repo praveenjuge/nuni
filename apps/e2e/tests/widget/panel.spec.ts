@@ -1,188 +1,138 @@
-import { generateProjectId as projectId } from "@nuni/shared"
-import { expect, test, type Page } from "@playwright/test"
+import { URLS } from "../../env"
+import { expect, test } from "../../fixtures"
+import type { Widget } from "../../widget"
 
-const root = (page: Page) => page.locator("#nuni-root")
-const panel = (page: Page) => root(page).locator(".panel")
-const items = (page: Page) => panel(page).locator("button.item")
-const openPanel = (page: Page) =>
-  root(page).locator(".toolbar").getByRole("button", { name: /open/ }).click()
-
-async function addComment(page: Page, plan: number, body: string) {
-  await root(page)
-    .locator(".toolbar")
-    .getByRole("button", { name: "Add a comment" })
-    .click()
-  await page.locator(".plan").nth(plan).locator(".price").click()
-  const composer = root(page).locator('[data-card="composer"]')
-  const name = composer.getByPlaceholder("Your name")
-  if (await name.isVisible()) await name.fill("Sam Visitor")
-  await composer.getByPlaceholder("Leave a comment").fill(body)
-  await composer.getByRole("button", { name: "Post" }).click()
-  await expect(root(page).locator(".toast")).toHaveText("Comment added")
-}
+const price = (widget: Widget, plan: number) =>
+  widget.page.locator(".plan").nth(plan).locator(".price")
 
 test("the panel marks the comment opened last and searches comments", async ({
-  page,
+  widget,
 }) => {
-  const project = projectId()
   const stamp = Date.now()
-  await page.goto(`/pricing?project=${project}`)
-  await addComment(page, 0, `Make the logo bigger ${stamp}`)
-  await addComment(page, 1, `Fix the price typo ${stamp}`)
+  await widget.goto("/pricing")
+  await widget.comment(price(widget, 0), `Make the logo bigger ${stamp}`, {
+    name: "Sam Visitor",
+  })
+  await widget.comment(price(widget, 1), `Fix the price typo ${stamp}`)
 
   // The comment opened from the panel stays marked after its card closes.
-  await openPanel(page)
-  await expect(items(page)).toHaveCount(2)
-  await items(page).filter({ hasText: "price typo" }).click()
-  await expect(root(page).locator('[data-card="thread"]')).toBeVisible()
-  await page.keyboard.press("Escape")
-  const current = panel(page).locator('button.item[aria-current="true"]')
+  await widget.openPanel()
+  await expect(widget.items).toHaveCount(2)
+  await widget.item("price typo").click()
+  await expect(widget.thread).toBeVisible()
+  await widget.page.keyboard.press("Escape")
+  const current = widget.list.locator('.item[aria-current="true"]')
   await expect(current).toHaveCount(1)
   await expect(current).toContainText("price typo")
 
   // And after a reload.
-  await page.reload()
-  await openPanel(page)
+  await widget.reload()
+  await widget.openPanel()
   await expect(current).toContainText("price typo")
 
   // Search filters by text and author; Escape clears it before closing.
-  const search = panel(page).getByRole("searchbox", { name: "Search comments" })
-  await search.fill("LOGO")
-  await expect(items(page)).toHaveCount(1)
-  await expect(items(page)).toContainText("logo bigger")
-  await search.fill("nothing like this")
-  await expect(items(page)).toHaveCount(0)
-  await expect(panel(page)).toContainText(
+  await widget.search.fill("LOGO")
+  await expect(widget.items).toHaveCount(1)
+  await expect(widget.items).toContainText("logo bigger")
+  await widget.search.fill("nothing like this")
+  await expect(widget.items).toHaveCount(0)
+  await expect(widget.panel).toContainText(
     "No comments match “nothing like this”."
   )
-  await search.fill("sam visitor")
-  await expect(items(page)).toHaveCount(2)
-  await page.keyboard.press("Escape")
-  await expect(search).toHaveValue("")
-  await expect(panel(page)).toBeVisible()
-  await page.keyboard.press("Escape")
-  await expect(panel(page)).toHaveCount(0)
+  await widget.search.fill("sam visitor")
+  await expect(widget.items).toHaveCount(2)
+  await widget.page.keyboard.press("Escape")
+  await expect(widget.search).toHaveValue("")
+  await expect(widget.panel).toBeVisible()
+  await widget.page.keyboard.press("Escape")
+  await expect(widget.panel).toHaveCount(0)
 })
 
 test("Yours lists your comments on every page and opens them", async ({
-  page,
-  browser,
+  widget,
+  newVisitor,
 }) => {
-  const project = projectId()
   const stamp = Date.now()
-  await page.goto(`/pricing?project=${project}`)
-  await addComment(page, 0, `Pricing note ${stamp}`)
-  await page.goto(`/?project=${project}`)
-  await root(page)
-    .locator(".toolbar")
-    .getByRole("button", { name: "Add a comment" })
-    .click()
-  await page.locator(".lead").click()
-  const composer = root(page).locator('[data-card="composer"]')
-  await composer.getByPlaceholder("Leave a comment").fill(`Home note ${stamp}`)
-  await composer.getByRole("button", { name: "Post" }).click()
-  await expect(root(page).locator(".toast")).toHaveText("Comment added")
+  await widget.goto("/pricing")
+  await widget.comment(price(widget, 0), `Pricing note ${stamp}`)
+  await widget.goto("/")
+  await widget.comment(widget.page.locator(".lead"), `Home note ${stamp}`)
 
-  await openPanel(page)
-  const yours = panel(page).getByRole("tab", { name: "Yours (2)" })
+  await widget.openPanel()
+  const yours = widget.tab("Yours (2)")
   await yours.click()
   await expect(yours).toHaveAttribute("aria-selected", "true")
-  const list = panel(page).getByRole("tabpanel")
-  await expect(list.locator(".item")).toHaveCount(2)
-  await expect(list.locator(".item").first()).toContainText("This page")
-  await expect(list.locator(".item").first()).toContainText("Open")
-  await expect(list.locator(".item").nth(1)).toContainText("/pricing")
+  await expect(widget.items).toHaveCount(2)
+  await expect(widget.items.first()).toContainText("This page")
+  await expect(widget.items.first()).toContainText("Open")
+  await expect(widget.items.nth(1)).toContainText("/pricing")
 
   // A comment on another page opens there, focused.
-  await list.getByRole("link", { name: /Pricing note/ }).click()
-  await expect(page).toHaveURL(/\/pricing\?project=/)
-  await expect(root(page).locator('[data-card="thread"]')).toContainText(
-    `Pricing note ${stamp}`
-  )
+  await widget.list.getByRole("link", { name: /Pricing note/ }).click()
+  await expect(widget.page).toHaveURL(/\/pricing\?project=/)
+  await expect(widget.thread).toContainText(`Pricing note ${stamp}`)
 
   // Someone else's browser has none of them.
-  const other = await browser.newContext()
-  const stranger = await other.newPage()
-  await stranger.goto(`/pricing?project=${project}`)
-  await openPanel(stranger)
-  await panel(stranger).getByRole("tab", { name: "Yours (0)" }).click()
-  await expect(panel(stranger)).toContainText(
+  const stranger = await newVisitor()
+  await stranger.goto("/pricing")
+  await stranger.openPanel()
+  await stranger.tab("Yours (0)").click()
+  await expect(stranger.panel).toContainText(
     "Comments you leave on any page of this site show here."
   )
-  await other.close()
 })
 
 test("the panel lists every page's comments, this page first, and searches them all", async ({
-  page,
-  browser,
+  widget,
+  newVisitor,
 }) => {
-  const project = projectId()
   const stamp = Date.now()
-  await page.goto(`/?project=${project}`)
-  await root(page)
-    .locator(".toolbar")
-    .getByRole("button", { name: "Add a comment" })
-    .click()
-  await page.locator(".lead").click()
-  const composer = root(page).locator('[data-card="composer"]')
-  await composer.getByPlaceholder("Your name").fill("Sam Visitor")
-  await composer.getByPlaceholder("Leave a comment").fill(`Home note ${stamp}`)
-  await composer.getByRole("button", { name: "Post" }).click()
-  await expect(root(page).locator(".toast")).toHaveText("Comment added")
-  await page.goto(`/pricing?project=${project}`)
-  await addComment(page, 0, `Starter note ${stamp}`)
-  await addComment(page, 1, `Pro note ${stamp}`)
+  await widget.goto("/")
+  await widget.comment(widget.page.locator(".lead"), `Home note ${stamp}`)
+  await widget.goto("/pricing")
+  await widget.comment(price(widget, 0), `Starter note ${stamp}`)
+  await widget.comment(price(widget, 1), `Pro note ${stamp}`)
 
-  await openPanel(page)
-  const list = panel(page).getByRole("tabpanel")
-  const sections = list.locator(".section-label")
-  await expect(panel(page).getByRole("tab", { name: "Open (3)" })).toBeVisible()
-  await expect(sections).toHaveText(["This page", "/"])
-  await expect(list.locator(".item")).toHaveCount(3)
+  await widget.openPanel()
+  await expect(widget.tab("Open (3)")).toBeVisible()
+  await expect(widget.sections).toHaveText(["This page", "/"])
+  await expect(widget.items).toHaveCount(3)
   // Comments here open in place; the one on another page is a link there.
-  await expect(items(page)).toHaveCount(2)
-  const home = list.getByRole("link", { name: /Home note/ })
+  await expect(widget.list.locator("button.item")).toHaveCount(2)
+  const home = widget.list.getByRole("link", { name: /Home note/ })
   await expect(home).toBeVisible()
 
   // Search looks through every page.
-  const search = panel(page).getByRole("searchbox", { name: "Search comments" })
-  await search.fill("home note")
-  await expect(list.locator(".item")).toHaveCount(1)
-  await expect(sections).toHaveText(["/"])
-  await search.fill("note")
-  await expect(list.locator(".item")).toHaveCount(3)
+  await widget.search.fill("home note")
+  await expect(widget.items).toHaveCount(1)
+  await expect(widget.sections).toHaveText(["/"])
+  await widget.search.fill("note")
+  await expect(widget.items).toHaveCount(3)
   // A page's path finds its comments, this page's too.
-  await search.fill("/pricing")
-  await expect(list.locator(".item")).toHaveCount(2)
-  await search.fill("")
+  await widget.search.fill("/pricing")
+  await expect(widget.items).toHaveCount(2)
+  await widget.search.fill("")
 
   // Opening it goes to that page, with the comment open.
   await home.click()
-  await expect(page).toHaveURL(/127\.0\.0\.1:5173\/\?project=/)
-  await expect(root(page).locator('[data-card="thread"]')).toContainText(
-    `Home note ${stamp}`
+  await expect(widget.page).toHaveURL(
+    new RegExp(`^${URLS.playground}/\\?project=`)
   )
-  await openPanel(page)
-  await expect(sections).toHaveText(["This page", "/pricing"])
-  await expect(list.getByRole("link", { name: /Pro note/ })).toBeVisible()
+  await expect(widget.thread).toContainText(`Home note ${stamp}`)
+  await widget.openPanel()
+  await expect(widget.sections).toHaveText(["This page", "/pricing"])
+  await expect(
+    widget.list.getByRole("link", { name: /Pro note/ })
+  ).toBeVisible()
 
   // A new visitor on a page with no comments still sees, and searches, the
   // others.
-  const other = await browser.newContext()
-  const visitor = await other.newPage()
-  await visitor.goto(`/tasks?project=${project}`)
-  await openPanel(visitor)
-  const theirs = panel(visitor).getByRole("tabpanel")
-  await expect(theirs.locator(".section-label")).toHaveText([
-    "This page",
-    "/pricing",
-    "/",
-  ])
-  await expect(theirs).toContainText("No open comments on this page.")
-  await panel(visitor)
-    .getByRole("searchbox", { name: "Search comments" })
-    .fill("starter")
-  await expect(theirs.locator(".item")).toHaveCount(1)
-  await expect(theirs.locator(".section-label")).toHaveText(["/pricing"])
-  await other.close()
+  const visitor = await newVisitor()
+  await visitor.goto("/tasks")
+  await visitor.openPanel()
+  await expect(visitor.sections).toHaveText(["This page", "/pricing", "/"])
+  await expect(visitor.list).toContainText("No open comments on this page.")
+  await visitor.search.fill("starter")
+  await expect(visitor.items).toHaveCount(1)
+  await expect(visitor.sections).toHaveText(["/pricing"])
 })

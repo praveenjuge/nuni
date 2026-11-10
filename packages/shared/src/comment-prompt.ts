@@ -1,8 +1,15 @@
-import { commentUrl } from "./path"
-import { PACKAGES } from "./prompt"
-import type { OwnerComment } from "./types"
+import { pageLink } from "./path"
+import { cliCommand, MCP_TOOLS } from "./prompt"
+import type { OwnerComment, WidgetComment } from "./types"
 
-export interface CommentPromptOptions {
+/**
+ * A comment as any surface has it: the owner's full view, or a visitor's
+ * public one with the thread's replies.
+ */
+type PromptComment = WidgetComment &
+  Partial<Omit<OwnerComment, keyof WidgetComment>>
+
+interface CommentPromptOptions {
   /**
    * Include the owner-only context (DOM, styles, console, network,
    * screenshot). Defaults to true; the fields are skipped when absent.
@@ -37,7 +44,7 @@ function inline(text: string): string {
  * truth for the widget, dashboard, CLI and MCP server.
  */
 export function buildCommentPrompt(
-  comment: OwnerComment,
+  comment: PromptComment,
   options: CommentPromptOptions = {}
 ): string {
   const includeContext = options.includeContext ?? true
@@ -84,7 +91,8 @@ export function buildCommentPrompt(
 
   out.push("", "## Where", "")
   out.push(`- Page: ${page.title ? `${page.title} ` : ""}(${page.path})`)
-  out.push(`- Open it: ${commentUrl(page, comment._id)}`)
+  const link = pageLink(page, comment._id)
+  if (link) out.push(`- Open it: ${link}`)
   out.push(
     `- Viewport: ${comment.viewport.w}×${comment.viewport.h} at ${comment.viewport.dpr}x`
   )
@@ -178,7 +186,7 @@ export function buildCommentPrompt(
       ? "2. Replace the text exactly as suggested (wherever it comes from: markup, a component, a translation or content file), and keep the fix focused on it."
       : "2. Make the change the comment asks for, and keep the fix focused on it.",
     "3. Tell me what you changed, so the comment can be resolved in Nuni.",
-    `   If the Nuni CLI is signed in to this project (\`npx ${PACKAGES.cli}@latest login\`), resolve it with \`npx ${PACKAGES.cli}@latest resolve ${comment._id}\` or the \`resolve_comment\` MCP tool.`
+    `   If the Nuni CLI is signed in to this project (\`${cliCommand("login")}\`), resolve it with \`${cliCommand(`resolve ${comment._id}`)}\` or the \`${MCP_TOOLS.resolveComment}\` MCP tool.`
   )
   return out.join("\n")
 }

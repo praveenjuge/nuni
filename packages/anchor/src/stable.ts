@@ -1,3 +1,5 @@
+import { WIDGET_CLASS_PREFIX } from "@nuni/shared"
+
 /**
  * Heuristics that decide whether an id, class or attribute is a stable,
  * human-authored identifier (good for re-finding an element) or something
@@ -79,7 +81,7 @@ function looksRandom(token: string): boolean {
   return digits / token.length > 0.2
 }
 
-export function isUtilityClass(name: string): boolean {
+function isUtilityClass(name: string): boolean {
   if (/[[\]:/()%!#@&*,.>+~=]/.test(name)) return true
   if (TAILWIND_EXACT.has(name)) return true
   return TAILWIND_PREFIX.test(name)
@@ -87,7 +89,7 @@ export function isUtilityClass(name: string): boolean {
 
 export function isStableClass(name: string): boolean {
   if (!name || name.length > 40) return false
-  if (name.startsWith("nuni-")) return false
+  if (name.startsWith(WIDGET_CLASS_PREFIX)) return false
   if (isUtilityClass(name)) return false
   if (GENERATED_CLASS_PATTERNS.some((re) => re.test(name))) return false
   return !looksRandom(name)

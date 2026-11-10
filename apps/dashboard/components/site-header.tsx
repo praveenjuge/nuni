@@ -1,11 +1,11 @@
 import { DOCS_URL } from "@nuni/shared"
-import type { User } from "@workos-inc/node"
 
 import { Logo } from "@/components/logo"
 import { buttonVariants } from "@/components/ui/button"
 import { UserMenu } from "@/components/user-menu"
 
-export function SiteHeader({ user }: { user: User | null }) {
+/** `email` is the signed-in person's, if anyone is signed in. */
+export function SiteHeader({ email }: { email?: string }) {
   return (
     <header className="sticky top-0 z-20 border-b bg-background/80 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-5xl items-center gap-2 px-4">
@@ -20,16 +20,7 @@ export function SiteHeader({ user }: { user: User | null }) {
           >
             Docs
           </a>
-          {user && (
-            <UserMenu
-              name={
-                [user.firstName, user.lastName].filter(Boolean).join(" ") ||
-                user.email
-              }
-              email={user.email}
-              avatarUrl={user.profilePictureUrl}
-            />
-          )}
+          {email && <UserMenu email={email} />}
         </nav>
       </div>
     </header>

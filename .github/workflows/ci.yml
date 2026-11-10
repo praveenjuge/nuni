@@ -19,31 +19,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - run: bun run format:check
       - run: bun run readmes:check
       - run: bunx turbo run build lint typecheck test
       - name: Bundle size
-        run: bunx turbo run size --filter=@nuniapp/widget
+        run: bunx turbo run size
 
   reliability:
     name: Pin reliability benchmark
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - run: bunx playwright install --with-deps chromium
         working-directory: packages/anchor
       - run: bun run bench
@@ -59,14 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: bun install --frozen-lockfile
-      - run: bunx turbo run build --filter=@nuni/playground... --filter=@nuni/docs...
+      - uses: ./.github/actions/setup
       - run: bunx playwright install --with-deps chromium
         working-directory: apps/e2e
       - run: bun run e2e

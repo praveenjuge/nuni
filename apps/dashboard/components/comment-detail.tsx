@@ -1,25 +1,25 @@
 "use client"
 
-import { api } from "@nuni/backend/api"
-import { buildCommentPrompt } from "@nuni/shared"
-import { useMutation } from "convex/react"
-import type { FunctionReturnType } from "convex/server"
+import { buildCommentPrompt, pageLink, type OwnerComment } from "@nuni/shared"
 import {
-  ArchiveIcon,
-  CheckIcon,
   ClipboardCopyIcon,
   ExternalLinkIcon,
   EllipsisIcon,
-  RotateCcwIcon,
   TrashIcon,
 } from "vadivam-react"
 import Image from "next/image"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import {
+  COMMENT_ACTIONS,
+  useCommentActions,
+  type CommentAction,
+} from "@/components/comment-actions"
 import { CommentContext } from "@/components/comment-context"
 import { CommentThread } from "@/components/comment-thread"
 import { ConfirmDialog } from "@/components/confirm-dialog"
+import { copyText } from "@/components/copy-button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
@@ -34,67 +34,26 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import {
-  describeAgent,
-  errorMessage,
-  hostOf,
-  initials,
-  jumpUrl,
-  timeAgo,
-} from "@/lib/format"
-
-export type OwnerComment = FunctionReturnType<
-  typeof api.comments.listForOwner
->["page"][number]
+import { describeAgent, hostOf, initials, timeAgo } from "@/lib/format"
 
 /** Everything about one comment: what was said, where, the screenshot and the thread. */
 export function CommentDetail({
-  publicId,
   comment: c,
   onChanged,
 }: {
-  publicId: string
   comment: OwnerComment
   /** Called after the comment is resolved, reopened or deleted. */
   onChanged?: () => void
 }) {
-  const resolve = useMutation(api.comments.resolve)
-  const [closing, setClosing] = useState(false)
-  const reopen = useMutation(api.comments.reopen)
-  const remove = useMutation(api.comments.remove)
+  const { run, busy } = useCommentActions()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const open = c.status === "open"
+  const toggle = COMMENT_ACTIONS[open ? "resolve" : "reopen"]
+  const outdated = COMMENT_ACTIONS.outdated
+  const link = pageLink(c.page, c._id) ?? c.page.url
 
-  async function toggleStatus() {
-    try {
-      if (open) {
-        await resolve({ id: c._id })
-        toast("Comment resolved", {
-          action: { label: "Undo", onClick: () => void reopen({ id: c._id }) },
-        })
-      } else {
-        await reopen({ id: c._id })
-        toast("Comment reopened")
-      }
-      onChanged?.()
-    } catch (err) {
-      toast.error(errorMessage(err))
-    }
-  }
-
-  async function closeAsOutdated() {
-    setClosing(true)
-    try {
-      await resolve({ id: c._id, resolution: "outdated" })
-      toast("Closed as outdated", {
-        action: { label: "Undo", onClick: () => void reopen({ id: c._id }) },
-      })
-      onChanged?.()
-    } catch (err) {
-      toast.error(errorMessage(err))
-    } finally {
-      setClosing(false)
-    }
+  async function act(action: CommentAction) {
+    if (await run(action, [c._id])) onChanged?.()
   }
 
   const element = [
@@ -128,12 +87,8 @@ export function CommentDetail({
                   variant="ghost"
                   aria-label="Copy for agent"
                   onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(buildCommentPrompt(c))
+                    if (await copyText(buildCommentPrompt(c)))
                       toast("Copied. Paste it into your agent.")
-                    } catch {
-                      toast.error("Couldn't copy. Allow clipboard access.")
-                    }
                   }}
                 />
               }
@@ -146,7 +101,7 @@ export function CommentDetail({
             <TooltipTrigger
               render={
                 <a
-                  href={jumpUrl(c.page, c._id)}
+                  href={link}
                   target="_blank"
                   rel="noreferrer"
                   aria-label="Open on page"
@@ -186,10 +141,11 @@ export function CommentDetail({
             size="sm"
             variant={open ? "default" : "outline"}
             className="ml-1"
-            onClick={() => void toggleStatus()}
+            disabled={busy}
+            onClick={() => void act(open ? "resolve" : "reopen")}
           >
-            {open ? <CheckIcon /> : <RotateCcwIcon />}
-            {open ? "Resolve" : "Reopen"}
+            <toggle.icon />
+            {toggle.label}
           </Button>
         </div>
       </header>
@@ -207,7 +163,7 @@ export function CommentDetail({
           </p>
           <div className="flex flex-wrap gap-2">
             <a
-              href={jumpUrl(c.page, c._id)}
+              href={link}
               target="_blank"
               rel="noreferrer"
               className={buttonVariants({ size: "sm", variant: "outline" })}
@@ -217,10 +173,10 @@ export function CommentDetail({
             <Button
               size="sm"
               variant="ghost"
-              disabled={closing}
-              onClick={() => void closeAsOutdated()}
+              disabled={busy}
+              onClick={() => void act("outdated")}
             >
-              <ArchiveIcon /> Close as outdated
+              <outdated.icon /> {outdated.label}
             </Button>
           </div>
         </section>
@@ -250,7 +206,7 @@ export function CommentDetail({
         <dt className="text-muted-foreground">Page</dt>
         <dd className="min-w-0 truncate">
           <a
-            href={jumpUrl(c.page, c._id)}
+            href={link}
             target="_blank"
             rel="noreferrer"
             className="font-mono text-xs hover:underline"
@@ -319,12 +275,7 @@ export function CommentDetail({
 
       <Separator />
 
-      <CommentThread
-        key={c._id}
-        publicId={publicId}
-        commentId={c._id}
-        replies={c.replies}
-      />
+      <CommentThread key={c._id} commentId={c._id} replies={c.replies} />
 
       <ConfirmDialog
         open={confirmDelete}
@@ -333,15 +284,7 @@ export function CommentDetail({
         description="The comment, its replies and its screenshot are deleted for everyone. This can't be undone."
         action="Delete comment"
         destructive
-        onConfirm={async () => {
-          try {
-            await remove({ id: c._id })
-            toast("Comment deleted")
-            onChanged?.()
-          } catch (err) {
-            toast.error(errorMessage(err))
-          }
-        }}
+        onConfirm={() => void act("delete")}
       />
     </article>
   )
@@ -365,12 +308,7 @@ function SuggestedEdit({
           variant="ghost"
           className="-my-1 ml-auto"
           onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(suggestion.after)
-              toast("New text copied")
-            } catch {
-              toast.error("Couldn't copy. Allow clipboard access.")
-            }
+            if (await copyText(suggestion.after)) toast("New text copied")
           }}
         >
           <ClipboardCopyIcon data-icon="inline-start" />

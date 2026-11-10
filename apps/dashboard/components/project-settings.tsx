@@ -1,9 +1,9 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
-import type { Doc, Id } from "@nuni/backend/dataModel"
-import { buildAgentPrompt } from "@nuni/shared"
+import { buildAgentPrompt, DASHBOARD_ROUTES, LIMITS } from "@nuni/shared"
 import { useMutation, useQuery } from "convex/react"
+import type { FunctionReturnType } from "convex/server"
 import {
   GlobeIcon,
   LinkIcon,
@@ -18,8 +18,7 @@ import { useState, type ReactNode } from "react"
 
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { CopyButton } from "@/components/copy-button"
-import { ProjectHeader } from "@/components/project-header"
-import { ProjectNotFound } from "@/components/project-view"
+import { useProject, type OwnedProject } from "@/components/project-shell"
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -33,8 +32,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useStoreUser } from "@/components/use-store-user"
-import { APP_URL, BASE_PATH } from "@/lib/config"
+import { appUrl } from "@/lib/config"
 import {
   describeAgent,
   errorMessage,
@@ -44,30 +42,15 @@ import {
 } from "@/lib/format"
 
 /** Name, install details, sites, devices, and handing over or deleting a project. */
-export function ProjectSettings({ publicId }: { publicId: string }) {
-  const { ready } = useStoreUser()
-  const project = useQuery(api.projects.getMine, ready ? { publicId } : "skip")
-
-  if (!ready || project === undefined) {
-    return (
-      <div className="grid gap-6">
-        <Skeleton className="h-24 w-64" />
-        <Skeleton className="h-40 rounded-3xl" />
-      </div>
-    )
-  }
-  if (project === null) return <ProjectNotFound />
-
+export function ProjectSettings() {
+  const project = useProject()
   return (
-    <div className="grid gap-2">
-      <ProjectHeader project={project} current="settings" />
-      <div className="divide-y">
-        <GeneralSection project={project} />
-        <SitesSection project={project} />
-        <SessionsSection publicId={publicId} projectId={project._id} />
-        <TransferSection projectId={project._id} />
-        <DangerSection project={project} />
-      </div>
+    <div className="divide-y">
+      <GeneralSection project={project} />
+      <SitesSection project={project} />
+      <SessionsSection publicId={project.publicId} />
+      <TransferSection publicId={project.publicId} />
+      <DangerSection project={project} />
     </div>
   )
 }
@@ -110,7 +93,7 @@ function Field({
   )
 }
 
-function GeneralSection({ project }: { project: Doc<"projects"> }) {
+function GeneralSection({ project }: { project: OwnedProject }) {
   const rename = useMutation(api.projects.rename)
   const [value, setValue] = useState(project.name)
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle")
@@ -127,7 +110,7 @@ function GeneralSection({ project }: { project: Doc<"projects"> }) {
           setState("saving")
           setError(null)
           try {
-            await rename({ projectId: project._id, name: value })
+            await rename({ publicId: project.publicId, name: value })
             setState("saved")
           } catch (err) {
             setError(errorMessage(err))
@@ -146,7 +129,7 @@ function GeneralSection({ project }: { project: Doc<"projects"> }) {
               setValue(e.target.value)
               setState("idle")
             }}
-            maxLength={100}
+            maxLength={LIMITS.projectNameMaxLength}
           />
           <Button
             type="submit"
@@ -191,7 +174,7 @@ function GeneralSection({ project }: { project: Doc<"projects"> }) {
   )
 }
 
-function SitesSection({ project }: { project: Doc<"projects"> }) {
+function SitesSection({ project }: { project: OwnedProject }) {
   const addOrigin = useMutation(api.projects.addOrigin)
   const removeOrigin = useMutation(api.projects.removeOrigin)
   const [value, setValue] = useState("")
@@ -247,7 +230,7 @@ function SitesSection({ project }: { project: Doc<"projects"> }) {
           if (!origin) return
           setBusy(true)
           try {
-            await addOrigin({ projectId: project._id, origin })
+            await addOrigin({ publicId: project.publicId, origin })
             setValue("")
             setError(null)
           } catch (err) {
@@ -284,7 +267,7 @@ function SitesSection({ project }: { project: Doc<"projects"> }) {
         onConfirm={() => {
           if (!removing) return
           setError(null)
-          removeOrigin({ projectId: project._id, origin: removing }).catch(
+          removeOrigin({ publicId: project.publicId, origin: removing }).catch(
             (err) => setError(errorMessage(err))
           )
         }}
@@ -293,13 +276,25 @@ function SitesSection({ project }: { project: Doc<"projects"> }) {
   )
 }
 
-function SessionsSection({
-  publicId,
-  projectId,
-}: {
-  publicId: string
-  projectId: Id<"projects">
-}) {
+type Session = FunctionReturnType<typeof api.sessions.listMine>[number]
+
+/** How each kind of owner session is shown. */
+const SESSION_KINDS = {
+  widget: {
+    icon: GlobeIcon,
+    badge: "Widget",
+    name: (s: Session) => describeAgent(s.userAgent),
+    where: (s: Session) => hostOf(s.origin),
+  },
+  cli: {
+    icon: TerminalIcon,
+    badge: "CLI",
+    name: (s: Session) => s.userAgent ?? "Nuni CLI",
+    where: () => "CLI and MCP",
+  },
+}
+
+function SessionsSection({ publicId }: { publicId: string }) {
   const sessions = useQuery(api.sessions.listMine, { publicId })
   const revoke = useMutation(api.sessions.revoke)
   const revokeAll = useMutation(api.sessions.revokeAll)
@@ -317,53 +312,44 @@ function SessionsSection({
       ) : (
         <div className="grid gap-3">
           <ul className="grid divide-y rounded-2xl ring-1 ring-foreground/10">
-            {sessions.map((s) => (
-              <li
-                key={s._id}
-                className="flex items-center gap-3 px-3 py-2.5 text-sm"
-              >
-                {s.kind === "cli" ? (
-                  <TerminalIcon
-                    className="size-4 shrink-0 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                ) : (
-                  <GlobeIcon
-                    className="size-4 shrink-0 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                )}
-                <div className="grid min-w-0 flex-1 gap-0.5">
-                  <span className="flex items-center gap-2">
-                    <span className="truncate font-medium">
-                      {s.kind === "cli"
-                        ? (s.userAgent ?? "Nuni CLI")
-                        : describeAgent(s.userAgent)}
-                    </span>
-                    <Badge variant="outline">
-                      {s.kind === "cli" ? "CLI" : "Widget"}
-                    </Badge>
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {s.kind === "cli" ? "CLI and MCP" : hostOf(s.origin)} ·
-                    signed in {timeAgo(s._creationTime)} · expires{" "}
-                    {timeLeft(s.expiresAt)}
-                  </span>
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setError(null)
-                    revoke({ id: s._id }).catch((err) =>
-                      setError(errorMessage(err))
-                    )
-                  }}
+            {sessions.map((s) => {
+              const kind = SESSION_KINDS[s.kind]
+              return (
+                <li
+                  key={s._id}
+                  className="flex items-center gap-3 px-3 py-2.5 text-sm"
                 >
-                  Sign out
-                </Button>
-              </li>
-            ))}
+                  <kind.icon
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <div className="grid min-w-0 flex-1 gap-0.5">
+                    <span className="flex items-center gap-2">
+                      <span className="truncate font-medium">
+                        {kind.name(s)}
+                      </span>
+                      <Badge variant="outline">{kind.badge}</Badge>
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {kind.where(s)} · signed in {timeAgo(s._creationTime)} ·
+                      expires {timeLeft(s.expiresAt)}
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setError(null)
+                      revoke({ id: s._id }).catch((err) =>
+                        setError(errorMessage(err))
+                      )
+                    }}
+                  >
+                    Sign out
+                  </Button>
+                </li>
+              )
+            })}
           </ul>
           {sessions.length > 1 && (
             <Button
@@ -385,15 +371,15 @@ function SessionsSection({
         description="Every browser and terminal signed in to this project is signed out. You can sign in again any time."
         action="Sign out everywhere"
         onConfirm={() =>
-          revokeAll({ projectId }).catch((err) => setError(errorMessage(err)))
+          revokeAll({ publicId }).catch((err) => setError(errorMessage(err)))
         }
       />
     </Section>
   )
 }
 
-function TransferSection({ projectId }: { projectId: Id<"projects"> }) {
-  const active = useQuery(api.transfers.active, { projectId })
+function TransferSection({ publicId }: { publicId: string }) {
+  const active = useQuery(api.transfers.active, { publicId })
   const create = useMutation(api.transfers.create)
   const cancel = useMutation(api.transfers.cancel)
   const [link, setLink] = useState<string | null>(null)
@@ -418,7 +404,7 @@ function TransferSection({ projectId }: { projectId: Id<"projects"> }) {
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">
-          The link works once, for 7 days.
+          The link works once, for {LIMITS.transferTtlMs / 86_400_000} days.
         </p>
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
@@ -429,10 +415,8 @@ function TransferSection({ projectId }: { projectId: Id<"projects"> }) {
           onClick={async () => {
             setError(null)
             try {
-              const { token } = await create({ projectId })
-              setLink(
-                `${APP_URL}${BASE_PATH}/transfer?token=${encodeURIComponent(token)}`
-              )
+              const { token } = await create({ publicId })
+              setLink(appUrl(DASHBOARD_ROUTES.transfer, { token }))
             } catch (err) {
               setError(errorMessage(err))
             }
@@ -447,7 +431,7 @@ function TransferSection({ projectId }: { projectId: Id<"projects"> }) {
             onClick={async () => {
               setError(null)
               try {
-                await cancel({ projectId })
+                await cancel({ publicId })
                 setLink(null)
               } catch (err) {
                 setError(errorMessage(err))
@@ -462,7 +446,7 @@ function TransferSection({ projectId }: { projectId: Id<"projects"> }) {
   )
 }
 
-function DangerSection({ project }: { project: Doc<"projects"> }) {
+function DangerSection({ project }: { project: OwnedProject }) {
   const router = useRouter()
   const release = useMutation(api.projects.release)
   const remove = useMutation(api.projects.remove)
@@ -526,7 +510,9 @@ function DangerSection({ project }: { project: Doc<"projects"> }) {
         title={`Release ${project.name}?`}
         description="Anyone will be able to claim it from the widget. Comments stay."
         action="Release project"
-        onConfirm={() => void run(() => release({ projectId: project._id }))}
+        onConfirm={() =>
+          void run(() => release({ publicId: project.publicId }))
+        }
       />
       <AlertDialog open={deleting} onOpenChange={setDeleting}>
         <AlertDialogContent>
@@ -534,7 +520,9 @@ function DangerSection({ project }: { project: Doc<"projects"> }) {
             className="grid gap-6"
             onSubmit={(e) => {
               e.preventDefault()
-              void run(() => remove({ projectId: project._id, confirmName }))
+              void run(() =>
+                remove({ publicId: project.publicId, confirmName })
+              )
             }}
           >
             <AlertDialogHeader>

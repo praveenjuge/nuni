@@ -8,16 +8,18 @@ import {
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-export interface Credential {
+import { NuniError } from "./errors"
+
+/** One entry in credentials.json, keyed by project ID. */
+export interface SavedCredential {
   token: string
   ownerName?: string
   projectName?: string
   expiresAt?: number
 }
 
-type Store = Record<string, Credential>
+type Store = Record<string, SavedCredential>
 
-/** ~/.config/nuni, or $XDG_CONFIG_HOME/nuni, or %APPDATA%\nuni on Windows. */
 export function configDir(): string {
   if (process.env.NUNI_CONFIG_DIR) return process.env.NUNI_CONFIG_DIR
   const base =
@@ -32,12 +34,22 @@ export function credentialsPath(): string {
 }
 
 function read(): Store {
+  const path = credentialsPath()
+  let text: string
   try {
-    const value: unknown = JSON.parse(readFileSync(credentialsPath(), "utf8"))
-    return value && typeof value === "object" ? (value as Store) : {}
-  } catch {
-    return {}
+    text = readFileSync(path, "utf8")
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
+    throw new NuniError(`Couldn't read ${path}: ${(error as Error).message}`)
   }
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    value = null
+  }
+  if (value && typeof value === "object") return value as Store
+  throw new NuniError(`${path} is not valid JSON. Delete it and log in again.`)
 }
 
 function write(store: Store) {
@@ -49,23 +61,29 @@ function write(store: Store) {
   chmodSync(path, 0o600)
 }
 
-/** The session for a project: $NUNI_TOKEN, or the one saved by `nuni login`. */
-export function credentialFor(publicId: string): Credential | null {
-  if (process.env.NUNI_TOKEN) return { token: process.env.NUNI_TOKEN }
-  const saved = read()[publicId]
-  if (!saved?.token) return null
-  if (saved.expiresAt && saved.expiresAt < Date.now()) return null
-  return saved
+/** The session token to use: $NUNI_TOKEN, else the one saved by `login`. */
+export function tokenFor(publicId: string): string | null {
+  return process.env.NUNI_TOKEN || read()[publicId]?.token || null
 }
 
-export function saveCredential(publicId: string, credential: Credential) {
+/**
+ * Fails when credentials.json can't be read, so a login stops before the
+ * owner approves a session that couldn't be saved.
+ */
+export function checkCredentialsStore() {
+  read()
+}
+
+export function saveCredential(publicId: string, credential: SavedCredential) {
   write({ ...read(), [publicId]: credential })
 }
 
-export function removeCredential(publicId: string): boolean {
+/** Forget the saved session for a project, returning it, if there was one. */
+export function removeCredential(publicId: string): SavedCredential | null {
   const store = read()
-  if (!store[publicId]) return false
+  const saved = store[publicId]
+  if (!saved) return null
   delete store[publicId]
   write(store)
-  return true
+  return saved
 }

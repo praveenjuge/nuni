@@ -1,13 +1,13 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
-import type { Id } from "@nuni/backend/dataModel"
 import { LIMITS, type ReplyView } from "@nuni/shared"
 import { useMutation } from "convex/react"
 import { ArrowUpIcon, TrashIcon } from "vadivam-react"
 import { useState } from "react"
 
 import { ConfirmDialog } from "@/components/confirm-dialog"
+import { useProject } from "@/components/project-shell"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -20,16 +20,14 @@ import {
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
 import { errorMessage, initials, timeAgo } from "@/lib/format"
 
-/** A comment's replies and the owner's reply box. */
 export function CommentThread({
-  publicId,
   commentId,
   replies,
 }: {
-  publicId: string
   commentId: string
   replies: ReplyView[]
 }) {
+  const { publicId } = useProject()
   const [body, setBody] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -127,9 +125,7 @@ export function CommentThread({
         onConfirm={() => {
           if (!deleting) return
           setError(null)
-          remove({ id: deleting as Id<"replies"> }).catch((err) =>
-            setError(errorMessage(err))
-          )
+          remove({ id: deleting }).catch((err) => setError(errorMessage(err)))
         }}
       />
     </div>

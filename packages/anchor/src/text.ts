@@ -1,4 +1,9 @@
-import { MASK_ATTRIBUTE, MASK_SELECTOR } from "@nuni/shared"
+import {
+  LIMITS,
+  MASK_ATTRIBUTE,
+  MASK_SELECTOR,
+  WIDGET_ATTRIBUTE,
+} from "@nuni/shared"
 
 const SKIP_TEXT_TAGS = new Set([
   "SCRIPT",
@@ -8,7 +13,19 @@ const SKIP_TEXT_TAGS = new Set([
   "SVG",
 ])
 
-export function normalizeText(value: string): string {
+/**
+ * Elements whose text is not page content: code, private areas and Nuni's
+ * own UI. Every reading of an element's text leaves them out.
+ */
+export function skipsText(el: Element): boolean {
+  return (
+    SKIP_TEXT_TAGS.has(el.tagName.toUpperCase()) ||
+    el.hasAttribute(MASK_ATTRIBUTE) ||
+    el.hasAttribute(WIDGET_ATTRIBUTE)
+  )
+}
+
+function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim()
 }
 
@@ -18,7 +35,10 @@ export function normalizeText(value: string): string {
  * resolving, so their (private) text is never stored and matching stays
  * consistent.
  */
-export function elementText(el: Element, max = 120): string {
+export function elementText(
+  el: Element,
+  max: number = LIMITS.anchorTextMaxLength
+): string {
   if (el.closest(MASK_SELECTOR)) return ""
   // Tag names, not instanceof: elements in iframes come from another realm.
   if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
@@ -35,12 +55,8 @@ export function elementText(el: Element, max = 120): string {
       out += node.nodeValue ?? ""
       return
     }
-    if (node.nodeType !== 1) return
+    if (node.nodeType !== 1 || skipsText(node as Element)) return
     const tag = (node as Element).tagName.toUpperCase()
-    if (SKIP_TEXT_TAGS.has(tag)) return
-    if ((node as Element).hasAttribute(MASK_ATTRIBUTE)) return
-    // Nuni's own host: its UI is never part of the page's text.
-    if ((node as Element).hasAttribute("data-nuni")) return
     if (tag === "IMG") {
       out += " " + ((node as Element).getAttribute("alt") ?? "") + " "
       return
