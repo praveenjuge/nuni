@@ -1,4 +1,10 @@
-import { LIMITS, randomBase58, sha256Hex, TOKEN_PREFIX } from "@nuni/shared"
+import {
+  LIMITS,
+  randomBase58,
+  sha256Hex,
+  TOKEN_PREFIX,
+  type ErrorData,
+} from "@nuni/shared"
 
 import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
@@ -104,42 +110,61 @@ const UNKNOWN_ORIGIN = {
   commenter: "Nuni isn't set up on this site",
 }
 
+interface SiteSession {
+  userId: Id<"users">
+  project: Doc<"projects">
+  origin: string
+  userAgent?: string
+}
+
 /**
- * A session the dashboard hands to the widget on one of the project's sites.
- * The caller has checked who may have it.
+ * A session the dashboard hands to the widget on one of the project's sites,
+ * or why there can't be one now. The caller has checked who may have it.
  */
-export async function createSiteSession(
+export async function siteSession(
   ctx: MutationCtx,
   kind: "owner" | "commenter",
-  {
-    userId,
-    project,
-    origin,
-    userAgent,
-  }: {
-    userId: Id<"users">
-    project: Doc<"projects">
-    origin: string
-    userAgent?: string
-  }
-) {
+  { userId, project, origin, userAgent }: SiteSession
+): Promise<{ token: string; expiresAt: number } | { refused: ErrorData }> {
   // The token is postMessage'd to this origin verbatim, so it must be one
   // of the project's registered origins - otherwise a crafted link could
   // deliver it to any host.
   const cleanOrigin = parseOrigin(origin)
   if (!project.origins.includes(cleanOrigin)) {
-    fail("unknown_origin", UNKNOWN_ORIGIN[kind])
+    return {
+      refused: { code: "unknown_origin", message: UNKNOWN_ORIGIN[kind] },
+    }
   }
   const { ok } = await rateLimiter.limit(ctx, "sessionPerUser", {
     key: userId,
   })
-  if (!ok) fail("rate_limited", "Too many sign-ins, try again later")
+  if (!ok) {
+    return {
+      refused: {
+        code: "rate_limited",
+        message: "Too many sign-ins, try again later",
+      },
+    }
+  }
   return issueSession(ctx, kind, {
     userId,
     projectId: project._id,
     origin: cleanOrigin,
     userAgent,
   })
+}
+
+/** `siteSession`, failing when there can't be one. */
+export async function createSiteSession(
+  ctx: MutationCtx,
+  kind: "owner" | "commenter",
+  fields: SiteSession
+) {
+  const session = await siteSession(ctx, kind, fields)
+  if ("refused" in session) {
+    fail(session.refused.code, session.refused.message)
+  }
+  return session
 }
 
 /** Daily cron: delete expired tokens, continuing until none are left. */

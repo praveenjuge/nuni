@@ -125,7 +125,7 @@ export async function ownerToken(
   origin = ORIGIN
 ) {
   const allowed = await claim(owner, publicId, origin)
-  if (allowed.status === "claimed_by_other") throw new Error("Not the owner")
+  if (!("token" in allowed)) throw new Error("No owner session")
   return allowed.token
 }
 

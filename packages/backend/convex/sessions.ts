@@ -11,7 +11,7 @@ import {
   claimFor,
   revokeSessions,
 } from "./ownership"
-import { createSiteSession, findByToken } from "./tokens"
+import { findByToken, siteSession } from "./tokens"
 
 /**
  * Owner sessions: the widget's owner tools on one of the project's sites,
@@ -21,7 +21,10 @@ import { createSiteSession, findByToken } from "./tokens"
 /**
  * The claim page's one step: claim the project if nobody owns it, then
  * create a widget owner session for `origin`, which the widget registers
- * while the project is unclaimed.
+ * while the project is unclaimed. A claim stands even when the session
+ * can't be created (the project's site list was full before `origin` got
+ * on it, or too many sign-ins): the new owner then has the project in the
+ * dashboard, where they can add the site, and `sessionError` says why.
  */
 export const allowOwnerTools = mutation({
   args: {
@@ -35,12 +38,17 @@ export const allowOwnerTools = mutation({
     const project = await ensureProject(ctx, publicId, cleanOrigin)
     const claim = await claimFor(ctx, project, user._id, cleanOrigin)
     if (claim.status === "claimed_by_other") return claim
-    const session = await createSiteSession(ctx, "owner", {
+    const session = await siteSession(ctx, "owner", {
       userId: user._id,
       project,
       origin: cleanOrigin,
       userAgent,
     })
+    if ("refused" in session) {
+      const { code, message } = session.refused
+      if (claim.status !== "claimed") fail(code, message)
+      return { status: "claimed" as const, sessionError: message }
+    }
     return { ...claim, ...session }
   },
 })

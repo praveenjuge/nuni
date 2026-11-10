@@ -2,6 +2,7 @@ import { generateProjectId, generateSecret, LIMITS } from "@nuni/shared"
 import { describe, expect, it, vi } from "vitest"
 
 import { api, internal } from "../convex/_generated/api"
+import { SERVER_LIMITS } from "../convex/limits"
 import {
   addComment,
   claim,
@@ -246,6 +247,40 @@ describe("allowing owner tools on a site", () => {
         origin: ORIGIN,
       })
     ).toMatchObject({ status: "claimed" })
+  })
+
+  it("keeps the claim when the site list was full before this site got on it", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    for (let i = 0; i < SERVER_LIMITS.maxOriginsPerProject; i++) {
+      await t.mutation(api.projects.touch, {
+        publicId,
+        origin: `https://preview-${i}.example`,
+      })
+    }
+    const alice = await signIn(t, "user_alice", "Alice")
+    const allowed = await claim(alice, publicId, "https://one-more.example")
+    expect(allowed).toEqual({
+      status: "claimed",
+      sessionError: expect.stringMatching(/not registered/),
+    })
+    // The project is theirs, so they can manage its sites in the dashboard.
+    const mine = await alice.query(api.projects.getMine, { publicId })
+    expect(mine?.origins).toHaveLength(SERVER_LIMITS.maxOriginsPerProject)
+    await alice.mutation(api.projects.removeOrigin, {
+      publicId,
+      origin: "https://preview-0.example",
+    })
+    await alice.mutation(api.projects.addOrigin, {
+      publicId,
+      origin: "https://one-more.example",
+    })
+    expect(
+      await claim(alice, publicId, "https://one-more.example")
+    ).toMatchObject({
+      status: "already_owner",
+      token: expect.stringMatching(/^nuni_s_/),
+    })
   })
 })
 

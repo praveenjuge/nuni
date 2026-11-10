@@ -16,7 +16,9 @@ import { hostOf } from "@/lib/format"
 import { handOff } from "@/lib/handoff"
 
 type Result =
-  { step: "done"; handedOff: boolean } | { step: "other"; ownerName: string }
+  | { step: "done"; handedOff: boolean }
+  | { step: "claimed"; why: string }
+  | { step: "other"; ownerName: string }
 
 /**
  * Nothing is claimed or granted until the user clicks: the page first shows
@@ -43,6 +45,10 @@ export function ClaimFlow({
       })
       if (allowed.status === "claimed_by_other") {
         return { step: "other", ownerName: allowed.ownerName }
+      }
+      // Claimed, but no owner session for this site (its list was full).
+      if (!("token" in allowed)) {
+        return { step: "claimed", why: allowed.sessionError }
       }
       const message = handoffMessage("session", project, allowed.token)
       return { step: "done", handedOff: handOff(origin, message) }
@@ -107,6 +113,24 @@ export function ClaimFlow({
               ? `You're signed in as the owner on ${host}. This window will close.`
               : `Go back to ${host} and open Nuni again, or manage comments from the dashboard.`
           }
+        >
+          <Link
+            className={buttonVariants({
+              variant: "outline",
+              className: "w-fit",
+            })}
+            href={projectRoute(project)}
+          >
+            Open dashboard
+          </Link>
+        </FlowCard>
+      )
+    case "claimed":
+      return (
+        <FlowCard
+          icon={CircleCheckIcon}
+          title="Claimed"
+          description={`The project is yours, but owner tools aren't on for ${host} yet: add it under Sites in the project's settings, then open Nuni there again. (${view.why})`}
         >
           <Link
             className={buttonVariants({
