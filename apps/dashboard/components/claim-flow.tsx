@@ -17,7 +17,7 @@ import { handOff } from "@/lib/handoff"
 
 type Result =
   | { step: "done"; handedOff: boolean }
-  | { step: "claimed"; why: string }
+  | { step: "claimed"; siteMissing: boolean; why: string }
   | { step: "other"; ownerName: string }
 
 /**
@@ -46,9 +46,12 @@ export function ClaimFlow({
       if (allowed.status === "claimed_by_other") {
         return { step: "other", ownerName: allowed.ownerName }
       }
-      // Claimed, but no owner session for this site (its list was full).
       if (!("token" in allowed)) {
-        return { step: "claimed", why: allowed.sessionError }
+        return {
+          step: "claimed",
+          siteMissing: allowed.sessionCode === "unknown_origin",
+          why: allowed.sessionError,
+        }
       }
       const message = handoffMessage("session", project, allowed.token)
       return { step: "done", handedOff: handOff(origin, message) }
@@ -130,7 +133,11 @@ export function ClaimFlow({
         <FlowCard
           icon={CircleCheckIcon}
           title="Claimed"
-          description={`The project is yours, but owner tools aren't on for ${host} yet: add it under Sites in the project's settings, then open Nuni there again. (${view.why})`}
+          description={
+            view.siteMissing
+              ? `The project is yours, but owner tools aren't on for ${host} yet: add it under Sites in the project's settings, then open Nuni there again. (${view.why})`
+              : `The project is yours, but owner tools aren't on for ${host} yet: open Nuni there again in a moment. (${view.why})`
+          }
         >
           <Link
             className={buttonVariants({

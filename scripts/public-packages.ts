@@ -53,10 +53,12 @@ export function publicPackages(): PublicPackage[] {
         `${pkg.dir} is not private but not in PACKAGES (packages/shared/src/prompt.ts)`
       )
   }
-  const found = all.filter((pkg) => names.has(pkg.name))
-  if (found.length !== names.size)
-    throw new Error(`No workspace for some of: ${[...names].join(", ")}`)
-  return found
+  // In PACKAGES order, so a package is published after the ones it depends on.
+  return [...names].map((name) => {
+    const pkg = all.find((candidate) => candidate.name === name)
+    if (!pkg) throw new Error(`No workspace for ${name}`)
+    return pkg
+  })
 }
 
 if (import.meta.main && process.argv.includes("--filters")) {

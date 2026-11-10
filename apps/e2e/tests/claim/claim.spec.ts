@@ -42,6 +42,9 @@ test("widget popup claims with a real owner session and enables owner tools", as
   await popup.getByRole("button", { name: "Claim and allow" }).click()
   await closed
   await expect(owner.toast).toHaveText("You're signed in as the owner")
+  await expect(
+    owner.panel.getByRole("button", { name: "Claim Nuni" })
+  ).toHaveCount(0)
   await owner.item("Claim popup feedback").click()
   await owner.thread
     .getByRole("button", { name: "Resolve", exact: true })

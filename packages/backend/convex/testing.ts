@@ -3,8 +3,7 @@ import { v } from "convex/values"
 
 import { internalMutation, internalQuery } from "./_generated/server"
 import { userByWorkosId } from "./accounts"
-import { loginByCode } from "./cliAuth"
-import { fail, parseOrigin, projectByPublicId } from "./lib"
+import { fail, parseOrigin } from "./lib"
 import { ensureProject, setOwner } from "./ownership"
 import { issueSession } from "./tokens"
 
@@ -44,22 +43,6 @@ export const seedOwner = internalMutation({
       origin: cleanOrigin,
     })
     return { token }
-  },
-})
-
-/** Approve a pending `nuni login` as the project's owner, in place of the dashboard page. */
-export const approveCliLogin = internalMutation({
-  args: { userCode: v.string() },
-  handler: async (ctx, { userCode }) => {
-    allowTesting()
-    const login = await loginByCode(ctx, userCode)
-    if (!login) fail("not_found", "No such login")
-    const project = await projectByPublicId(ctx, login.publicId)
-    if (!project?.ownerId) fail("forbidden", "Project has no owner")
-    await ctx.db.patch(login._id, {
-      status: "approved",
-      userId: project.ownerId,
-    })
   },
 })
 

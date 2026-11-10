@@ -262,6 +262,7 @@ describe("allowing owner tools on a site", () => {
     const allowed = await claim(alice, publicId, "https://one-more.example")
     expect(allowed).toEqual({
       status: "claimed",
+      sessionCode: "unknown_origin",
       sessionError: expect.stringMatching(/not registered/),
     })
     // The project is theirs, so they can manage its sites in the dashboard.

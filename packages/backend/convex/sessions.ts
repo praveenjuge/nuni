@@ -48,7 +48,11 @@ export const allowOwnerTools = mutation({
     if ("refused" in session) {
       const { code, message } = session.refused
       if (claim.status !== "claimed") fail(code, message)
-      return { status: "claimed" as const, sessionError: message }
+      return {
+        status: "claimed" as const,
+        sessionError: message,
+        sessionCode: code,
+      }
     }
     return { ...claim, ...session }
   },

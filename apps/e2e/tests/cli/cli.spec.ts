@@ -1,6 +1,6 @@
 import { COMMENT_PARAM } from "@nuni/shared"
 
-import { URLS } from "../../env"
+import { URLS, USERS } from "../../env"
 import { expect, test } from "../../fixtures"
 import { addComment, choosePlan, claimProject, cliSession } from "../../helpers"
 
@@ -16,7 +16,7 @@ test("dashboard approval signs in the CLI to read, reply and resolve", async ({
   await cli.login(ownerPage)
   const identity = JSON.parse(await cli.run("whoami", "--json"))
   expect(identity).toMatchObject({ project: projectId, signedIn: true })
-  expect(identity.owner).toBeTruthy()
+  expect(identity.owner).toBe(USERS.owner.name)
   const id = await cli.commentId(body)
   const shown = await cli.run("comment", id)
   expect(shown).toContain(`> ${body}`)

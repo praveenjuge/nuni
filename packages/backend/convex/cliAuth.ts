@@ -40,7 +40,7 @@ import { hashOf, issueSession, mintToken } from "./tokens"
  *    hashed at rest, revocable from the dashboard).
  */
 
-export async function loginByCode(ctx: Ctx, userCode: string) {
+async function loginByCode(ctx: Ctx, userCode: string) {
   const code = normalizeUserCode(userCode)
   if (!isUserCode(code)) return null
   return ctx.db
