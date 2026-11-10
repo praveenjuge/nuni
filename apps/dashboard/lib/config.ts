@@ -4,6 +4,7 @@ import {
   dashboardPath,
   dashboardUrl,
 } from "@nuni/shared"
+import { DEV_URLS } from "@nuni/shared/build"
 
 import type nextConfig from "../next.config"
 
@@ -16,11 +17,10 @@ export const BASE_PATH: (typeof nextConfig)["basePath"] = DASHBOARD_PATH
  * http://localhost:3000 locally.
  */
 export const APP_URL = (
-  process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
+  process.env.NEXT_PUBLIC_APP_URL ?? DEV_URLS.app
 ).replace(/\/+$/, "")
 
-export const CONVEX_URL =
-  process.env.NEXT_PUBLIC_CONVEX_URL ?? "http://127.0.0.1:3210"
+export const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL ?? DEV_URLS.convex
 
 /**
  * A dashboard URL on the public origin, for links that leave the app: sign-in

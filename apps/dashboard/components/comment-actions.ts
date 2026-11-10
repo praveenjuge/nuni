@@ -52,16 +52,26 @@ export function useCommentActions() {
   /** Runs `action` on `ids` and says how it went; true when it worked. */
   async function run(action: CommentAction, ids: string[]): Promise<boolean> {
     setBusy(true)
+    let changed: number
     try {
-      await call(action, ids)
+      changed = await call(action, ids)
     } catch (err) {
       toast.error(errorMessage(err))
       return false
     } finally {
       setBusy(false)
     }
+    // The backend skips comments that are gone or were changed already.
+    if (!changed) {
+      toast.error(
+        ids.length === 1
+          ? "That comment was deleted or already changed"
+          : "Those comments were deleted or already changed"
+      )
+      return false
+    }
     const { done, undo } = COMMENT_ACTIONS[action]
-    toast(`${plural(ids.length, "comment")} ${done}`, {
+    toast(`${plural(changed, "comment")} ${done}`, {
       action: undo
         ? { label: "Undo", onClick: () => void run("reopen", ids) }
         : undefined,

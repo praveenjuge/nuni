@@ -1,6 +1,6 @@
 "use client"
 
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 
 import { NuniMark } from "@/components/logo"
 import { buttonVariants } from "@/components/ui/button"
@@ -8,6 +8,10 @@ import { signInUrl } from "@/lib/config"
 
 export function SignedOut() {
   const pathname = usePathname()
+  // Back to this page as it was opened: a claim, CLI or transfer link is
+  // nothing without its query.
+  const query = Object.fromEntries(useSearchParams())
+  const route = pathname === "/" ? "" : pathname
   return (
     <div className="mx-auto grid max-w-sm justify-items-center gap-8 py-16 text-center">
       <NuniMark size={44} />
@@ -22,7 +26,7 @@ export function SignedOut() {
       </div>
       <a
         className={buttonVariants({ size: "lg", className: "w-full" })}
-        href={signInUrl(pathname)}
+        href={signInUrl(route, query)}
       >
         Sign in to Nuni
       </a>
