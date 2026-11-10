@@ -276,6 +276,27 @@ describe("login", () => {
     })
   })
 
+  it("stops before asking for approval when the credentials file is unreadable", async () => {
+    // An interrupted write leaves an empty file behind.
+    const file = join(process.env.NUNI_CONFIG_DIR!, "credentials.json")
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, "")
+    const remote = fakeRemote([
+      {
+        status: "approved",
+        token: "nuni_s_good",
+        expiresAt: 123,
+        ownerName: "Alice",
+        projectName: "example.com",
+      },
+    ])
+    const io = cli({ remote })
+    expect(await io.run("login")).toBe(1)
+    expect(io.err).toEqual([expect.stringContaining("is not valid JSON")])
+    expect(remote.calls).toEqual([])
+    expect(io.opened).toEqual([])
+  })
+
   it("reports a denied sign-in", async () => {
     const io = cli({ remote: fakeRemote([{ status: "denied" }]) })
     expect(await io.run("login")).toBe(1)

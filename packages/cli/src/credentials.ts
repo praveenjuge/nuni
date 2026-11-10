@@ -18,12 +18,6 @@ export interface SavedCredential {
   expiresAt?: number
 }
 
-/** The session token to use, and whether it came from $NUNI_TOKEN. */
-export interface Credential {
-  token: string
-  source: "env" | "saved"
-}
-
 type Store = Record<string, SavedCredential>
 
 export function configDir(): string {
@@ -67,12 +61,17 @@ function write(store: Store) {
   chmodSync(path, 0o600)
 }
 
-export function credentialFor(publicId: string): Credential | null {
-  if (process.env.NUNI_TOKEN) {
-    return { token: process.env.NUNI_TOKEN, source: "env" }
-  }
-  const saved = read()[publicId]
-  return saved?.token ? { token: saved.token, source: "saved" } : null
+/** The session token to use: $NUNI_TOKEN, else the one saved by `login`. */
+export function tokenFor(publicId: string): string | null {
+  return process.env.NUNI_TOKEN || read()[publicId]?.token || null
+}
+
+/**
+ * Fails when credentials.json can't be read, so a login stops before the
+ * owner approves a session that couldn't be saved.
+ */
+export function checkCredentialsStore() {
+  read()
 }
 
 export function saveCredential(publicId: string, credential: SavedCredential) {

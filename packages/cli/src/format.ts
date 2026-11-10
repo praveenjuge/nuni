@@ -2,7 +2,7 @@ import type { OwnerComment } from "@nuni/shared"
 
 import type { CommentList, GroupBy, StatusChange } from "./ops"
 
-export function timeAgo(at: number, now = Date.now()): string {
+function timeAgo(at: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - at) / 1000))
   if (seconds < 60) return "just now"
   const steps: [number, string][] = [

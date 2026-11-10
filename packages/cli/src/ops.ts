@@ -8,10 +8,11 @@ import {
 } from "@nuni/shared"
 
 import {
-  credentialFor,
+  checkCredentialsStore,
   credentialsPath,
   removeCredential,
   saveCredential,
+  tokenFor,
 } from "./credentials"
 import { APP_URL, VERSION } from "./env"
 import { NuniError } from "./errors"
@@ -93,16 +94,12 @@ export function createOps({ remote, project: flag, cwd }: OpsOptions) {
 
   function session(): Session {
     const { id } = currentProject()
-    const credential = credentialFor(id)
-    if (!credential) {
-      throw new NuniError(`Not signed in to ${id}`, "unauthenticated")
-    }
-    return { publicId: id, token: credential.token }
+    const token = tokenFor(id)
+    if (!token) throw new NuniError(`Not signed in to ${id}`, "unauthenticated")
+    return { publicId: id, token }
   }
 
   return {
-    project: currentProject,
-
     /** The project ID given, or a new one: for setting up a project. */
     projectIdForSetup(): string {
       return flag ? checkProjectId(flag) : generateProjectId()
@@ -124,6 +121,7 @@ export function createOps({ remote, project: flag, cwd }: OpsOptions) {
       pollMs?: number
     }): Promise<LoginOutcome> {
       const { id } = currentProject()
+      checkCredentialsStore()
       const start = await remote.startLogin(
         id,
         `nuni-cli ${VERSION} (${process.platform}; node ${process.versions.node})`
@@ -186,9 +184,9 @@ export function createOps({ remote, project: flag, cwd }: OpsOptions) {
 
     async whoami() {
       const { id } = currentProject()
-      const credential = credentialFor(id)
-      const result = credential
-        ? await remote.whoami({ publicId: id, token: credential.token })
+      const token = tokenFor(id)
+      const result = token
+        ? await remote.whoami({ publicId: id, token })
         : { valid: false }
       return {
         project: id,
