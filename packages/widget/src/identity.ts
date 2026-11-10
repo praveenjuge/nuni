@@ -4,13 +4,13 @@ import {
   generateSecret,
   LIMITS,
   readHandoff,
+  sha256Hex,
   type WidgetAuthor,
 } from "@nuni/shared"
 
 import { api, failureCode } from "./api"
 import { colorFor, h, icon, initials } from "./dom"
 import { ICONS } from "./icons"
-import { sha256Hex } from "./sha256"
 import { KEYS, read, write } from "./storage"
 import type { Ctx } from "./widget"
 
@@ -146,10 +146,6 @@ export function createIdentity(ctx: Ctx) {
       }
     },
 
-    get isOwner() {
-      return Boolean(ownerToken && ownerName)
-    },
-
     /**
      * The name a message goes out under: the owner's (`asOwner`, a reply
      * while signed in as the owner), the commenter account's, or the one
@@ -182,21 +178,13 @@ export function createIdentity(ctx: Ctx) {
 
     /**
      * Whether this visitor wrote it and may change it: signed in or not,
-     * this browser's guest comments stay theirs.
+     * this browser's guest comments stay theirs. Reactions too: pressing
+     * one removes it under either key.
      */
     owns(key: string): boolean {
       return (
         Boolean(key) && (key === secretHash || key === commenter?.authorKey)
       )
-    },
-
-    /**
-     * Whether pressing a reaction removes this visitor's own: reactions
-     * toggle under the current author only (the account when signed in),
-     * not under this browser's guest key.
-     */
-    reacted(authorKeys: string[]): boolean {
-      return authorKeys.includes(commenter?.authorKey ?? secretHash)
     },
 
     /**

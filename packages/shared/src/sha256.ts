@@ -1,6 +1,9 @@
 /**
- * SHA-256 hex digest. Uses Web Crypto when available (secure contexts),
- * with a small pure JS fallback for plain-http sites.
+ * SHA-256 hex digest: how a browser's author secret becomes the author key
+ * on its comments, and how tokens are stored. The widget and the backend
+ * must hash alike, so both use this. Uses Web Crypto when available (secure
+ * contexts, the backend), with a small pure JS fallback for widgets on
+ * plain-http sites.
  */
 export async function sha256Hex(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value)
@@ -15,7 +18,7 @@ function toHex(bytes: Uint8Array) {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
 }
 
-const K = new Uint32Array([
+const K = /* @__PURE__ */ new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
   0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
   0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
@@ -29,6 +32,7 @@ const K = new Uint32Array([
   0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ])
 
+/** The fallback, exported for its test. */
 export function sha256(data: Uint8Array): Uint8Array {
   const h = new Uint32Array([
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,

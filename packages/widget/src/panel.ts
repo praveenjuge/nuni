@@ -351,7 +351,7 @@ export function createPanel(ctx: Ctx) {
   const renderFooter = () => {
     const { identity } = ctx
     const status = ctx.page.status
-    const claimable = status && !status.claimed && !identity.isOwner
+    const claimable = status && !status.claimed && !identity.ownerToken
     const commenter = identity.commenter
     if (!claimable && !commenter) return null
     return h(

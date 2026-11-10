@@ -2,6 +2,7 @@ import {
   LIMITS,
   stripHtmlUrlQueries,
   stripUrlQueries,
+  suggestionTarget,
   withoutQuery,
   type Anchor,
   type AnchorAncestor,
@@ -131,12 +132,7 @@ export function cleanSuggestion(
   if (!suggestion) return undefined
   const before = suggestion.before.trim()
   const after = suggestion.after.replace(/\r\n/g, "\n").trim()
-  const target = anchor.quote
-    ? anchor.quote.exact
-    : anchor.region
-      ? ""
-      : anchor.text
-  if (!before || before !== target) {
+  if (!before || before !== suggestionTarget(anchor)) {
     fail("invalid_suggestion", "A suggestion has to change the commented text")
   }
   if (!after || after === before) {

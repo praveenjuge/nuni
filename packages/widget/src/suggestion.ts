@@ -1,5 +1,10 @@
 import { elementText } from "@nuni/anchor"
-import { LIMITS, type Anchor, type TextSuggestion } from "@nuni/shared"
+import {
+  LIMITS,
+  suggestionTarget,
+  type Anchor,
+  type TextSuggestion,
+} from "@nuni/shared"
 
 import { h } from "./dom"
 import { isEditable } from "./privacy"
@@ -13,14 +18,15 @@ export function suggestableText(
   anchor: Anchor,
   element: Element
 ): string | null {
-  if (anchor.quote) return anchor.quote.exact
-  if (anchor.region || !anchor.text || isEditable(element)) return null
+  const target = suggestionTarget(anchor)
+  if (anchor.quote) return target
+  if (!target || isEditable(element)) return null
   // Text cut at the limit can't be replaced as a whole.
-  if (anchor.text.length >= LIMITS.anchorTextMaxLength) return null
+  if (target.length >= LIMITS.anchorTextMaxLength) return null
   for (const child of element.querySelectorAll("*")) {
     if (elementText(child)) return null
   }
-  return anchor.text
+  return target
 }
 
 /**

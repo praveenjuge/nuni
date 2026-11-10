@@ -159,7 +159,7 @@ export function createThread(ctx: Ctx) {
 
   const sendReply = async (comment: WidgetComment, card: ThreadCard) => {
     const { identity } = ctx
-    const asOwnerReply = identity.isOwner
+    const asOwnerReply = identity.ownerToken !== null
     const authorName = identity.cleanName(asOwnerReply, card.replyName)
     const body = card.reply.trim()
     if (!body) return
@@ -284,7 +284,8 @@ export function createThread(ctx: Ctx) {
       "div",
       { class: "reactions" },
       ...summaries.map((r) => {
-        const mine = ctx.identity.reacted(r.authorKeyHashes)
+        // Pressing it removes a reaction under either of this visitor's keys.
+        const mine = r.authorKeyHashes.some(ctx.identity.owns)
         return h(
           "button",
           {
@@ -410,7 +411,7 @@ export function createThread(ctx: Ctx) {
   const renderComment = (card: ThreadCard, comment: WidgetComment) => {
     const { identity, pins } = ctx
     const mine = identity.owns(comment.authorKeyHash)
-    const owner = identity.isOwner
+    const owner = identity.ownerToken !== null
     const found = pins.found(comment._id)
     const resolved = comment.status === "resolved"
     const badges = [
@@ -708,7 +709,7 @@ export function createThread(ctx: Ctx) {
                 { title: t("edit") }
               )
             : null,
-          mine || identity.isOwner
+          mine || identity.ownerToken !== null
             ? iconButton(
                 t("deleteReply"),
                 ICONS.trash,
@@ -736,7 +737,7 @@ export function createThread(ctx: Ctx) {
   const renderReplies = (card: ThreadCard, comment: WidgetComment) => {
     const replies = thread?.replies ?? []
     const items = replies.map((reply) => renderReply(card, comment, reply))
-    const needsName = !ctx.identity.nameFor(ctx.identity.isOwner)
+    const needsName = !ctx.identity.nameFor(ctx.identity.ownerToken !== null)
     const nameInput = h("input", {
       class: "reply-name",
       placeholder: t("yourName"),
@@ -821,7 +822,9 @@ export function createThread(ctx: Ctx) {
       ctx.dialog.keepFocus()
       ctx.panel.viewed(id)
       ctx.dialog.focusAfterRender('[data-card="thread"] .card-close')
-      ctx.setCard({ kind: "thread", id, reply: "", replyName: "" })
+      // Already open: keep the card, and the reply being typed in it.
+      if (openCard(id)) ctx.render()
+      else ctx.setCard({ kind: "thread", id, reply: "", replyName: "" })
     },
 
     /** Keep the open comment's replies, and its owner context, subscribed. */

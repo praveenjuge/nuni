@@ -1,8 +1,8 @@
-import type { WidgetAuthor } from "@nuni/shared"
+import { sha256Hex, type WidgetAuthor } from "@nuni/shared"
 
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
-import { fail, sha256Hex, type Ctx } from "./lib"
+import { fail, type Ctx } from "./lib"
 import { SERVER_LIMITS } from "./limits"
 import { rateLimiter } from "./rateLimits"
 import { findByToken } from "./tokens"

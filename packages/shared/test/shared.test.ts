@@ -21,6 +21,7 @@ import {
   projectIdsIn,
   readHandoff,
 } from "../src"
+import { sha256 } from "../src/sha256"
 
 describe("project ids", () => {
   it("generates valid, unique ids", () => {
@@ -339,6 +340,24 @@ describe("stripHtmlUrlQueries", () => {
       )
     ).toBe(
       `<img data-src="i.png" data-lazy-srcset="a.png 1x" style="background: url(/bg.png)"><p>See https://a.com/x</p>`
+    )
+  })
+})
+
+const hex = (bytes: Uint8Array) =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+
+describe("sha256 fallback", () => {
+  it("matches known test vectors", () => {
+    expect(hex(sha256(new TextEncoder().encode("")))).toBe(
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    )
+    expect(hex(sha256(new TextEncoder().encode("abc")))).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    )
+    const long = "a".repeat(1000)
+    expect(hex(sha256(new TextEncoder().encode(long)))).toBe(
+      "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3"
     )
   })
 })

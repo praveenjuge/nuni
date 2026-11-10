@@ -1,3 +1,4 @@
+import { LIMITS } from "@nuni/shared"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { optionsFromAttributes, pageKeyFor, resolveConfig } from "../src/config"
@@ -5,29 +6,11 @@ import { domContext, safeUrl, startCollectors } from "../src/context"
 import { CAPTURE_MARK, ownTraffic } from "../src/mark"
 import { maskedBoxes } from "../src/screenshot"
 import { h, icon, initials, readableOn } from "../src/dom"
+import { failed as messageFor } from "../src/failures"
 import { createI18n } from "../src/i18n"
 import { ICONS } from "../src/icons"
 import { init } from "../src/index"
-import { sha256 } from "../src/sha256"
 import { KEYS, read, write } from "../src/storage"
-
-const hex = (bytes: Uint8Array) =>
-  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
-
-describe("sha256 fallback", () => {
-  it("matches known test vectors", () => {
-    expect(hex(sha256(new TextEncoder().encode("")))).toBe(
-      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    )
-    expect(hex(sha256(new TextEncoder().encode("abc")))).toBe(
-      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    )
-    const long = "a".repeat(1000)
-    expect(hex(sha256(new TextEncoder().encode(long)))).toBe(
-      "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3"
-    )
-  })
-})
 
 describe("dom helpers", () => {
   it("creates renderable SVG icons", () => {
@@ -84,7 +67,8 @@ describe("messages", () => {
   })
 
   it("says what a failed call means, in the site's words", () => {
-    const { failed } = createI18n("en", { slowDown: "Doucement" })
+    const { t } = createI18n("en", { slowDown: "Doucement" })
+    const failed = messageFor.bind(null, t)
     expect(failed("rate_limited", "postFailed")).toBe("Doucement")
     expect(failed("network", "postFailed")).toBe(
       "Couldn't reach Nuni. Check your connection."
@@ -376,7 +360,7 @@ describe("what visitors typed or masked never leaves the page", () => {
   it("keeps big elements within the snippet limit", () => {
     document.body.innerHTML = `<ul id="l">${"<li><span>item</span></li>".repeat(2000)}</ul>`
     const { html } = domContext(document.getElementById("l")!)
-    expect(html.length).toBeLessThanOrEqual(4000)
+    expect(html.length).toBeLessThanOrEqual(LIMITS.domSnippetMaxLength)
     expect(html.startsWith("<ul")).toBe(true)
   })
 })

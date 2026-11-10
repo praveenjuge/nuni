@@ -1,10 +1,11 @@
+import { sha256Hex } from "@nuni/shared"
 import { v } from "convex/values"
 
 import { mutation, query } from "./_generated/server"
 import { requireUser } from "./accounts"
 import { checkSecret, commenterFromToken, userAuthorKey } from "./authors"
 import { adjustThread, reauthorComment } from "./lifecycle"
-import { cleanName, fail, projectByPublicId, sha256Hex } from "./lib"
+import { cleanName, fail, projectByPublicId } from "./lib"
 import { SERVER_LIMITS } from "./limits"
 import { createSiteSession, findByToken } from "./tokens"
 

@@ -287,7 +287,7 @@ export function createPicker(ctx: Ctx) {
       ctx.setCard(null)
       // Adding a comment shows the others again, like Figma.
       ctx.pins.setHidden(false, true)
-      if (isMobile()) ctx.panel.toggle(false)
+      if (isMobile()) ctx.panel.hide()
       // The page and its same-origin iframes: anything in them can be picked.
       docs = [document, ...frameDocuments(document)]
       for (const doc of docs) {
