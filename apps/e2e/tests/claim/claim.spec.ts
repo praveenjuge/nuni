@@ -37,7 +37,10 @@ test("widget popup claims with a real owner session and enables owner tools", as
     new RegExp(`^${dashboard(DASHBOARD_ROUTES.claim)}\\?`)
   )
   expect(new URL(popup.url()).searchParams.get("project")).toBe(projectId)
+  // The popup hands the session over and closes itself.
+  const closed = popup.waitForEvent("close")
   await popup.getByRole("button", { name: "Claim and allow" }).click()
+  await closed
   await expect(owner.toast).toHaveText("You're signed in as the owner")
   await owner.item("Claim popup feedback").click()
   await owner.thread

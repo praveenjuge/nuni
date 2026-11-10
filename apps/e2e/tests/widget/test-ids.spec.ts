@@ -36,19 +36,20 @@ test("an area comment never records the widget's own words", async ({
 }) => {
   const { page } = widget
   await widget.goto("/")
-  await widget.openPanel()
   await widget.commentButton.click()
   // From the hero to near the bottom-right corner, where the toolbar is.
   const hero = (await page.locator(".hero").boundingBox())!
   const view = page.viewportSize()!
   await page.mouse.move(hero.x + 10, hero.y + 10)
   await page.mouse.down()
+  await page.mouse.move(hero.x + 30, hero.y + 30, { steps: 2 })
   await page.mouse.move(view.width - 120, view.height - 120, { steps: 6 })
   await page.mouse.up()
+  await expect(widget.composer).toBeVisible()
   await widget.post(`The whole page ${Date.now()}`)
 
   const [comment] = await pageComments(projectId, "/")
-  expect(comment!.anchor.region).toBeDefined()
+  expect(comment!.anchor.region, JSON.stringify(comment!.anchor)).toBeDefined()
   const anchor = JSON.stringify(comment!.anchor)
   for (const words of [
     EN.toolbar,

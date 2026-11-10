@@ -57,6 +57,8 @@ const local: PlaywrightTestConfig = {
       url: URLS.docs,
       timeout: 120_000,
       env: backendEnv("PUBLIC_NUNI_"),
+      // Lets blume remove its dev lock, or the next run refuses to start.
+      gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
     },
   ],
 }

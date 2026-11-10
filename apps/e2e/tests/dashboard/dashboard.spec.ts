@@ -82,14 +82,28 @@ test("triage comments: reply, undo, bulk resolve and delete", async ({
     .getByRole("checkbox", { name: "Select all comments shown" })
     .click()
   await expect(ownerPage.getByText("2 selected")).toBeVisible()
-  await ownerPage
+  const bulkResolve = ownerPage
     .getByRole("toolbar", { name: "Bulk actions" })
     .getByRole("button", { name: "Resolve", exact: true })
-    .click()
+  await bulkResolve.click()
   await expect(
     ownerPage.getByRole("tab", { name: "Resolved 2", exact: true })
   ).toBeVisible()
   await widget.expectOpenCount(0)
+
+  // A bulk resolve can be undone too.
+  await ownerPage.getByRole("button", { name: "Undo" }).click()
+  await expect(
+    ownerPage.getByRole("tab", { name: "Open 2", exact: true })
+  ).toBeVisible()
+  await widget.expectOpenCount(2)
+  await ownerPage
+    .getByRole("checkbox", { name: "Select all comments shown" })
+    .click()
+  await bulkResolve.click()
+  await expect(
+    ownerPage.getByRole("tab", { name: "Resolved 2", exact: true })
+  ).toBeVisible()
 
   // Deleting asks first.
   await ownerPage.getByRole("tab", { name: "Resolved 2", exact: true }).click()
