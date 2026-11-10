@@ -27,6 +27,9 @@
     "typecheck": {
       "dependsOn": ["^build"]
     },
+    "@nuni/dashboard#typecheck": {
+      "dependsOn": ["^build", "build"]
+    },
     "test": {
       "dependsOn": ["^build"],
       "outputs": []
