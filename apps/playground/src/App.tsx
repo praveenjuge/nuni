@@ -52,6 +52,10 @@ function Home() {
           </article>
         ))}
       </section>
+      {/* A test id, as sites put on their own elements: its text is content. */}
+      <p className="tagline" data-nuni="tagline">
+        Made for teams that ship every day.
+      </p>
     </>
   )
 }

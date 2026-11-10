@@ -1,42 +1,37 @@
 import { spawn, spawnSync } from "node:child_process"
 import {
-  mkdirSync,
-  writeFileSync,
-  symlinkSync,
-  existsSync,
-  readFileSync,
   cpSync,
-  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
 } from "node:fs"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
-const runtimeRoot = fileURLToPath(new URL("../.runtime", import.meta.url))
-mkdirSync(runtimeRoot, { recursive: true })
-const runtimeDir = mkdtempSync(`${runtimeRoot}/backend-`)
-// Isolate deployment selection and AuthKit provisioning from developer .env.local.
-for (const name of ["node_modules"]) {
-  const target = fileURLToPath(
-    new URL(`../../../packages/backend/${name}`, import.meta.url)
-  )
-  if (!existsSync(`${runtimeDir}/${name}`))
-    symlinkSync(target, `${runtimeDir}/${name}`)
-}
-const source = fileURLToPath(
-  new URL("../../../packages/backend/convex", import.meta.url)
+
+import { BACKEND_DIR, URLS, WORKOS, portOf } from "../env"
+
+/**
+ * A fresh anonymous Convex project with the backend's code, chosen from this
+ * directory alone: never from a developer's packages/backend/.env.local.
+ */
+const backend = fileURLToPath(
+  new URL("../../../packages/backend/", import.meta.url)
 )
-cpSync(source, `${runtimeDir}/convex`, { recursive: true })
-writeFileSync(`${runtimeDir}/convex.json`, "{}\n")
+rmSync(BACKEND_DIR, { recursive: true, force: true })
+mkdirSync(`${BACKEND_DIR}/convex`, { recursive: true })
+symlinkSync(`${backend}node_modules`, `${BACKEND_DIR}/node_modules`)
+const { type, dependencies } = JSON.parse(
+  readFileSync(`${backend}package.json`, "utf8")
+) as { type: string; dependencies: Record<string, string> }
 writeFileSync(
-  `${runtimeDir}/package.json`,
-  JSON.stringify({
-    type: "module",
-    dependencies: {
-      convex: "*",
-      "@convex-dev/workos-authkit": "*",
-      "@convex-dev/rate-limiter": "*",
-    },
-  })
+  `${BACKEND_DIR}/package.json`,
+  JSON.stringify({ type, dependencies })
 )
+// Without the backend's convex.json, `convex dev` doesn't provision hosted AuthKit.
+writeFileSync(`${BACKEND_DIR}/convex.json`, "{}\n")
+
 const env = {
   ...process.env,
   CONVEX_AGENT_MODE: "anonymous",
@@ -46,64 +41,63 @@ const env = {
   CONVEX_SELF_HOSTED_URL: "",
   CONVEX_SELF_HOSTED_ADMIN_KEY: "",
 }
-/** Run Convex in the isolated runtime; only initial provisioning may fail. */
-function run(args: string[], allowFailure = false) {
+const ports = [
+  "--local-cloud-port",
+  String(portOf(URLS.convex)),
+  "--local-site-port",
+  String(portOf(URLS.convexSite)),
+]
+function convex(args: string[]) {
   const result = spawnSync("bunx", ["convex", ...args], {
-    cwd: runtimeDir,
+    cwd: BACKEND_DIR,
     env,
     stdio: "inherit",
   })
-  if (result.status !== 0 && !allowFailure)
-    throw new Error(`convex ${args[0]} failed`)
+  if (result.status !== 0) throw new Error(`convex ${args[0]} failed`)
 }
-// Not the default 3210, so a developer's own `convex dev` can keep running.
-const PORTS = ["--local-cloud-port", "3310", "--local-site-port", "3311"]
-run(["dev", "--once", ...PORTS], true)
-const localEnv = readFileSync(`${runtimeDir}/.env.local`, "utf8")
-if (!/^CONVEX_DEPLOYMENT=anonymous:/m.test(localEnv))
-  throw new Error("Refusing a non-anonymous E2E backend")
-writeFileSync(
-  `${runtimeRoot}/current.json`,
-  JSON.stringify({ directory: runtimeDir })
-)
-env.CONVEX_DEPLOYMENT = localEnv.match(/^CONVEX_DEPLOYMENT=(.*)$/m)![1]!.trim()
+
+// The backend's code needs the WorkOS settings, and they can only be set on
+// a deployment that exists: create it with no functions first.
+convex(["dev", "--once", ...ports])
+const deployment = /^CONVEX_DEPLOYMENT=(anonymous:.*)$/m.exec(
+  readFileSync(`${BACKEND_DIR}/.env.local`, "utf8")
+)?.[1]
+if (!deployment) throw new Error("Refusing a non-anonymous E2E backend")
+env.CONVEX_DEPLOYMENT = deployment.trim()
 for (const [key, value] of Object.entries({
-  WORKOS_CLIENT_ID: "client_nuni_local",
-  WORKOS_API_KEY: "sk_test_default",
-  WORKOS_API_URL: "http://localhost:4100",
-  WORKOS_WEBHOOK_SECRET: "whsec_nuni_local",
+  WORKOS_CLIENT_ID: WORKOS.clientId,
+  WORKOS_API_KEY: WORKOS.apiKey,
+  WORKOS_API_URL: URLS.workos,
+  WORKOS_WEBHOOK_SECRET: WORKOS.webhookSecret,
   NUNI_ALLOW_TESTING: "1",
 }))
-  run(["env", "set", key, value])
-run(["dev", "--once", ...PORTS])
-const child = spawn("bunx", ["convex", "dev", ...PORTS], {
-  cwd: runtimeDir,
+  convex(["env", "set", key, value])
+cpSync(`${backend}convex`, `${BACKEND_DIR}/convex`, { recursive: true })
+convex(["dev", "--once", ...ports])
+
+// Its own process group, so stopping it also stops the local backend binary
+// `convex dev` starts (which otherwise outlives it and keeps the ports).
+const child = spawn("bunx", ["convex", "dev", ...ports], {
+  cwd: BACKEND_DIR,
   env,
   stdio: "inherit",
+  detached: true,
 })
+// The functions are pushed; ready once the watcher's backend answers.
 const ready = createServer(async (_request, response) => {
-  try {
-    const result = await fetch("http://127.0.0.1:3310/api/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        path: "comments:listForPage",
-        args: { publicId: "nuni_123456789ABCDEFGHJKLMN", path: "/" },
-        format: "json",
-      }),
-      signal: AbortSignal.timeout(2_000),
-    })
-    const body = (await result.json()) as { status?: string }
-    response.statusCode = result.ok && body.status === "success" ? 200 : 503
-  } catch {
-    response.statusCode = 503
-  }
-  response.end("ready")
+  const up = await fetch(`${URLS.convex}/version`, {
+    signal: AbortSignal.timeout(2_000),
+  }).then(
+    (r) => r.ok,
+    () => false
+  )
+  response.statusCode = up ? 200 : 503
+  response.end()
 })
-ready.listen(4199, "127.0.0.1")
+ready.listen(portOf(URLS.convexReady), "127.0.0.1")
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.on(signal, () => {
     ready.close()
-    child.kill(signal)
+    process.kill(-child.pid!, signal)
   })
 child.on("exit", (code) => process.exit(code ?? 1))

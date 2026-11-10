@@ -16,30 +16,30 @@ Open a comment in the widget (as the owner) or in the dashboard and choose **Cop
 The CLI and the MCP server read comments as the project owner. Sign in from the project folder:
 
 ```bash
-npx @nuniapp/cli@latest login
+{{cli}} login
 ```
 
 It prints a link and a short code. Open the link (on any device), check that the code matches, and choose **Allow**. If nobody owns the project yet, you claim it at the same time. This works over SSH and in cloud sandboxes, since nothing has to call back to your machine.
 
 ![The dashboard asking to allow a terminal sign-in, with the code to check and Allow and Deny buttons](../images/cli-approve.webp)
 
-The session is saved in `~/.config/nuni/credentials.json` (readable only by you) for 90 days. The project is the `nuni_` ID in your code; pass `--project nuni_...` if there is more than one. In CI, set `NUNI_TOKEN` instead. Sign out with `npx @nuniapp/cli@latest logout`, or revoke the session in the project settings in the dashboard.
+The session is saved for {{cli-session-days}} days in `credentials.json`, readable only by you, in `~/.config/nuni` (or `$XDG_CONFIG_HOME/nuni`, or `%APPDATA%\nuni` on Windows). The project is the `nuni_` ID in your code; pass `--project nuni_...` if there is more than one. In CI, set `NUNI_TOKEN` instead. Sign out with `{{cli}} logout`, or revoke the session in the project settings in the dashboard.
 
 ## MCP server
 
-Add Nuni to your agent once. It runs `npx @nuniapp/cli@latest mcp` in your project folder.
+Add Nuni to your agent once. It runs `{{cli}} mcp` in your project folder.
 
 <Tabs>
   <Tab title="Claude Code">
     ```bash
-    claude mcp add nuni -- npx -y @nuniapp/cli@latest mcp
+    {{mcp-add}}
     ```
   </Tab>
   <Tab title="Cursor">
     ```json .cursor/mcp.json
     {
       "mcpServers": {
-        "nuni": { "command": "npx", "args": ["-y", "@nuniapp/cli@latest", "mcp"] }
+        "nuni": { "command": "npx", "args": ["-y", "{{cli-package}}@latest", "mcp"] }
       }
     }
     ```
@@ -48,11 +48,11 @@ Add Nuni to your agent once. It runs `npx @nuniapp/cli@latest mcp` in your proje
     ```toml ~/.codex/config.toml
     [mcp_servers.nuni]
     command = "npx"
-    args = ["-y", "@nuniapp/cli@latest", "mcp"]
+    args = ["-y", "{{cli-package}}@latest", "mcp"]
     ```
   </Tab>
   <Tab title="Other">
-    Any MCP client with stdio servers: the command is `npx`, the arguments are `-y @nuniapp/cli@latest mcp`. Add `--project nuni_...` if the agent doesn't start in your project folder.
+    Any MCP client with stdio servers: the command is `npx`, the arguments are `-y {{cli-package}}@latest mcp`. Add `--project nuni_...` if the agent doesn't start in your project folder.
   </Tab>
 </Tabs>
 
@@ -66,7 +66,7 @@ Then ask your agent something like _"fix the open Nuni comments"_. The tools:
 | `get_comment`      | One comment with all of its context, plus the screenshot as an image                              |
 | `reply_to_comment` | Reply in the thread, as the owner                                                                 |
 | `resolve_comment`  | Resolve it, optionally with a note saying what changed                                            |
-| `resolve_comments` | Resolve several at once, for example everything one change fixed                                  |
+| `resolve_comments` | Resolve up to {{bulk-max}} at once, for example everything one change fixed                       |
 | `reopen_comment`   | Reopen it                                                                                         |
 
 Grouping helps with requests like _"fix all the comments on /pricing"_: comments on the same element (the same button, heading or sentence) are listed together, so one change can fix them all.
@@ -76,18 +76,19 @@ If the agent isn't signed in, the tools say so and ask you to run `login`.
 ## From the terminal
 
 ```bash
-npx @nuniapp/cli@latest comments                  # open comments, newest first
-npx @nuniapp/cli@latest comments --page /pricing  # one page
-npx @nuniapp/cli@latest comments --search "typo"  # best match first
-npx @nuniapp/cli@latest comments --group element  # related comments together
-npx @nuniapp/cli@latest pages                     # pages with open comments
-npx @nuniapp/cli@latest comment <id>              # everything about one comment
-npx @nuniapp/cli@latest comment <id> --save-screenshot .
-npx @nuniapp/cli@latest reply <id> "Fixed in the next deploy"
-npx @nuniapp/cli@latest resolve <id> --note "Made the button bigger"
-npx @nuniapp/cli@latest resolve <id> <id> --note "Fixed both typos"
+{{cli}} comments                  # open comments, newest first
+{{cli}} comments --page /pricing  # one page
+{{cli}} comments --search "typo"  # best match first
+{{cli}} comments --group element  # related comments together
+{{cli}} pages                     # pages with open comments
+{{cli}} comment <id>              # everything about one comment
+{{cli}} comment <id> --save-screenshot .
+{{cli}} reply <id> "Fixed in the next deploy"
+{{cli}} resolve <id> --note "Made the button bigger"
+{{cli}} resolve <id> <id> --note "Fixed both typos"
+{{cli}} reopen <id> --note "Still wrong on mobile"
 ```
 
 ![Terminal output of nuni comments: four open comments with author, time, text and the element each one is on](../images/cli-comments.webp)
 
-Add `--json` to any command for machine-readable output.
+Add `--json` to any command for machine-readable output; the [CLI reference](/reference/cli#json-output) lists the shapes.

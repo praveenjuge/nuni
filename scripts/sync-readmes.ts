@@ -6,20 +6,19 @@
  *   bun scripts/sync-readmes.ts --check  # fail if out of date (CI)
  */
 import { readFileSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 
-import { buildAgentPrompt } from "../packages/shared/src/prompt"
+import { buildAgentPrompt } from "@nuni/shared"
+
+import { publicPackages } from "./public-packages"
 
 const START = "<!-- prompt:start -->"
 const END = "<!-- prompt:end -->"
-const files = [
-  "packages/widget/README.md",
-  "packages/react/README.md",
-  "packages/cli/README.md",
-]
 const block = `${START}\n\n\`\`\`text\n${buildAgentPrompt()}\n\`\`\`\n\n${END}`
 
 let stale = false
-for (const file of files) {
+for (const { dir } of publicPackages()) {
+  const file = join(dir, "README.md")
   const content = readFileSync(file, "utf8")
   const start = content.indexOf(START)
   const end = content.indexOf(END)
