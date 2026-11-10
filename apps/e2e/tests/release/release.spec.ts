@@ -159,7 +159,14 @@ test("CLI", async () => {
 /** The MCP server's name, version and tools, through a real stdio client. */
 async function mcpServer(command: string, args: string[], cwd: string) {
   const client = new Client({ name: "nuni-release", version: VERSION })
-  await client.connect(new StdioClientTransport({ command, args, cwd }))
+  // The SDK passes only a few variables to the server by default; npx needs
+  // the rest (a proxy, the npm config) to reach the registry.
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined
+    )
+  )
+  await client.connect(new StdioClientTransport({ command, args, cwd, env }))
   try {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort()
     return { info: client.getServerVersion(), tools }
