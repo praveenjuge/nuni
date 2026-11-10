@@ -15,8 +15,6 @@ export type Anchor = Infer<typeof anchorValidator>
 export type AnchorAncestor = Anchor["ancestors"][number]
 export type AnchorQuote = NonNullable<Anchor["quote"]>
 export type Rect = Anchor["rect"]
-/** One shadow host or <iframe> on the way to the element. */
-export type AnchorScope = NonNullable<Anchor["scope"]>[number]
 
 export type CommentStatus = Infer<typeof statusValidator>
 export type Resolution = Infer<typeof resolutionValidator>
@@ -86,7 +84,7 @@ export interface ReplyView {
 }
 
 /** One emoji on a comment or reply, with who added it. */
-export interface ReactionSummary {
+interface ReactionSummary {
   /** The comment or reply id. */
   targetId: string
   emoji: string

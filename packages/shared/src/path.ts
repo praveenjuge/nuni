@@ -1,4 +1,4 @@
-export interface PageLocation {
+interface PageLocation {
   origin: string
   path: string
   search: string
@@ -44,20 +44,6 @@ export function describeLocation(input: string | URL): PageLocation {
     search: url.search,
     hash: url.hash,
     url: url.href,
-  }
-}
-
-export function isLocalOrigin(origin: string): boolean {
-  try {
-    const { hostname } = new URL(origin)
-    return (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "[::1]" ||
-      hostname.endsWith(".localhost")
-    )
-  } catch {
-    return false
   }
 }
 

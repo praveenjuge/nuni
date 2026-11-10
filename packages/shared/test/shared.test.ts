@@ -13,7 +13,6 @@ import {
   generateProjectId,
   generateUserCode,
   handoffMessage,
-  isLocalOrigin,
   isProjectId,
   isUserCode,
   normalizePath,
@@ -128,16 +127,6 @@ describe("normalizePath", () => {
       hash: "#z",
       url: "https://a.com/x?y=1#z",
     })
-  })
-})
-
-describe("isLocalOrigin", () => {
-  it("detects local origins", () => {
-    expect(isLocalOrigin("http://localhost:3000")).toBe(true)
-    expect(isLocalOrigin("http://127.0.0.1:5173")).toBe(true)
-    expect(isLocalOrigin("http://app.localhost")).toBe(true)
-    expect(isLocalOrigin("https://example.com")).toBe(false)
-    expect(isLocalOrigin("not a url")).toBe(false)
   })
 })
 

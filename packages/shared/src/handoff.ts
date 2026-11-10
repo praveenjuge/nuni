@@ -64,12 +64,12 @@ export const TOKEN_PREFIX = {
  * What the dashboard popup posts back to the widget that opened it: an
  * owner session after a claim, or a commenter sign-in.
  */
-export const HANDOFF_TYPE = {
+const HANDOFF_TYPE = {
   session: "nuni:session",
   commenter: "nuni:commenter",
 } as const
 
-export type HandoffKind = keyof typeof HANDOFF_TYPE
+type HandoffKind = keyof typeof HANDOFF_TYPE
 
 export interface HandoffMessage {
   type: (typeof HANDOFF_TYPE)[HandoffKind]

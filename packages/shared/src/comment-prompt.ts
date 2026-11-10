@@ -6,10 +6,10 @@ import type { OwnerComment, WidgetComment } from "./types"
  * A comment as any surface has it: the owner's full view, or a visitor's
  * public one with the thread's replies.
  */
-export type PromptComment = WidgetComment &
+type PromptComment = WidgetComment &
   Partial<Omit<OwnerComment, keyof WidgetComment>>
 
-export interface CommentPromptOptions {
+interface CommentPromptOptions {
   /**
    * Include the owner-only context (DOM, styles, console, network,
    * screenshot). Defaults to true; the fields are skipped when absent.
