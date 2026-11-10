@@ -1,4 +1,10 @@
-import { LIMITS, type CommentStatus, type ErrorData } from "@nuni/shared"
+import {
+  HTTP_ROUTES,
+  LIMITS,
+  type CommentStatus,
+  type ErrorData,
+  type NewCommentPayload,
+} from "@nuni/shared"
 import {
   anchorValidator,
   contextValidator,
@@ -9,9 +15,10 @@ import {
   viewportValidator,
   widgetAuthorArgs,
 } from "@nuni/shared/validators"
-import { paginationOptsValidator } from "convex/server"
+import { paginationOptsValidator, type HttpRouter } from "convex/server"
 import { v } from "convex/values"
 
+import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import {
   internalMutation,
@@ -35,6 +42,7 @@ import {
   cleanSuggestion,
   pageKey,
 } from "./commentInput"
+import { clientIp, json, jsonRoute, optionalText, text } from "./httpRoutes"
 import {
   deleteComments,
   editComment,
@@ -55,6 +63,7 @@ import {
 import { SERVER_LIMITS } from "./limits"
 import {
   dashboardProject,
+  requireProjectOwner,
   ensureProject,
   ownerOf,
   requireOwner,
@@ -351,7 +360,6 @@ async function loadBulk(ctx: MutationCtx, ids: string[]) {
   if (ids.length > LIMITS.bulkMax) {
     fail("too_many", `Pick up to ${LIMITS.bulkMax} comments at a time`)
   }
-  const user = await requireUser(ctx)
   const comments = (
     await Promise.all(
       [...new Set(ids)].map((id) => rowById(ctx, "comments", id))
@@ -360,8 +368,11 @@ async function loadBulk(ctx: MutationCtx, ids: string[]) {
   const projectIds = new Set(comments.map((c) => c.projectId))
   if (projectIds.size > 1) fail("invalid", "Comments from several projects")
   const [projectId] = projectIds
-  if (projectId) await requireOwner(ctx, await ctx.db.get(projectId))
-  return { userId: user._id, comments }
+  // None of the ids is a comment any more: still only for signed-in people.
+  const userId = projectId
+    ? await requireOwner(ctx, await ctx.db.get(projectId))
+    : (await requireUser(ctx))._id
+  return { userId, comments }
 }
 
 export const bulkSetStatus = mutation({
@@ -538,14 +549,10 @@ export const getForOwner = query({
  */
 const agentArgs = { publicId: v.string(), sessionToken: v.string() }
 
-async function agentOwner(
+const agentOwner = (
   ctx: QueryCtx | MutationCtx,
   { publicId, sessionToken }: { publicId: string; sessionToken: string }
-) {
-  const project = await projectByPublicId(ctx, publicId)
-  const userId = await requireOwner(ctx, project, sessionToken)
-  return { project: project!, userId }
-}
+) => requireProjectOwner(ctx, publicId, sessionToken)
 
 /** Pages with open comments, most first. */
 export const pagesForAgent = query({
@@ -653,3 +660,30 @@ export const setStatusForAgent = mutation({
     return args.ids.map((id) => results.get(id)!)
   },
 })
+
+/** The widget posts a comment over HTTP, so it is rate limited per IP. */
+export function commentRoutes(http: HttpRouter) {
+  jsonRoute<NewCommentPayload>(
+    http,
+    HTTP_ROUTES.comments,
+    { maxBytes: SERVER_LIMITS.commentBodyMax, invalid: "Invalid comment" },
+    async (ctx, body, request) => {
+      const id = await ctx.runMutation(internal.comments.createFromWidget, {
+        publicId: text(body.publicId),
+        ip: clientIp(request),
+        body: text(body.body),
+        authorName: text(body.authorName),
+        authorSecret: text(body.authorSecret),
+        commenterToken: optionalText(body.commenterToken),
+        // Shape is enforced by the mutation's validators.
+        suggestion: (body.suggestion ?? undefined) as never,
+        page: body.page as never,
+        anchor: body.anchor as never,
+        viewport: body.viewport as never,
+        context: (body.context ?? undefined) as never,
+        userAgent: request.headers.get("User-Agent") ?? "",
+      })
+      return json(request, 201, { id })
+    }
+  )
+}

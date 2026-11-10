@@ -1,9 +1,12 @@
-import type { Thread } from "@nuni/shared"
+import { HTTP_ROUTES, type NewReplyPayload, type Thread } from "@nuni/shared"
 import { widgetAuthorArgs } from "@nuni/shared/validators"
+import type { HttpRouter } from "convex/server"
 import { v } from "convex/values"
 
+import { internal } from "./_generated/api"
 import { internalMutation, mutation, query } from "./_generated/server"
 import { requireOwnRow, widgetAuthor } from "./authors"
+import { clientIp, json, jsonRoute, optionalText, text } from "./httpRoutes"
 import { deleteReply, insertOwnerReply, insertReply } from "./lifecycle"
 import { cleanBody, fail, findComment, requireComment, rowById } from "./lib"
 import { SERVER_LIMITS } from "./limits"
@@ -158,3 +161,25 @@ export const remove = mutation({
     await deleteReply(ctx, reply)
   },
 })
+
+export function replyRoutes(http: HttpRouter) {
+  /** A reply in a comment's thread, rate limited per IP like comments. */
+  jsonRoute<NewReplyPayload>(
+    http,
+    HTTP_ROUTES.replies,
+    { maxBytes: SERVER_LIMITS.replyBodyMax, invalid: "Invalid reply" },
+    async (ctx, body, request) => {
+      const id = await ctx.runMutation(internal.replies.createFromWidget, {
+        publicId: text(body.publicId),
+        commentId: text(body.commentId),
+        ip: clientIp(request),
+        body: text(body.body),
+        authorName: text(body.authorName),
+        authorSecret: text(body.authorSecret),
+        commenterToken: optionalText(body.commenterToken),
+        sessionToken: optionalText(body.sessionToken),
+      })
+      return json(request, 201, { id })
+    }
+  )
+}

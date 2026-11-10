@@ -1,16 +1,27 @@
 import {
   cliCommand,
   generateUserCode,
+  HTTP_ROUTES,
   isUserCode,
+  LOGIN_POLL_STATUS,
   normalizeUserCode,
   type LoginPoll,
   type LoginStart,
 } from "@nuni/shared"
+import type { HttpRouter } from "convex/server"
 import { v } from "convex/values"
 
+import { internal } from "./_generated/api"
 import { internalMutation, mutation, query } from "./_generated/server"
 import { currentUser, nameOf, requireUser } from "./accounts"
-import { assertProjectId, fail, projectByPublicId, type Ctx } from "./lib"
+import { clientIp, json, jsonRoute, text } from "./httpRoutes"
+import {
+  assertProjectId,
+  fail,
+  liveProject,
+  projectByPublicId,
+  type Ctx,
+} from "./lib"
 import { SERVER_LIMITS } from "./limits"
 import { claimFor } from "./ownership"
 import { ipKey, rateLimiter } from "./rateLimits"
@@ -97,8 +108,8 @@ export const poll = internalMutation({
     await ctx.db.delete(login._id)
     if (login.status === "denied" || !login.userId) return { status: "denied" }
 
-    const project = await projectByPublicId(ctx, login.publicId)
-    if (!project || project.deletingAt || project.ownerId !== login.userId) {
+    const project = await liveProject(ctx, login.publicId)
+    if (!project || project.ownerId !== login.userId) {
       return { status: "denied" }
     }
     const { token, expiresAt } = await issueSession(ctx, "cli", {
@@ -128,7 +139,8 @@ export const pending = query({
       return { state: "expired" as const }
     }
     if (login.status !== "pending") return { state: login.status }
-    const project = await projectByPublicId(ctx, login.publicId)
+    // A project being deleted can't be approved: see `approve`.
+    const project = await liveProject(ctx, login.publicId)
     if (!project) return { state: "expired" as const }
     const owner = project.ownerId ? await ctx.db.get(project.ownerId) : null
     return {
@@ -159,8 +171,8 @@ export const approve = mutation({
         `This code has expired. Run ${cliCommand("login")} again.`
       )
     }
-    const project = await projectByPublicId(ctx, login.publicId)
-    if (!project || project.deletingAt) fail("not_found", "Project not found")
+    const project = await liveProject(ctx, login.publicId)
+    if (!project) fail("not_found", "Project not found")
     const claim = await claimFor(ctx, project, user._id)
     if (claim.status === "claimed_by_other") {
       fail("forbidden", "Only the project owner can sign in to it")
@@ -179,3 +191,40 @@ export const deny = mutation({
     }
   },
 })
+
+export function cliLoginRoutes(http: HttpRouter) {
+  /** `nuni login`, step 1: see cliAuth.ts. */
+  jsonRoute<{ publicId: string; client: string }>(
+    http,
+    HTTP_ROUTES.cliLoginStart,
+    {
+      maxBytes: SERVER_LIMITS.cliLoginBodyMax,
+      invalid: "Invalid sign-in request",
+    },
+    async (ctx, body, request) => {
+      const login = await ctx.runMutation(internal.cliAuth.start, {
+        publicId: text(body.publicId),
+        client: text(body.client),
+        ip: clientIp(request),
+      })
+      return json(request, 201, login)
+    }
+  )
+
+  /** `nuni login`, step 3: the CLI waits for the owner to approve. */
+  jsonRoute<{ deviceSecret: string }>(
+    http,
+    HTTP_ROUTES.cliLoginPoll,
+    {
+      maxBytes: SERVER_LIMITS.cliLoginBodyMax,
+      invalid: "Invalid sign-in request",
+    },
+    async (ctx, body, request) => {
+      const result = await ctx.runMutation(internal.cliAuth.poll, {
+        deviceSecret: text(body.deviceSecret),
+        ip: clientIp(request),
+      })
+      return json(request, LOGIN_POLL_STATUS[result.status], result)
+    }
+  )
+}

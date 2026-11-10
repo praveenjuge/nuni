@@ -7,6 +7,7 @@ import {
   dashboardProject,
   ensureProject,
   ownerOf,
+  requireOwner,
   requireDashboardProject,
   claimFor,
   revokeSessions,
@@ -89,11 +90,12 @@ export const listMine = query({
 export const revoke = mutation({
   args: { id: v.id("widgetSessions") },
   handler: async (ctx, { id }) => {
-    const user = await requireUser(ctx)
     const session = await ctx.db.get(id)
-    if (!session) return
-    const project = await ctx.db.get(session.projectId)
-    if (project?.ownerId !== user._id) fail("forbidden", "Not your session")
+    if (!session) {
+      await requireUser(ctx)
+      return
+    }
+    await requireOwner(ctx, await ctx.db.get(session.projectId))
     await ctx.db.delete(id)
   },
 })

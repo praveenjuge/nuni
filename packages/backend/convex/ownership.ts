@@ -205,8 +205,21 @@ export async function dashboardProject(ctx: Ctx, publicId: string) {
   return (await ownerOf(ctx, project)) ? project : null
 }
 
-export async function requireDashboardProject(ctx: Ctx, publicId: string) {
+/**
+ * The project and its acting owner: the session token's (agents), or the
+ * signed-in dashboard user.
+ */
+export async function requireProjectOwner(
+  ctx: Ctx,
+  publicId: string,
+  sessionToken?: string
+) {
   const project = await projectByPublicId(ctx, publicId)
-  const userId = await requireOwner(ctx, project)
+  const userId = await requireOwner(ctx, project, sessionToken)
   return { userId, project: project! }
+}
+
+/** The project, for its signed-in owner in the dashboard. */
+export function requireDashboardProject(ctx: Ctx, publicId: string) {
+  return requireProjectOwner(ctx, publicId)
 }

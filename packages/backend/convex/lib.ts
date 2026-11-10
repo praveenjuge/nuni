@@ -57,6 +57,18 @@ export async function projectByPublicId(
     .unique()
 }
 
+/**
+ * The project, or null while it is being deleted: to everything but the
+ * delete itself (and `ensureProject`, which says so) it is already gone.
+ */
+export async function liveProject(
+  ctx: Ctx,
+  publicId: string
+): Promise<Doc<"projects"> | null> {
+  const project = await projectByPublicId(ctx, publicId)
+  return project && !project.deletingAt ? project : null
+}
+
 /** A row by the id a client sent, or null when it isn't one of that table. */
 export async function rowById<T extends "comments" | "replies">(
   ctx: Ctx,

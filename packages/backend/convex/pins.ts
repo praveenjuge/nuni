@@ -6,7 +6,7 @@ import { internal } from "./_generated/api"
 import { internalMutation } from "./_generated/server"
 import { pageKey } from "./commentInput"
 import { clientIp, json, jsonRoute, text } from "./httpRoutes"
-import { fail, projectByPublicId } from "./lib"
+import { fail, liveProject } from "./lib"
 import { SERVER_LIMITS } from "./limits"
 import { ipKey, rateLimiter } from "./rateLimits"
 
@@ -31,8 +31,8 @@ export const report = internalMutation({
       key: ipKey(args.ip, args.publicId),
     })
     if (!ok) fail("rate_limited", "Slow down a little")
-    const project = await projectByPublicId(ctx, args.publicId)
-    if (!project || project.deletingAt) return 0
+    const project = await liveProject(ctx, args.publicId)
+    if (!project) return 0
     const path = pageKey(args.path)
     const now = Date.now()
     let changed = 0

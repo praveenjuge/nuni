@@ -5,7 +5,7 @@ import { mutation, query } from "./_generated/server"
 import { requireUser } from "./accounts"
 import { checkSecret, commenterFromToken, userAuthorKey } from "./authors"
 import { adjustThread, reauthorComment } from "./lifecycle"
-import { cleanName, fail, projectByPublicId } from "./lib"
+import { cleanName, fail, liveProject, projectByPublicId } from "./lib"
 import { SERVER_LIMITS } from "./limits"
 import { createSiteSession, findByToken } from "./tokens"
 
@@ -24,8 +24,8 @@ export const create = mutation({
   args: { publicId: v.string(), origin: v.string() },
   handler: async (ctx, { publicId, origin }) => {
     const user = await requireUser(ctx)
-    const project = await projectByPublicId(ctx, publicId)
-    if (!project || project.deletingAt) fail("not_found", "Project not found")
+    const project = await liveProject(ctx, publicId)
+    if (!project) fail("not_found", "Project not found")
     return createSiteSession(ctx, "commenter", {
       userId: user._id,
       project,
