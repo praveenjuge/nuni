@@ -268,22 +268,34 @@ export function createOps({ remote, project: flag, cwd }: OpsOptions) {
       note?: string
     ): Promise<StatusChange> {
       const unique = [...new Set(ids)]
-      const results = []
+      const change: StatusChange = { status, done: [], failed: [] }
       for (let i = 0; i < unique.length; i += LIMITS.bulkMax) {
         const batch = unique.slice(i, i + LIMITS.bulkMax)
-        results.push(
-          ...(await remote.setStatus(session(), batch, status, note))
-        )
-      }
-      const change: StatusChange = { status, done: [], failed: [] }
-      for (const result of results) {
-        if (result.ok) change.done.push(result.id)
-        else {
-          change.failed.push({
-            id: result.id,
-            code: result.error.code,
-            error: result.error.message,
-          })
+        let results
+        try {
+          results = await remote.setStatus(session(), batch, status, note)
+        } catch (error) {
+          // Nothing changed yet: report the error itself.
+          if (i === 0 || !(error instanceof NuniError)) throw error
+          // Earlier batches went through, so say which ids didn't.
+          for (const id of batch) {
+            change.failed.push({
+              id,
+              code: error.code ?? "failed",
+              error: error.message,
+            })
+          }
+          continue
+        }
+        for (const result of results) {
+          if (result.ok) change.done.push(result.id)
+          else {
+            change.failed.push({
+              id: result.id,
+              code: result.error.code,
+              error: result.error.message,
+            })
+          }
         }
       }
       return change

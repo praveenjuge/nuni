@@ -233,7 +233,9 @@ describe("commenter sign-in", () => {
       })
       // Once the account is stored, page loads don't call WorkOS again.
       const calls = vi.mocked(fetch).mock.calls.length
-      await ada.action(api.users.storeFresh, {})
+      expect(await ada.action(api.users.storeFresh, {})).toMatchObject({
+        name: "Ada Lovelace",
+      })
       expect(vi.mocked(fetch).mock.calls.length).toBe(calls)
       // When WorkOS can't be reached, the sign-in token's name is used.
       vi.stubGlobal(

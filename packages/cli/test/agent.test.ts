@@ -523,6 +523,31 @@ describe("resolve and reopen", () => {
     expect(io.json()).toEqual({ resolved: ids, failed: [] })
   })
 
+  it("keeps finished batches when a later one can't reach Nuni", async () => {
+    const remote = fakeRemote()
+    const setStatus = remote.setStatus
+    let batches = 0
+    remote.setStatus = async (...args) => {
+      if (++batches === 2) {
+        throw new NuniError("Could not reach Nuni (offline)", "network")
+      }
+      return setStatus(...args)
+    }
+    const io = cli({ remote })
+    const ids = Array.from({ length: LIMITS.bulkMax + 1 }, (_, i) => `c${i}`)
+    expect(await io.run("resolve", ...ids, "--json")).toBe(1)
+    expect(io.json()).toEqual({
+      resolved: ids.slice(0, LIMITS.bulkMax),
+      failed: [
+        {
+          id: ids[LIMITS.bulkMax],
+          code: "network",
+          error: "Could not reach Nuni (offline)",
+        },
+      ],
+    })
+  })
+
   it("reports the ones that failed, and still resolves the rest", async () => {
     const io = cli()
     expect(

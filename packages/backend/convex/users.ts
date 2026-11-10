@@ -49,10 +49,14 @@ export const storeProfile = internalMutation({
   },
 })
 
-export const known = internalQuery({
+export const stored = internalQuery({
   args: { workosId: v.string() },
-  handler: async (ctx, { workosId }) =>
-    (await userByWorkosId(ctx, workosId)) !== null,
+  handler: async (ctx, { workosId }) => {
+    const user = await userByWorkosId(ctx, workosId)
+    return user
+      ? { _id: user._id, name: user.name, avatarUrl: user.avatarUrl }
+      : null
+  },
 })
 
 /** The signed-in user's profile, read fresh from WorkOS; null if it can't be. */
@@ -80,8 +84,9 @@ async function fetchProfile(workosId: string): Promise<Profile | null> {
  * The dashboard calls this once per page load: the signed-in user's row.
  * The first time, before the user.created webhook has arrived, the name and
  * photo are read fresh from WorkOS, so someone who signs in to comment has
- * their real name on their comments right away. After that the webhooks keep
- * the row current, so no WorkOS call slows the page. When WorkOS can't be
+ * their real name on their comments right away. After that the stored row is
+ * returned as it is: the webhooks keep it current, no WorkOS call slows the
+ * page, and a reload can't replace the real name with the token's. When WorkOS can't be
  * reached, the sign-in token's name is used.
  */
 export const storeFresh = action({
@@ -91,10 +96,11 @@ export const storeFresh = action({
   ): Promise<{ _id: Id<"users">; name: string; avatarUrl?: string }> => {
     const identity = await ctx.auth.getUserIdentity()
     if (!identity) fail("unauthenticated", "Sign in first")
-    const known = await ctx.runQuery(internal.users.known, {
+    const stored = await ctx.runQuery(internal.users.stored, {
       workosId: identity.subject,
     })
-    const profile = known ? null : await fetchProfile(identity.subject)
+    if (stored) return stored
+    const profile = await fetchProfile(identity.subject)
     return ctx.runMutation(internal.users.storeProfile, {
       profile: profile ?? undefined,
     })
