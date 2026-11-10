@@ -1,6 +1,6 @@
 {
   "name": "@nuniapp/react",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "React component for Nuni: pinned comments on your live site.",
   "license": "MIT",
   "type": "module",
@@ -36,7 +36,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nuniapp/widget": "^0.1.13"
+    "@nuniapp/widget": "^0.1.14"
   },
   "peerDependencies": {
     "react": ">=18"
