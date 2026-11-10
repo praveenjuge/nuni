@@ -95,7 +95,7 @@ export function createPins(ctx: Ctx) {
     if (layoutFrame) return
     layoutFrame = requestAnimationFrame(() => {
       layoutFrame = 0
-      layout()
+      ctx.layout()
     })
   }
 
@@ -226,7 +226,7 @@ export function createPins(ctx: Ctx) {
       }
       watchScopes()
       render()
-      layout()
+      ctx.layout()
       if (queue.length) {
         whenIdle(slice, 100)
         return
@@ -338,8 +338,6 @@ export function createPins(ctx: Ctx) {
       pin.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`
     }
     renderMarks()
-    ctx.positionCard()
-    ctx.picker.layout()
   }
 
   const render = () => {
@@ -475,6 +473,7 @@ export function createPins(ctx: Ctx) {
     },
 
     render,
+    /** Put the pins and marks where their elements are: see `ctx.layout`. */
     layout,
     scheduleLayout,
     scheduleResolve,

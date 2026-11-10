@@ -19,6 +19,7 @@ import type {
 } from "convex/server"
 
 import type { ResolvedConfig } from "./config"
+import type { FailureCode } from "./failures"
 
 export { api }
 
@@ -27,9 +28,6 @@ export type PageSummary = FunctionReturnType<
   typeof api.comments.pagesWithComments
 >[number]
 type NewComment = Omit<NewCommentPayload, "publicId">
-
-/** Why a call failed: a backend error code, or no answer at all. */
-export type FailureCode = ErrorCode | "network" | "unknown"
 
 class NuniApiError extends Error {
   constructor(public code: FailureCode) {

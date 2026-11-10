@@ -11,6 +11,7 @@ import type { ResolvedConfig } from "./config"
 import type { Collectors } from "./context"
 import { createDialog, DIALOG_CSS, type Dialog } from "./dialog"
 import { h, isMobile, parseColor, readableOn } from "./dom"
+import { failed, type FailureMessages } from "./failures"
 import { createI18n, type I18n, type MessageKey } from "./i18n"
 import { createIdentity, type Identity } from "./identity"
 import type { Runtime } from "./mount"
@@ -72,7 +73,7 @@ export interface Ctx {
   failed(
     error: unknown,
     action: MessageKey,
-    overrides?: Record<string, MessageKey>
+    overrides?: FailureMessages
   ): string
   host: HTMLElement
   root: ShadowRoot
@@ -91,6 +92,8 @@ export interface Ctx {
   /** The visitor closes the card: focus goes back to where it was. */
   closeCard(): void
   positionCard(): void
+  /** The page moved: the pins, then the card and the picker that follow them. */
+  layout(): void
   /** Run once the next render has put the new UI in place. */
   afterRender(fn: () => void): void
   render(): void
@@ -157,7 +160,13 @@ export class NuniWidget {
       const done = after
       after = []
       for (const fn of done) fn()
+      layout()
+    }
+
+    const layout = () => {
       ctx.pins.layout()
+      positionCard(ctx)
+      ctx.picker.layout()
     }
 
     const setCard = (next: Card) => {
@@ -174,7 +183,7 @@ export class NuniWidget {
       config,
       runtime,
       api: new NuniApi(config, (code) =>
-        ctx.toast(i18n.failed(code, "failed"))
+        ctx.toast(failed(i18n.t, code, "failed"))
       ),
       i18n,
       t: i18n.t,
@@ -183,7 +192,7 @@ export class NuniWidget {
         return key ? i18n.t(keyed, { key: key.toUpperCase() }) : i18n.t(plain)
       },
       failed: (error, action, overrides) =>
-        i18n.failed(failureCode(error), action, overrides),
+        failed(i18n.t, failureCode(error), action, overrides),
       host,
       root,
       ui,
@@ -204,6 +213,7 @@ export class NuniWidget {
         if (had && !ctx.panel.open) ctx.dialog.restoreFocus()
       },
       positionCard: () => positionCard(ctx),
+      layout,
       afterRender: (fn) => after.push(fn),
       render,
       toast: (message) => ctx.dialog.toast(message),
