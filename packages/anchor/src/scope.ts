@@ -23,7 +23,7 @@ export function scopeDocument(root: ScopeRoot): Document {
 }
 
 /** The <iframe> showing this document, when the parent is same-origin. */
-export function frameElementOf(doc: Document): Element | null {
+function frameElementOf(doc: Document): Element | null {
   try {
     return doc.defaultView?.frameElement ?? null
   } catch {

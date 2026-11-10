@@ -203,7 +203,7 @@ export function rangeText(range: Range): string {
 }
 
 /** A Range over characters [start, end) of the element's text. */
-export function rangeFor(map: TextMap, start: number, end: number): Range {
+function rangeFor(map: TextMap, start: number, end: number): Range {
   const first = map.nodes[map.node[start]!]!
   const last = map.nodes[map.node[end - 1]!]!
   const range = first.ownerDocument.createRange()

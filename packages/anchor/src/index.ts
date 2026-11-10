@@ -23,4 +23,4 @@ export {
   type ScopeStep,
 } from "./scope"
 export { pickTarget } from "./target"
-export { elementText, textSimilarity } from "./text"
+export { elementText } from "./text"

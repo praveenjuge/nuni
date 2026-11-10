@@ -49,8 +49,6 @@ export function createResolveCache(): ResolveCache {
 }
 
 export interface ResolveOptions {
-  /** Elements that must never be matched. */
-  isIgnored?: (el: Element) => boolean
   /** Shared by every anchor resolved over the same DOM. */
   cache?: ResolveCache
 }
@@ -365,15 +363,12 @@ function scoreCandidate(
 function collectCandidates(
   anchor: Anchor,
   root: ScopeRoot,
-  isIgnored: (el: Element) => boolean,
   cache: ResolveCache
 ): { candidates: Set<Element>; pathMatch: Element | null } {
   const doc = scopeDocument(root)
   const candidates = new Set<Element>()
   const ignored = (el: Element) =>
-    el === doc.documentElement ||
-    el.closest(WIDGET_SELECTOR) !== null ||
-    isIgnored(el)
+    el === doc.documentElement || el.closest(WIDGET_SELECTOR) !== null
   const add = (el: Element | null | undefined) => {
     if (el && !ignored(el)) candidates.add(el)
   }
@@ -457,13 +452,13 @@ const RANK: Record<Confidence, number> = { lost: 0, low: 1, high: 2, exact: 3 }
  */
 export function resolveAnchor(
   anchor: Anchor,
-  { isIgnored = () => false, cache = createResolveCache() }: ResolveOptions = {}
+  { cache = createResolveCache() }: ResolveOptions = {}
 ): ResolveResult {
   let root: ScopeRoot = document
   let floor: Confidence = "exact"
   const lost: ResolveResult = { element: null, confidence: "lost", score: 0 }
   for (const step of anchor.scope ?? []) {
-    const host = resolveIn(step.host, root, isIgnored, cache)
+    const host = resolveIn(step.host, root, cache)
     if (!host.element) return lost
     let confidence = host.confidence
     if (step.host.text) {
@@ -484,7 +479,7 @@ export function resolveAnchor(
     if (RANK[confidence] < RANK[floor]) floor = confidence
     root = next
   }
-  const match = resolveIn(anchor, root, isIgnored, cache)
+  const match = resolveIn(anchor, root, cache)
   const result: ResolveResult = {
     element: match.element,
     confidence: match.confidence,
@@ -518,7 +513,6 @@ interface Match {
 function resolveIn(
   anchor: Anchor,
   root: ScopeRoot,
-  isIgnored: (el: Element) => boolean,
   cache: ResolveCache
 ): Match {
   const doc = scopeDocument(root)
@@ -532,12 +526,7 @@ function resolveIn(
     }
   }
 
-  const { candidates, pathMatch } = collectCandidates(
-    anchor,
-    root,
-    isIgnored,
-    cache
-  )
+  const { candidates, pathMatch } = collectCandidates(anchor, root, cache)
   if (!candidates.size) {
     return { element: null, confidence: "lost", score: 0, text: 0, margin: 0 }
   }

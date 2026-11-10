@@ -81,7 +81,7 @@ function looksRandom(token: string): boolean {
   return digits / token.length > 0.2
 }
 
-export function isUtilityClass(name: string): boolean {
+function isUtilityClass(name: string): boolean {
   if (/[[\]:/()%!#@&*,.>+~=]/.test(name)) return true
   if (TAILWIND_EXACT.has(name)) return true
   return TAILWIND_PREFIX.test(name)

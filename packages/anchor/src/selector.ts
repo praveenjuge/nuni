@@ -52,7 +52,7 @@ function tagOf(el: Element): string {
   return el.tagName.toLowerCase()
 }
 
-export function nthOfType(el: Element): number {
+function nthOfType(el: Element): number {
   let index = 1
   let sibling = el.previousElementSibling
   while (sibling) {

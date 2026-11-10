@@ -170,11 +170,7 @@ export interface Box {
  * The element an area comment belongs to: the smallest one that covers the
  * whole box (in viewport coordinates).
  */
-export function areaContainer(
-  doc: Document,
-  box: Box,
-  { isIgnored = () => false }: { isIgnored?: (el: Element) => boolean } = {}
-): Element {
+export function areaContainer(doc: Document, box: Box): Element {
   const right = box.left + box.width
   const bottom = box.top + box.height
   const corners: [number, number][] = [
@@ -183,8 +179,7 @@ export function areaContainer(
     [box.left + 1, bottom - 1],
     [right - 1, bottom - 1],
   ]
-  const ignored = (el: Element) =>
-    isIgnored(el) || el.closest(WIDGET_SELECTOR) !== null
+  const ignored = (el: Element) => el.closest(WIDGET_SELECTOR) !== null
   let common: Element | null = null
   for (const [x, y] of corners) {
     const hit = doc.elementsFromPoint(x, y).find((el) => !ignored(el))

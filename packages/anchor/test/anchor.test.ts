@@ -1,15 +1,10 @@
 import { WIDGET_ATTRIBUTE, WIDGET_SELECTOR } from "@nuni/shared"
 import { beforeEach, describe, expect, it } from "vitest"
 
-import {
-  captureAnchor,
-  elementText,
-  pickTarget,
-  resolveAnchor,
-  textSimilarity,
-} from "../src"
+import { captureAnchor, elementText, pickTarget, resolveAnchor } from "../src"
 import { buildCssSelector, buildPath } from "../src/selector"
 import { isStableClass, isStableId } from "../src/stable"
+import { textSimilarity } from "../src/text"
 
 describe("stability heuristics", () => {
   it.each([
@@ -149,15 +144,12 @@ describe("capture and resolve", () => {
     expect(result.confidence).toBe("lost")
   })
 
-  it("never matches ignored elements", () => {
-    document.body.innerHTML = `<div id="nuni-root"><button>Comment</button></div><button>Comment</button>`
+  it("never matches the widget's own elements", () => {
+    document.body.innerHTML = `<div ${WIDGET_ATTRIBUTE}><button>Comment</button></div><button>Comment</button>`
     const target = document.querySelectorAll("button")[1]!
     const anchor = captureAnchor(target)
     target.remove()
-    const result = resolveAnchor(anchor, {
-      isIgnored: (el) => Boolean(el.closest("#nuni-root")),
-    })
-    expect(result.element).toBeNull()
+    expect(resolveAnchor(anchor).element).toBeNull()
   })
 
   it("stores the click position as a fraction of the element", () => {
