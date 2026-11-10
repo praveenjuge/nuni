@@ -66,39 +66,48 @@ export async function findByToken<T extends HashedTable>(
 
 /**
  * Owner sessions (the widget's owner tools, or `nuni login` for the CLI and
- * MCP server) and commenter sign-ins.
+ * MCP server) and commenter sign-ins. Owner sessions record their `kind`
+ * and the browser or client they were made for.
  */
 const SESSIONS = {
-  owner: { table: "widgetSessions", ttlMs: LIMITS.sessionTtlMs },
-  cli: { table: "widgetSessions", ttlMs: LIMITS.cliSessionTtlMs },
+  owner: {
+    table: "widgetSessions",
+    ttlMs: LIMITS.sessionTtlMs,
+    kind: "widget",
+  },
+  cli: { table: "widgetSessions", ttlMs: LIMITS.cliSessionTtlMs, kind: "cli" },
   commenter: { table: "commenterSessions", ttlMs: LIMITS.sessionTtlMs },
 } as const
 
 type SessionKind = keyof typeof SESSIONS
 
-export async function issueSession(
+/** Only owner sessions record the browser or client they are for. */
+type UserAgentOf<K extends SessionKind> = K extends "commenter"
+  ? { userAgent?: never }
+  : { userAgent?: string }
+
+export async function issueSession<K extends SessionKind>(
   ctx: MutationCtx,
-  kind: SessionKind,
+  kind: K,
   fields: {
     userId: Id<"users">
     projectId: Id<"projects">
     origin: string
-    userAgent?: string
-  }
+  } & UserAgentOf<K>
 ): Promise<{ token: string; expiresAt: number }> {
-  const { table, ttlMs } = SESSIONS[kind]
-  const { token, hash } = await mintToken(table)
-  const expiresAt = Date.now() + ttlMs
-  const row = { tokenHash: hash, expiresAt, ...fields }
-  if (table === "commenterSessions") {
-    await ctx.db.insert(table, row)
+  const session: (typeof SESSIONS)[SessionKind] = SESSIONS[kind]
+  const { token, hash } = await mintToken(session.table)
+  const expiresAt = Date.now() + session.ttlMs
+  const { userId, projectId, origin, userAgent } = fields
+  const row = { tokenHash: hash, expiresAt, userId, projectId, origin }
+  if (session.table === "commenterSessions") {
+    await ctx.db.insert(session.table, row)
   } else {
-    await ctx.db.insert(table, {
+    await ctx.db.insert(session.table, {
       ...row,
-      kind: kind === "cli" ? "cli" : "widget",
+      kind: session.kind,
       userAgent:
-        fields.userAgent &&
-        clampString(fields.userAgent, SERVER_LIMITS.userAgentMaxLength),
+        userAgent && clampString(userAgent, SERVER_LIMITS.userAgentMaxLength),
     })
   }
   return { token, expiresAt }
@@ -110,21 +119,22 @@ const UNKNOWN_ORIGIN = {
   commenter: "Nuni isn't set up on this site",
 }
 
-interface SiteSession {
+type SiteKind = "owner" | "commenter"
+
+type SiteSession<K extends SiteKind> = {
   userId: Id<"users">
   project: Doc<"projects">
   origin: string
-  userAgent?: string
-}
+} & UserAgentOf<K>
 
 /**
  * A session the dashboard hands to the widget on one of the project's sites,
  * or why there can't be one now. The caller has checked who may have it.
  */
-export async function siteSession(
+export async function siteSession<K extends SiteKind>(
   ctx: MutationCtx,
-  kind: "owner" | "commenter",
-  { userId, project, origin, userAgent }: SiteSession
+  kind: K,
+  { userId, project, origin, userAgent }: SiteSession<K>
 ): Promise<{ token: string; expiresAt: number } | { refused: ErrorData }> {
   // The token is postMessage'd to this origin verbatim, so it must be one
   // of the project's registered origins - otherwise a crafted link could
@@ -146,19 +156,17 @@ export async function siteSession(
       },
     }
   }
-  return issueSession(ctx, kind, {
-    userId,
-    projectId: project._id,
-    origin: cleanOrigin,
-    userAgent,
-  })
+  const fields = { userId, projectId: project._id, origin: cleanOrigin }
+  return kind === "commenter"
+    ? issueSession(ctx, "commenter", fields)
+    : issueSession(ctx, "owner", { ...fields, userAgent })
 }
 
 /** `siteSession`, failing when there can't be one. */
-export async function createSiteSession(
+export async function createSiteSession<K extends SiteKind>(
   ctx: MutationCtx,
-  kind: "owner" | "commenter",
-  fields: SiteSession
+  kind: K,
+  fields: SiteSession<K>
 ) {
   const session = await siteSession(ctx, kind, fields)
   if ("refused" in session) {

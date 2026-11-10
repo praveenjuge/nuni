@@ -4,9 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./api": "./convex/_generated/api.js",
-    "./dataModel": "./convex/_generated/dataModel.d.ts",
-    "./server": "./convex/_generated/server.js"
+    "./api": "./convex/_generated/api.js"
   },
   "scripts": {
     "dev": "convex dev",
