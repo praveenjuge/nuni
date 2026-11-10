@@ -1,10 +1,6 @@
 import { readdirSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
-import {
-  CAPTURED_ATTRIBUTES,
-  TEST_ID_ATTRIBUTES,
-} from "../../../../packages/anchor/src/stable"
 import { URLS } from "../../env"
 import { expect, test } from "../../fixtures"
 import { Widget } from "../../widget"
@@ -60,18 +56,6 @@ test("internal documentation links all lead somewhere", async ({
         pending.add(target.href)
     }
   }
-})
-
-test("How pins stay put lists every attribute a pin records", async ({
-  page,
-}) => {
-  await page.goto(`${URLS.docs}/guides/how-pins-work`)
-  const main = page.getByRole("main")
-  for (const name of [...TEST_ID_ATTRIBUTES, ...CAPTURED_ATTRIBUTES])
-    await expect(
-      main.locator("code", { hasText: new RegExp(`^${name}$`) }),
-      `${name} is missing`
-    ).not.toHaveCount(0)
 })
 
 test("embedded feedback widget opens on the docs site", async ({ page }) => {

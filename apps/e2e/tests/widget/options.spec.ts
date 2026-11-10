@@ -22,7 +22,7 @@ test("position, color, theme, label, hotkey and locale options", async ({
 }) => {
   await widget.goto("/", {
     position: "top-left",
-    accent: "#facc15",
+    accentColor: "#facc15",
     theme: "dark",
     label: "Feedback",
     hotkey: "f",

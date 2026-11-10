@@ -53,6 +53,7 @@ Call `init` once, on the client. Calling it again with the same project does not
   </Tab>
   <Tab title="Astro">
     ```astro src/layouts/Layout.astro
+    <!-- In your base layout, before </body> -->
     <script>
       import { init } from "@nuniapp/widget"
       init({ project: "nuni_..." })

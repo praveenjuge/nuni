@@ -55,6 +55,7 @@ export default defineConfig({
     "unclaimed-cap": String(LIMITS.unclaimedCommentCap),
     "images-per-comment": String(LIMITS.imagesPerComment),
     "agent-list-default": String(LIMITS.agentListDefault),
+    "bulk-max": String(LIMITS.bulkMax),
   },
   github: {
     owner: "praveenjuge",

@@ -8,29 +8,44 @@ sidebar:
 ## Set up
 
 ```bash
-{{cli}} init                 # project ID + install steps for this framework
-{{cli}} init --json          # the same as JSON, for agents
-{{cli}} init --id nuni_...   # reuse an existing ID
-{{cli}} prompt               # the ready-made agent prompt
-{{cli}} id                   # just a new project ID
+{{cli}} init [--id <project-id>] [--cwd <dir>]   # project ID + install steps for this framework
+{{cli}} prompt [--id <project-id>]               # the ready-made agent prompt
+{{cli}} id                                       # just a new project ID
 ```
 
-`init` never edits your files. It detects Next.js (App and Pages Router), React with Vite, React Router and Remix, TanStack Start, Gatsby, Vue, Nuxt, Svelte, SvelteKit, Astro, Angular and plain HTML, plus npm, pnpm, yarn and bun.
+`init` never edits your files. It detects Next.js (App and Pages Router), React with Vite, React Router and Remix, TanStack Start, Gatsby, Vue, Nuxt, Svelte, SvelteKit, Astro, Angular and plain HTML, plus npm, pnpm, yarn and bun. Pass `--id nuni_...` to reuse an existing ID.
 
 ## Comments
 
 ```bash
-{{cli}} login                         # approve this terminal in the dashboard
-{{cli}} whoami                        # who you are signed in as
-{{cli}} comments [--status open|resolved] [--page /path] [--limit {{agent-list-default}}]
-                                 [--search "words"] [--group page|element]
-{{cli}} pages                            # pages with open comments
+{{cli}} login                                    # approve this terminal in the dashboard
+{{cli}} whoami                                   # who you are signed in as
+{{cli}} comments [--status open|resolved] [--page /path] [--limit {{agent-list-default}}] [--search "words"] [--group page|element]
+{{cli}} pages                                    # pages with open comments
 {{cli}} comment <id> [--save-screenshot <dir>]
 {{cli}} reply <id> "message"
 {{cli}} resolve <id...> [--note "what changed"]
-{{cli}} reopen <id>
+{{cli}} reopen <id...> [--note "what changed"]
 {{cli}} logout
-{{cli}} mcp                           # MCP server on stdio
+{{cli}} mcp                                      # MCP server on stdio
 ```
 
-These commands work on one project: `--project nuni_...`, then `$NUNI_PROJECT`, then the `nuni_` ID found in your code. `$NUNI_TOKEN` overrides the saved session, for CI. Every command takes `--json`. See [Coding agents](/guides/agents) for the MCP setup.
+`{{cli}} help` lists these, and `{{cli}} help <command>` shows one.
+
+These commands work on one project: `--project nuni_...`, then `$NUNI_PROJECT`, then the `nuni_` ID found in your code. `$NUNI_TOKEN` overrides the saved session, for CI. See [Coding agents](/guides/agents) for the MCP setup.
+
+## JSON output
+
+Add `--json` to any command for machine-readable output on stdout. A few shapes:
+
+| Command                       | `--json` output                                                   |
+| ----------------------------- | ----------------------------------------------------------------- |
+| `id`                          | `{ "projectId": "nuni_..." }`                                     |
+| `prompt`                      | `{ "projectId": "nuni_...", "prompt": "..." }`                    |
+| `resolve <id...>`             | `{ "resolved": [ids], "failed": [{ "id", "code", "error" }] }`    |
+| `reopen <id...>`              | `{ "reopened": [ids], "failed": [{ "id", "code", "error" }] }`    |
+| `logout`                      | `{ "project": "nuni_...", "signedOut": true or false }`           |
+| `--version`, `-v`             | `{ "version": "..." }`                                            |
+| `help`                        | `{ "commands": [{ "name", "usage", "summary" }] }`                |
+
+`resolve` and `reopen` take any number of ids and report each one that failed instead of stopping. With `--json`, an error goes to stderr as `{ "error": { "code": "...", "message": "..." } }`, and the exit code is not 0.
