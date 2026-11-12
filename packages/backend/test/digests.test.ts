@@ -273,6 +273,35 @@ describe("activity emails", () => {
     expect(sent).toHaveLength(0)
   })
 
+  it("splits a very large batch into emails an hour apart", async () => {
+    const t = setup()
+    const sent = stubCloudflare()
+    const { publicId } = await ownedProject(t)
+    const id = await addComment(t, publicId)
+    // One email reads 200 records: 206 are waiting.
+    await t.run(async (ctx) => {
+      const { _id, _creationTime, ...comment } = (await ctx.db.get(id))!
+      for (let n = 0; n < 205; n++) {
+        const commentId = await ctx.db.insert("comments", comment)
+        await ctx.db.insert("emailActivity", {
+          projectId: comment.projectId,
+          kind: "comment",
+          commentId,
+        })
+      }
+    })
+
+    await runCron(t, START + 2 * HOUR)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.subject).toContain("200 new comments")
+    await runCron(t, START + 3 * HOUR)
+    expect(sent).toHaveLength(2)
+    expect(sent[1]!.subject).toContain("6 new comments")
+    expect(await waiting(t)).toEqual([])
+    await runCron(t, START + 2 * DAY)
+    expect(sent).toHaveLength(2)
+  })
+
   it("drops an email Cloudflare won't take", async () => {
     const t = setup()
     stubCloudflare(() => 400)
@@ -338,6 +367,38 @@ describe("email settings", () => {
     expect(
       (await bob.query(api.projects.emailSettings, { publicId }))?.frequency
     ).toBe("daily")
+  })
+})
+
+describe("a change of owner while an email is being written", () => {
+  it("doesn't send the previous owner's activity to the new one", async () => {
+    const t = setup()
+    const sent = stubCloudflare()
+    const { publicId, alice } = await ownedProject(t)
+    await addComment(t, publicId, { body: "For Alice" })
+
+    // The cron has queued the email; the project changes hands before it
+    // is written, and before the old activity is deleted.
+    vi.setSystemTime(START + 2 * HOUR)
+    await t.mutation(internal.digests.sendDue, {})
+    const bob = t.withIdentity({
+      subject: "user_bob",
+      name: "Bob",
+      email: "bob@example.com",
+    })
+    await bob.mutation(internal.users.storeProfile, {})
+    await alice.mutation(api.projects.release, { publicId })
+    await claim(bob, publicId)
+    await t.finishAllScheduledFunctions(vi.runAllTimers)
+    expect(fetch).not.toHaveBeenCalled()
+
+    // Bob still hears about what happens from now on.
+    await addComment(t, publicId, { body: "For Bob" })
+    await runCron(t, START + DAY + 2 * HOUR)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.to.address).toBe("bob@example.com")
+    expect(sent[0]!.text).toContain("For Bob")
+    expect(sent[0]!.text).not.toContain("For Alice")
   })
 })
 

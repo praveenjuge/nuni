@@ -57,8 +57,13 @@ export const SERVER_LIMITS = {
   pinReportBodyMax: 48_000,
   cliLoginBodyMax: 6_000,
 
-  /** Activity read for one email; anything beyond waits for the next one. */
-  emailActivityMax: 1000,
+  /**
+   * Activity read for one email. Each record can mean reading a whole
+   * comment (tens of kilobytes with its page context), so this keeps one
+   * email well inside a transaction's read limit. Anything beyond goes out
+   * in another email an hour later.
+   */
+  emailActivityMax: 200,
   /** Comments shown in one email, and replies shown under each. */
   emailThreadsMax: 25,
   emailRepliesMax: 5,

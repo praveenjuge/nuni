@@ -35,6 +35,12 @@ export default defineSchema({
     emailFrequency: v.optional(emailFrequencyValidator),
     /** When the next email goes out. Set only while activity is waiting. */
     emailDueAt: v.optional(v.number()),
+    /**
+     * Activity noted up to this time was discarded: emails were turned off,
+     * or the owner changed. Rows that old may still be waiting for deletion,
+     * and are never read.
+     */
+    emailCutoff: v.optional(v.number()),
   })
     .index("by_publicId", ["publicId"])
     .index("by_owner", ["ownerId", "lastActivityAt"])

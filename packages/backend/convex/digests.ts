@@ -136,7 +136,22 @@ export async function resetEmails(ctx: MutationCtx, project: Project) {
   await discardActivity(ctx, project._id)
 }
 
-/** Delete what is waiting now; activity noted after this call stays. */
+/** The activity still meant for an email: noted after the last discard. */
+function waitingActivity(ctx: Ctx, project: Project) {
+  return ctx.db
+    .query("emailActivity")
+    .withIndex("by_project", (q) =>
+      q
+        .eq("projectId", project._id)
+        .gt("_creationTime", project.emailCutoff ?? 0)
+    )
+}
+
+/**
+ * Discard what is waiting now; activity noted after this call stays. The
+ * cutoff takes effect in this transaction, so an email already being
+ * written can't pick the old activity up; the rows are deleted afterwards.
+ */
 async function discardActivity(ctx: MutationCtx, projectId: Id<"projects">) {
   const newest = await ctx.db
     .query("emailActivity")
@@ -144,6 +159,7 @@ async function discardActivity(ctx: MutationCtx, projectId: Id<"projects">) {
     .order("desc")
     .first()
   if (!newest) return
+  await ctx.db.patch(projectId, { emailCutoff: newest._creationTime })
   await ctx.scheduler.runAfter(0, internal.digests.discard, {
     projectId,
     through: newest._creationTime,
@@ -235,15 +251,15 @@ function emailBody(body: string) {
 }
 
 /**
- * The waiting activity as an email's content, and the time of the last
- * record it covers. `content` is null when nothing is left to say: every
- * comment was deleted, or a status went back to where it started.
+ * The waiting activity as an email's content, the time of the last record
+ * it covers, and whether `more` is waiting than one email reads. `content`
+ * is null when nothing is left to say: every comment was deleted, or a
+ * status went back to where it started.
  */
 async function pendingDigest(ctx: Ctx, project: Project) {
-  const rows = await ctx.db
-    .query("emailActivity")
-    .withIndex("by_project", (q) => q.eq("projectId", project._id))
-    .take(SERVER_LIMITS.emailActivityMax)
+  const rows = await waitingActivity(ctx, project).take(
+    SERVER_LIMITS.emailActivityMax
+  )
   const last = rows.at(-1)
   if (!last) return null
 
@@ -324,7 +340,11 @@ async function pendingDigest(ctx: Ctx, project: Project) {
         moreThreads,
       }
     : null
-  return { through: last._creationTime, content }
+  return {
+    through: last._creationTime,
+    more: rows.length === SERVER_LIMITS.emailActivityMax,
+    content,
+  }
 }
 
 type DigestContent = NonNullable<
@@ -383,26 +403,37 @@ async function ownerWithEmail(ctx: Ctx, project: Project) {
   return owner?.email ? { ...owner, email: owner.email } : null
 }
 
-/** Delete the activity an email covered; the project is due again only if more is waiting. */
+/**
+ * Delete the activity an email covered. The project stays due only while
+ * something is waiting; when the email couldn't hold everything (`more`),
+ * the rest goes out in an hour instead of a whole period later.
+ */
 async function finishDigest(
   ctx: MutationCtx,
   projectId: Id<"projects">,
-  through: number
+  { through, more }: { through: number; more: boolean }
 ) {
+  const project = await ctx.db.get(projectId)
+  if (!project) return
   const covered = await ctx.db
     .query("emailActivity")
     .withIndex("by_project", (q) =>
-      q.eq("projectId", projectId).lte("_creationTime", through)
+      q
+        .eq("projectId", projectId)
+        .gt("_creationTime", project.emailCutoff ?? 0)
+        .lte("_creationTime", through)
     )
     .collect()
   for (const row of covered) await ctx.db.delete(row._id)
-  const waiting = await ctx.db
-    .query("emailActivity")
-    .withIndex("by_project", (q) => q.eq("projectId", projectId))
-    .first()
-  const project = await ctx.db.get(projectId)
-  if (!waiting && project?.emailDueAt !== undefined) {
-    await ctx.db.patch(projectId, { emailDueAt: undefined })
+  const waiting = await waitingActivity(ctx, project).first()
+  if (!waiting) {
+    if (project.emailDueAt !== undefined) {
+      await ctx.db.patch(projectId, { emailDueAt: undefined })
+    }
+  } else if (more && emailFrequencyOf(project) !== "off") {
+    await ctx.db.patch(projectId, {
+      emailDueAt: nextSendAt("hourly", Date.now()),
+    })
   }
 }
 
@@ -458,12 +489,13 @@ export const prepare = internalMutation({
       return "nothing"
     }
     if (!pending.content) {
-      await finishDigest(ctx, projectId, pending.through)
+      await finishDigest(ctx, projectId, pending)
       return "nothing"
     }
     await ctx.scheduler.runAfter(0, internal.digests.deliver, {
       projectId,
       through: pending.through,
+      more: pending.more,
       ownerId: owner._id,
       email: await composeEmail(ctx, project, owner, pending.content),
       attempt: 0,
@@ -546,6 +578,7 @@ export const deliver = internalAction({
   args: {
     projectId: v.id("projects"),
     through: v.number(),
+    more: v.boolean(),
     ownerId: v.id("users"),
     email: emailValidator,
     attempt: v.number(),
@@ -564,6 +597,7 @@ export const deliver = internalAction({
       await ctx.runMutation(internal.digests.finish, {
         projectId: args.projectId,
         through: args.through,
+        more: args.more,
       })
       return outcome
     }
@@ -582,9 +616,13 @@ export const deliver = internalAction({
 })
 
 export const finish = internalMutation({
-  args: { projectId: v.id("projects"), through: v.number() },
-  handler: (ctx, { projectId, through }) =>
-    finishDigest(ctx, projectId, through),
+  args: {
+    projectId: v.id("projects"),
+    through: v.number(),
+    more: v.boolean(),
+  },
+  handler: (ctx, { projectId, ...covered }) =>
+    finishDigest(ctx, projectId, covered),
 })
 
 /** The project an unsubscribe link is for, while it still works for its owner. */
