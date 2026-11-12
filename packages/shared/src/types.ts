@@ -5,6 +5,7 @@ import type {
   contextValidator,
   pageValidator,
   resolutionValidator,
+  emailFrequencyValidator,
   statusValidator,
   suggestionValidator,
   viewportValidator,
@@ -18,6 +19,7 @@ export type Rect = Anchor["rect"]
 
 export type CommentStatus = Infer<typeof statusValidator>
 export type Resolution = Infer<typeof resolutionValidator>
+export type EmailFrequency = Infer<typeof emailFrequencyValidator>
 export type CommentContext = Infer<typeof contextValidator>
 export type ConsoleEntry = NonNullable<CommentContext["console"]>[number]
 export type NetworkEntry = NonNullable<CommentContext["network"]>[number]

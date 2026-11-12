@@ -1,7 +1,14 @@
 "use client"
 
 import { api } from "@nuni/backend/api"
-import { buildAgentPrompt, DASHBOARD_ROUTES, LIMITS } from "@nuni/shared"
+import {
+  buildAgentPrompt,
+  DASHBOARD_ROUTES,
+  EMAIL_FREQUENCIES,
+  EMAIL_SEND_HOUR_UTC,
+  LIMITS,
+  type EmailFrequency,
+} from "@nuni/shared"
 import { useMutation, useQuery } from "convex/react"
 import type { FunctionReturnType } from "convex/server"
 import {
@@ -31,6 +38,13 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { appUrl } from "@/lib/config"
 import {
@@ -41,13 +55,14 @@ import {
   timeLeft,
 } from "@/lib/format"
 
-/** Name, install details, sites, devices, and handing over or deleting a project. */
+/** Name, install details, sites, emails, devices, and handing over or deleting a project. */
 export function ProjectSettings() {
   const project = useProject()
   return (
     <div className="divide-y">
       <GeneralSection project={project} />
       <SitesSection project={project} />
+      <EmailsSection publicId={project.publicId} />
       <SessionsSection publicId={project.publicId} />
       <TransferSection publicId={project.publicId} />
       <DangerSection project={project} />
@@ -272,6 +287,70 @@ function SitesSection({ project }: { project: OwnedProject }) {
           )
         }}
       />
+    </Section>
+  )
+}
+
+const sendHour = `${String(EMAIL_SEND_HOUR_UTC).padStart(2, "0")}:00 UTC`
+
+/** Each frequency as the menu names it, and when its emails go out. */
+const EMAIL_OPTIONS: Record<EmailFrequency, { label: string; when: string }> = {
+  off: { label: "Off", when: "No emails for this project." },
+  hourly: { label: "Hourly", when: "On the hour." },
+  daily: { label: "Daily", when: `Every day at ${sendHour}.` },
+  weekly: { label: "Weekly", when: `Mondays at ${sendHour}.` },
+}
+
+const EMAIL_ITEMS = EMAIL_FREQUENCIES.map((value) => ({
+  value,
+  label: EMAIL_OPTIONS[value].label,
+}))
+
+function EmailsSection({ publicId }: { publicId: string }) {
+  const settings = useQuery(api.projects.emailSettings, { publicId })
+  const setEmails = useMutation(api.projects.setEmails)
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <Section
+      title="Emails"
+      description="One email with the new comments, replies and status changes since the last. Nothing is sent when nothing happened."
+    >
+      {!settings ? (
+        <Skeleton className="h-14" />
+      ) : (
+        <Field
+          label="Email me"
+          hint={
+            settings.email
+              ? `${EMAIL_OPTIONS[settings.frequency].when} Sent to ${settings.email}.`
+              : "Your account has no email address, so nothing can be sent."
+          }
+        >
+          <Select
+            items={EMAIL_ITEMS}
+            value={settings.frequency}
+            onValueChange={(frequency) => {
+              if (!frequency) return
+              setError(null)
+              setEmails({ publicId, frequency }).catch((err) =>
+                setError(errorMessage(err))
+              )
+            }}
+          >
+            <SelectTrigger aria-label="Email me" className="min-w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {EMAIL_ITEMS.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </Section>
   )
 }

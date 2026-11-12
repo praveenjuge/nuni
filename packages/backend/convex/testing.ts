@@ -3,7 +3,8 @@ import { v } from "convex/values"
 
 import { internalMutation, internalQuery } from "./_generated/server"
 import { userByWorkosId } from "./accounts"
-import { fail, parseOrigin } from "./lib"
+import { previewDigest as preview } from "./digests"
+import { fail, liveProject, parseOrigin } from "./lib"
 import { ensureProject, setOwner } from "./ownership"
 import { issueSession } from "./tokens"
 
@@ -43,6 +44,19 @@ export const seedOwner = internalMutation({
       origin: cleanOrigin,
     })
     return { token }
+  },
+})
+
+/**
+ * The activity email the project's owner would get now, as text, with its
+ * unsubscribe link. Nothing is sent, and what is waiting stays.
+ */
+export const previewDigest = internalMutation({
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    allowTesting()
+    const project = await liveProject(ctx, publicId)
+    return project && preview(ctx, project)
   },
 })
 

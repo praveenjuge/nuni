@@ -17,6 +17,8 @@ export const HTTP_ROUTES = {
   pins: "/widget/pins",
   cliLoginStart: "/cli/login/start",
   cliLoginPoll: "/cli/login/poll",
+  /** `?token=`: where mail clients post a one-click unsubscribe. */
+  unsubscribe: "/email/unsubscribe",
 } as const
 
 /**

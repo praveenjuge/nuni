@@ -15,6 +15,8 @@ For each comment: the text, the author name (as typed), a hash of the commenter'
 
 For owners, and commenters who sign in: the name, email and avatar from GitHub via WorkOS. A signed-in commenter's comments show their GitHub name and avatar; their email is never shown.
 
+An owner's email address is also where Nuni sends the [activity emails](/guides/dashboard#settings) for their projects. These emails include the text of new comments and replies, and are sent through Cloudflare. Commenters are never emailed.
+
 ## Images commenters attach
 
 On a claimed site, a commenter can attach up to {{images-per-comment}} images to a comment: their own (picked or pasted), or the screenshot of the element after drawing boxes, arrows or lines on it. These images are **public, like the comment**: everyone who can see the comment sees them, and the comment box says so. Images are scaled down and re-encoded in the browser before they are sent, which also removes their metadata (such as location). They are deleted with the comment. Turn them off with the [`images` option](/reference/options).

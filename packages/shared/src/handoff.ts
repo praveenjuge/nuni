@@ -19,6 +19,8 @@ export const DASHBOARD_ROUTES = {
   cli: "/cli",
   /** `?token=`: accept a project someone hands over. */
   transfer: "/transfer",
+  /** `?token=`: turn off a project's emails, from a link in one. */
+  unsubscribe: "/unsubscribe",
   /** `?returnTo=`: a path inside the dashboard. */
   signIn: "/sign-in",
   signOut: "/sign-out",
@@ -58,6 +60,8 @@ export const TOKEN_PREFIX = {
   transfer: "nuni_t_",
   /** The secret a `nuni login` polls with. */
   device: "nuni_d_",
+  /** The link in an email that turns the project's emails off. */
+  unsubscribe: "nuni_u_",
 } as const
 
 /**

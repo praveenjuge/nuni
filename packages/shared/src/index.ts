@@ -1,4 +1,5 @@
 export * from "./comment-prompt"
+export * from "./email"
 export * from "./errors"
 export * from "./handoff"
 export * from "./http"

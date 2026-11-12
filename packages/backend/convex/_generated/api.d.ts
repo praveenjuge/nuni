@@ -16,6 +16,8 @@ import type * as commentInput from "../commentInput.js";
 import type * as commenters from "../commenters.js";
 import type * as comments from "../comments.js";
 import type * as crons from "../crons.js";
+import type * as digestEmail from "../digestEmail.js";
+import type * as digests from "../digests.js";
 import type * as http from "../http.js";
 import type * as httpRoutes from "../httpRoutes.js";
 import type * as lib from "../lib.js";
@@ -50,6 +52,8 @@ declare const fullApi: ApiFromModules<{
   commenters: typeof commenters;
   comments: typeof comments;
   crons: typeof crons;
+  digestEmail: typeof digestEmail;
+  digests: typeof digests;
   http: typeof http;
   httpRoutes: typeof httpRoutes;
   lib: typeof lib;
