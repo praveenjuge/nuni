@@ -483,12 +483,12 @@ async function sendEmail(
     console.log(`Email is not set up. Not sent: "${email.subject}"`)
     return "skipped"
   }
-  const headers: Record<string, string> = email.oneClick
+  const headers = email.oneClick
     ? {
         "List-Unsubscribe": `<${email.oneClick}>`,
         "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
       }
-    : {}
+    : undefined
   let response: Response
   try {
     response = await fetch(
@@ -500,8 +500,10 @@ async function sendEmail(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: { email: config.from, name: "Nuni" },
-          to: { email: email.to, name: email.toName },
+          // The REST API names the address `address`; `email` is the
+          // Workers binding's name for it and is rejected here.
+          from: { address: config.from, name: "Nuni" },
+          to: { address: email.to, name: email.toName },
           subject: email.subject,
           text: email.text,
           html: email.html,

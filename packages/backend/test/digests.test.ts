@@ -13,8 +13,8 @@ const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
 
 interface Sent {
-  to: { email: string }
-  from: { email: string; name: string }
+  to: { address: string }
+  from: { address: string; name: string }
   subject: string
   text: string
   html: string
@@ -134,8 +134,11 @@ describe("activity emails", () => {
     await runCron(t, START + 2 * HOUR)
     expect(sent).toHaveLength(1)
     const email = sent[0]!
-    expect(email.to.email).toBe(OWNER_EMAIL)
-    expect(email.from).toEqual({ email: "notify@nuni.test", name: "Nuni" })
+    expect(email.to.address).toBe(OWNER_EMAIL)
+    expect(email.from).toEqual({
+      address: "notify@nuni.test",
+      name: "Nuni",
+    })
     expect(email.subject).toBe("localhost:3000: 2 new comments, 1 reply")
     expect(email.text).toContain("Pricing (/pricing)")
     expect(email.text).toContain("Sam commented\n  Make this bigger")
