@@ -249,6 +249,30 @@ describe("activity emails", () => {
     expect(await waiting(t)).toEqual([])
   })
 
+  it("doesn't retry an email the owner no longer wants", async () => {
+    const t = setup()
+    let status = 500
+    const sent = stubCloudflare(() => status)
+    const { publicId, alice } = await ownedProject(t)
+    await addComment(t, publicId)
+
+    // The first try fails; the owner turns emails off before the retry.
+    vi.setSystemTime(START + 2 * HOUR)
+    await t.mutation(internal.digests.sendDue, {})
+    // Start the email being written, then its first send.
+    for (let step = 0; step < 2; step++) {
+      vi.runOnlyPendingTimers()
+      await t.finishInProgressScheduledFunctions()
+    }
+    expect(fetch).toHaveBeenCalledTimes(1)
+    await alice.mutation(api.projects.setEmails, { publicId, frequency: "off" })
+
+    status = 200
+    await t.finishAllScheduledFunctions(vi.runAllTimers)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(sent).toHaveLength(0)
+  })
+
   it("drops an email Cloudflare won't take", async () => {
     const t = setup()
     stubCloudflare(() => 400)

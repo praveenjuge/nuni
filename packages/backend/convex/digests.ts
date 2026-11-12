@@ -17,6 +17,7 @@ import type { Doc, Id } from "./_generated/dataModel"
 import {
   internalAction,
   internalMutation,
+  internalQuery,
   mutation,
   query,
   type MutationCtx,
@@ -463,6 +464,7 @@ export const prepare = internalMutation({
     await ctx.scheduler.runAfter(0, internal.digests.deliver, {
       projectId,
       through: pending.through,
+      ownerId: owner._id,
       email: await composeEmail(ctx, project, owner, pending.content),
       attempt: 0,
     })
@@ -523,14 +525,40 @@ async function sendEmail(
     : "rejected"
 }
 
+/**
+ * Whether an email written earlier should still go out: the project is
+ * still this owner's, at this address, with emails on. Checked right before
+ * every send, since a retry can come minutes after the email was written.
+ */
+export const stillWanted = internalQuery({
+  args: { projectId: v.id("projects"), ownerId: v.id("users"), to: v.string() },
+  handler: async (ctx, { projectId, ownerId, to }) => {
+    const project = await ctx.db.get(projectId)
+    if (!project || project.deletingAt || project.ownerId !== ownerId) {
+      return false
+    }
+    if (emailFrequencyOf(project) === "off") return false
+    return (await ctx.db.get(ownerId))?.email === to
+  },
+})
+
 export const deliver = internalAction({
   args: {
     projectId: v.id("projects"),
     through: v.number(),
+    ownerId: v.id("users"),
     email: emailValidator,
     attempt: v.number(),
   },
   handler: async (ctx, args) => {
+    const wanted = await ctx.runQuery(internal.digests.stillWanted, {
+      projectId: args.projectId,
+      ownerId: args.ownerId,
+      to: args.email.to,
+    })
+    // Turned off, handed over or deleted since it was written: what was
+    // waiting is already gone, or goes to the owner's new address next time.
+    if (!wanted) return "cancelled"
     const outcome = await sendEmail(args.email)
     if (outcome !== "retry") {
       await ctx.runMutation(internal.digests.finish, {
