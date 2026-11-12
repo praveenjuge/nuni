@@ -4,6 +4,7 @@ import { v } from "convex/values"
 import {
   anchorValidator,
   contextValidator,
+  emailFrequencyValidator,
   pageValidator,
   resolutionValidator,
   statusValidator,
@@ -30,9 +31,20 @@ export default defineSchema({
     lastActivityAt: v.number(),
     /** Set while the owner's delete runs; the project takes no new comments. */
     deletingAt: v.optional(v.number()),
+    /** How often the owner is emailed about activity. Unset means daily. */
+    emailFrequency: v.optional(emailFrequencyValidator),
+    /** When the next email goes out. Set only while activity is waiting. */
+    emailDueAt: v.optional(v.number()),
+    /**
+     * Activity noted up to this time was discarded: emails were turned off,
+     * or the owner changed. Rows that old may still be waiting for deletion,
+     * and are never read.
+     */
+    emailCutoff: v.optional(v.number()),
   })
     .index("by_publicId", ["publicId"])
-    .index("by_owner", ["ownerId", "lastActivityAt"]),
+    .index("by_owner", ["ownerId", "lastActivityAt"])
+    .index("by_emailDue", ["emailDueAt"]),
 
   comments: defineTable({
     projectId: v.id("projects"),
@@ -200,6 +212,37 @@ export default defineSchema({
   transfers: defineTable({
     projectId: v.id("projects"),
     fromUserId: v.id("users"),
+    tokenHash: v.string(),
+    expiresAt: v.number(),
+  })
+    .index("by_tokenHash", ["tokenHash"])
+    .index("by_project", ["projectId"])
+    .index("by_expires", ["expiresAt"]),
+
+  /**
+   * Activity waiting for the owner's next email: a new comment, a reply, or
+   * a comment that was resolved or reopened. Deleted once the email is sent.
+   */
+  emailActivity: defineTable({
+    projectId: v.id("projects"),
+    kind: v.union(
+      v.literal("comment"),
+      v.literal("reply"),
+      v.literal("resolved"),
+      v.literal("reopened")
+    ),
+    commentId: v.id("comments"),
+    replyId: v.optional(v.id("replies")),
+  }).index("by_project", ["projectId"]),
+
+  /**
+   * The link in an email that turns the project's emails off without
+   * signing in. Only the token's hash is stored. Works for the owner the
+   * email was sent to.
+   */
+  emailUnsubscribes: defineTable({
+    projectId: v.id("projects"),
+    userId: v.id("users"),
     tokenHash: v.string(),
     expiresAt: v.number(),
   })

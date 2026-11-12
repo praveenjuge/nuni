@@ -64,6 +64,15 @@ Playwright uses its own Chromium. To use a preinstalled one: `CHROMIUM_PATH=/pat
 
 ## Deploy and release
 
+Activity emails to project owners go out through [Cloudflare Email Sending](https://developers.cloudflare.com/email-service/). Until these are set on the Convex deployment, nothing is sent:
+
+```bash
+npx convex env set CLOUDFLARE_ACCOUNT_ID <account id>
+npx convex env set CLOUDFLARE_EMAIL_API_TOKEN <token with Email Sending: Edit>
+npx convex env set NUNI_EMAIL_FROM notifications@<a domain onboarded to Email Sending>
+npx convex env set NUNI_APP_URL https://nuni.praveenjuge.com
+```
+
 To release the public packages (the workspaces named in `PACKAGES` in `packages/shared/src/prompt.ts`), increase the root `package.json` version and merge to `main`. [The release workflow](./.github/workflows/release.yml) builds and publishes them.
 
 ### Checking a release

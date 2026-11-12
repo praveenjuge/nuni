@@ -10,4 +10,11 @@ crons.daily(
   internal.tokens.cleanupExpired
 )
 
+// On the hour, which is when hourly, daily and weekly emails are all due.
+crons.hourly(
+  "send activity emails that are due",
+  { minuteUTC: 0 },
+  internal.digests.sendDue
+)
+
 export default crons

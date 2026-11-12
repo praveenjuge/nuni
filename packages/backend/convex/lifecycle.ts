@@ -5,6 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx } from "./_generated/server"
 import { nameOf } from "./accounts"
 import { ownerAuthorKey } from "./authors"
+import { recordActivity } from "./digests"
 import { cleanBody, cleanName, fail } from "./lib"
 import { SERVER_LIMITS } from "./limits"
 
@@ -13,7 +14,8 @@ import { SERVER_LIMITS } from "./limits"
  * comment or a reply. The numbers derived from them are only written here:
  * the project's `commentCount`/`openCount`/`lastActivityAt`, the per-page
  * `pageStats.openCount`, each comment's `searchText`, and its thread's
- * `replyCount`/`reactionCount`.
+ * `replyCount`/`reactionCount`. New comments, replies and status changes
+ * are also noted here for the owner's next email.
  */
 
 type Comment = Doc<"comments">
@@ -99,6 +101,12 @@ export async function insertComment(ctx: MutationCtx, fields: NewComment) {
   await applyCounts(ctx, fields.projectId, [
     { path: fields.page.path, from: null, to: "open" },
   ])
+  await recordActivity(
+    ctx,
+    fields.projectId,
+    { kind: "comment", commentId: id },
+    fields.authorId
+  )
   return id
 }
 
@@ -157,6 +165,10 @@ export async function setStatus(
     const list = changes.get(comment.projectId) ?? []
     list.push({ path: comment.page.path, from: comment.status, to: status })
     changes.set(comment.projectId, list)
+    await recordActivity(ctx, comment.projectId, {
+      kind: resolved ? "resolved" : "reopened",
+      commentId: comment._id,
+    })
   }
   let changed = 0
   for (const [projectId, list] of changes) {
@@ -250,6 +262,12 @@ export async function insertReply(
   })
   await adjustThread(ctx, comment._id, { replies: 1 })
   await ctx.db.patch(comment.projectId, { lastActivityAt: now })
+  await recordActivity(
+    ctx,
+    comment.projectId,
+    { kind: "reply", commentId: comment._id, replyId: id },
+    fields.ownerId ?? fields.authorId
+  )
   return id
 }
 

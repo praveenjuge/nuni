@@ -23,6 +23,7 @@ const TOKENS = {
   commenterSessions: { prefix: TOKEN_PREFIX.commenter, length: 40 },
   transfers: { prefix: TOKEN_PREFIX.transfer, length: 32 },
   cliLogins: { prefix: TOKEN_PREFIX.device, length: 40 },
+  emailUnsubscribes: { prefix: TOKEN_PREFIX.unsubscribe, length: 32 },
 } as const
 
 type TokenTable = keyof typeof TOKENS

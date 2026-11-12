@@ -3,6 +3,7 @@ import { httpRouter } from "convex/server"
 import { authKit } from "./auth"
 import { cliLoginRoutes } from "./cliAuth"
 import { commentRoutes } from "./comments"
+import { emailRoutes } from "./digests"
 import { pinRoutes } from "./pins"
 import { replyRoutes } from "./replies"
 import { uploadRoutes } from "./uploads"
@@ -16,5 +17,6 @@ replyRoutes(http)
 pinRoutes(http)
 uploadRoutes(http)
 cliLoginRoutes(http)
+emailRoutes(http)
 
 export default http

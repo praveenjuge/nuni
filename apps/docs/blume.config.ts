@@ -5,6 +5,7 @@ import {
   CLI_NPX,
   DASHBOARD_ROUTES,
   DOCS_URL,
+  EMAIL_SEND_HOUR_UTC,
   LIMITS,
   MCP_ADD_COMMAND,
   PACKAGES,
@@ -56,6 +57,7 @@ export default defineConfig({
     "images-per-comment": String(LIMITS.imagesPerComment),
     "agent-list-default": String(LIMITS.agentListDefault),
     "bulk-max": String(LIMITS.bulkMax),
+    "email-send-time": `${String(EMAIL_SEND_HOUR_UTC).padStart(2, "0")}:00 UTC`,
   },
   github: {
     owner: "praveenjuge",

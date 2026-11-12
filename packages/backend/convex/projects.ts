@@ -1,10 +1,12 @@
 import { LIMITS } from "@nuni/shared"
+import { emailFrequencyValidator } from "@nuni/shared/validators"
 import { v } from "convex/values"
 
 import { internal } from "./_generated/api"
 import type { Doc } from "./_generated/dataModel"
 import { internalMutation, mutation, query } from "./_generated/server"
 import { currentUser } from "./accounts"
+import { emailFrequencyOf, setEmailFrequency } from "./digests"
 import { deleteCommentRows } from "./lifecycle"
 import { assertProjectId, fail, parseOrigin, projectByPublicId } from "./lib"
 import { SERVER_LIMITS } from "./limits"
@@ -156,6 +158,28 @@ export const rename = mutation({
   },
 })
 
+/** How often the owner is emailed about this project, and where. */
+export const emailSettings = query({
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    const project = await dashboardProject(ctx, publicId)
+    if (!project?.ownerId) return null
+    const owner = await ctx.db.get(project.ownerId)
+    return {
+      frequency: emailFrequencyOf(project),
+      email: owner?.email ?? null,
+    }
+  },
+})
+
+export const setEmails = mutation({
+  args: { publicId: v.string(), frequency: emailFrequencyValidator },
+  handler: async (ctx, { publicId, frequency }) => {
+    const { project } = await requireDashboardProject(ctx, publicId)
+    await setEmailFrequency(ctx, project, frequency)
+  },
+})
+
 /**
  * Give the project up: it becomes unclaimed again, so anyone can claim it
  * from the widget. Comments stay; every owner session is signed out.
@@ -226,6 +250,14 @@ export const deleteBatch = internalMutation({
         .take(SERVER_LIMITS.deleteBatch),
       ctx.db
         .query("claims")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .take(SERVER_LIMITS.deleteBatch),
+      ctx.db
+        .query("emailActivity")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .take(SERVER_LIMITS.deleteBatch),
+      ctx.db
+        .query("emailUnsubscribes")
         .withIndex("by_project", (q) => q.eq("projectId", projectId))
         .take(SERVER_LIMITS.deleteBatch),
       // A CLI sign-in waiting for approval must not carry over to a new

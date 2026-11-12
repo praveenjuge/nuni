@@ -130,6 +130,13 @@ export const contextValidator = v.object({
 
 export const statusValidator = v.union(v.literal("open"), v.literal("resolved"))
 
+export const emailFrequencyValidator = v.union(
+  v.literal("off"),
+  v.literal("hourly"),
+  v.literal("daily"),
+  v.literal("weekly")
+)
+
 /** Why a comment was resolved without a change: its element is gone. */
 export const resolutionValidator = v.literal("outdated")
 

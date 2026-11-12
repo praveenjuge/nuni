@@ -57,6 +57,25 @@ export const SERVER_LIMITS = {
   pinReportBodyMax: 48_000,
   cliLoginBodyMax: 6_000,
 
+  /**
+   * Activity read for one email. Each record can mean reading a whole
+   * comment (tens of kilobytes with its page context), so this keeps one
+   * email well inside a transaction's read limit. Anything beyond goes out
+   * in another email an hour later.
+   */
+  emailActivityMax: 200,
+  /** Comments shown in one email, and replies shown under each. */
+  emailThreadsMax: 25,
+  emailRepliesMax: 5,
+  /** Comment and reply text shown in an email before it is cut off. */
+  emailBodyMaxLength: 600,
+  /** Projects whose emails one run of the hourly cron starts. */
+  emailProjectsBatch: 50,
+  /** How long the unsubscribe link in an email works. */
+  unsubscribeTtlMs: 90 * 24 * 60 * 60 * 1000,
+  /** Waits before sending an email again after a failure that may pass. */
+  emailRetryDelaysMs: [30_000, 5 * 60_000],
+
   /** Guest comments, replies and reactions moved to an account at sign-in. */
   linkBrowserMax: 200,
   /** Rows a daily cleanup or a project delete handles per transaction. */

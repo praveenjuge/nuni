@@ -1,6 +1,7 @@
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx } from "./_generated/server"
 import { currentUser } from "./accounts"
+import { resetEmails } from "./digests"
 import { assertProjectId, fail, projectByPublicId, type Ctx } from "./lib"
 import { SERVER_LIMITS } from "./limits"
 import { findByToken } from "./tokens"
@@ -78,7 +79,7 @@ export async function clearTransfers(
 /**
  * Every change of owner: a claim, a transfer, a release (`null`), or the
  * owner's account being deleted. The previous owner's sessions and transfer
- * links stop working.
+ * links stop working, and their email settings don't carry over.
  */
 export async function setOwner(
   ctx: MutationCtx,
@@ -102,6 +103,7 @@ export async function setOwner(
   }
   await revokeSessions(ctx, project._id)
   await clearTransfers(ctx, project._id)
+  await resetEmails(ctx, project)
 }
 
 /** First come, first served: the user claims the project unless someone else owns it. */
