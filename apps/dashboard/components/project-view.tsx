@@ -11,6 +11,7 @@ import {
   MessageSquareIcon,
   SearchIcon,
   TrashIcon,
+  UserIcon,
   XIcon,
 } from "vadivam-react"
 import { useMemo, useState, type KeyboardEvent } from "react"
@@ -104,7 +105,12 @@ const VIEWS: Record<
 
 const PAGE_SIZE = 50
 
-type Filters = { path?: string; origin?: string; search?: string }
+type Filters = {
+  path?: string
+  origin?: string
+  search?: string
+  author?: string
+}
 
 export function ProjectView() {
   const project = useProject()
@@ -115,10 +121,25 @@ export function ProjectView() {
   const [query, setQuery] = useState("")
   const [pageInput, setPageInput] = useState("")
   const [origin, setOrigin] = useState("")
+  const [author, setAuthor] = useState("")
   const search = useDebounced(query.trim(), 250)
   const path = useDebounced(pageInput.trim(), 250)
   const pages = useMemo(() => [...(choices?.paths ?? [])].sort(), [choices])
   const origins = useMemo(() => [...project.origins].sort(), [project.origins])
+  const people = useMemo(
+    () =>
+      [...(choices?.people ?? [])].sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" })
+      ),
+    [choices]
+  )
+  // Labels for the picker, which shows the chosen one's while closed.
+  const personItems = [
+    { value: "all", label: "Everyone" },
+    ...(author && !people.includes(author) ? [author] : [])
+      .concat(people)
+      .map((name) => ({ value: name, label: name })),
+  ]
 
   const counts: Record<View, number> = {
     open: project.openCount,
@@ -132,6 +153,7 @@ export function ProjectView() {
     ...(path ? { path } : {}),
     ...(origin ? { origin } : {}),
     ...(search ? { search } : {}),
+    ...(author ? { author } : {}),
   }
 
   return (
@@ -183,6 +205,27 @@ export function ProjectView() {
               <option key={p} value={p} />
             ))}
           </datalist>
+          {(people.length > 1 || author) && (
+            <Select
+              items={personItems}
+              value={author || "all"}
+              onValueChange={(value) =>
+                setAuthor(value === "all" ? "" : (value ?? ""))
+              }
+            >
+              <SelectTrigger aria-label="Filter by person" className="max-w-48">
+                <UserIcon className="text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {personItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           {origins.length > 1 && (
             <Select
               value={origin || "all"}
@@ -206,17 +249,18 @@ export function ProjectView() {
         </div>
       </div>
       <CommentList
-        key={`${view}|${path}|${origin}|${search}`}
+        key={`${view}|${path}|${origin}|${search}|${author}`}
         publicId={publicId}
         view={view}
         filters={filters}
         showSite={origins.length > 1}
         onClearFilters={
-          pageInput || origin || query
+          pageInput || origin || query || author
             ? () => {
                 setQuery("")
                 setPageInput("")
                 setOrigin("")
+                setAuthor("")
               }
             : undefined
         }
@@ -264,7 +308,7 @@ function CommentList({
     const empty = onClearFilters
       ? {
           title: "No comments match",
-          description: "Try another search, page or site.",
+          description: "Try another search, page, person or site.",
         }
       : VIEWS[view].empty
     return (

@@ -100,6 +100,13 @@ export default defineSchema({
     ])
     .index("by_project_status", ["projectId", "status", "createdAt"])
     .index("by_project_author", ["projectId", "authorKeyHash", "createdAt"])
+    /** The dashboard's person filter, and the names it offers. */
+    .index("by_project_name_status", [
+      "projectId",
+      "authorName",
+      "status",
+      "createdAt",
+    ])
     .index("by_project_status_lost", ["projectId", "status", "pinLostAt"])
     .searchIndex("search_text", {
       searchField: "searchText",

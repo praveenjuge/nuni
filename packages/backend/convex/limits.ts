@@ -22,6 +22,8 @@ export const SERVER_LIMITS = {
   pagesListMax: 200,
   /** Pages offered as dashboard filters. */
   pageFiltersMax: 1000,
+  /** Author names offered as dashboard filters. */
+  peopleFiltersMax: 500,
   /** Projects listed for one owner. */
   projectsListMax: 200,
   /** Replies kept per comment thread. */

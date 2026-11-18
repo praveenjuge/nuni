@@ -765,6 +765,37 @@ describe("claiming and owner actions", () => {
     expect(filters.paths.sort()).toEqual(["/about", "/pricing"])
   })
 
+  it("filters the owner list by author and offers every author's name", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    for (const authorName of ["Sam", "Yogesh", "Sam", "Ada"]) {
+      await addComment(t, publicId, { authorName })
+    }
+    await addComment(t, publicId, { authorName: "Yogesh", path: "/about" })
+    const alice = await signIn(t, "user_alice", "Alice")
+    await claim(alice, publicId)
+    const list = (args: Record<string, string>) =>
+      alice.query(api.comments.listForOwner, {
+        publicId,
+        view: "open",
+        paginationOpts: { numItems: 10, cursor: null },
+        ...args,
+      })
+    const yogesh = (await list({ author: "Yogesh" })).page
+    expect(yogesh.map((c) => c.authorName)).toEqual(["Yogesh", "Yogesh"])
+    expect(
+      (await list({ author: "Yogesh", path: "/about" })).page
+    ).toHaveLength(1)
+    expect(
+      (await list({ author: "Yogesh", search: "bigger" })).page
+    ).toHaveLength(2)
+    expect((await list({ author: "Nobody" })).page).toHaveLength(0)
+    await alice.mutation(api.comments.resolve, { id: yogesh[0]!._id })
+    expect((await list({ author: "Yogesh" })).page).toHaveLength(1)
+    const filters = await alice.query(api.comments.ownerFilters, { publicId })
+    expect(filters.people).toEqual(["Ada", "Sam", "Yogesh"])
+  })
+
   it("searches by author name as well as body", async () => {
     const t = setup()
     const { publicId, alice } = await ownedProject(t)

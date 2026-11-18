@@ -123,6 +123,41 @@ test("triage comments: reply, undo, bulk resolve and delete", async ({
   await expect(ownerPage.getByText(second, { exact: true })).toHaveCount(0)
 })
 
+test("filter the inbox by the person who commented", async ({
+  widget,
+  newVisitor,
+  ownerPage,
+  projectId,
+}) => {
+  const mine = `Visitor note ${projectId}`
+  const theirs = `Ada note ${projectId}`
+  await addComment(widget, mine)
+  await widget.comment(choosePlan(widget.page, 1), `Second ${mine}`)
+  const ada = await newVisitor()
+  await ada.goto("/pricing")
+  await ada.comment(choosePlan(ada.page, 2), theirs, { name: "Ada Lovelace" })
+  await claimProject(ownerPage, projectId)
+  await ownerPage.goto(projectPage(projectId))
+  const open = ownerPage.getByRole("list", { name: "Open comments" })
+  await expect(open.getByRole("listitem")).toHaveCount(3)
+
+  const person = ownerPage.getByRole("combobox", { name: "Filter by person" })
+  await person.click()
+  await ownerPage.getByRole("option", { name: "Ada Lovelace" }).click()
+  await expect(person).toContainText("Ada Lovelace")
+  await expect(open.getByRole("listitem")).toHaveCount(1)
+  await expect(open.getByText(theirs, { exact: true })).toBeVisible()
+
+  // With search too, nothing matches; clearing brings everyone back.
+  await ownerPage
+    .getByRole("textbox", { name: "Search comments" })
+    .fill("Visitor")
+  await expect(ownerPage.getByText("No comments match")).toBeVisible()
+  await ownerPage.getByRole("button", { name: "Clear filters" }).click()
+  await expect(person).toContainText("Everyone")
+  await expect(open.getByRole("listitem")).toHaveCount(3)
+})
+
 test("rename, add and remove a site, and delete a project", async ({
   ownerPage,
   projectId,
