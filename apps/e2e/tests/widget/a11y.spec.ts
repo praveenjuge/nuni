@@ -65,8 +65,10 @@ test("keyboard only: pick, post, confirm, tabs and focus return", async ({
   await page.keyboard.press("ArrowLeft")
   await expect(openTab).toHaveAttribute("aria-selected", "true")
 
-  // Open the comment from the list, then delete it: an in-widget dialog
-  // asks first, and Escape keeps the comment.
+  // Tab moves on to the search, then the list. Open the comment, then
+  // delete it: an in-widget dialog asks first, and Escape keeps the comment.
+  await page.keyboard.press("Tab")
+  await expect(widget.search).toBeFocused()
   await page.keyboard.press("Tab")
   await page.keyboard.press("Enter")
   await expect(widget.thread).toContainText("Keyboard comment")

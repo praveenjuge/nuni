@@ -398,7 +398,7 @@ export const bulkRemove = mutation({
 
 /**
  * Comments for the owner's lists (dashboard and agents): newest first, or by
- * relevance when searching, then narrowed by page and environment.
+ * relevance when searching, then narrowed by page, environment and author.
  */
 function ownerComments(
   ctx: QueryCtx,
@@ -408,11 +408,14 @@ function ownerComments(
     path?: string
     origin?: string
     search?: string
+    /** The author's name as written on the comment. */
+    author?: string
     /** Only comments whose element visitors' widgets can't find. */
     lost?: boolean
   }
 ) {
   const search = args.search?.trim()
+  const author = args.author?.trim()
   const base = search
     ? ctx.db
         .query("comments")
@@ -422,30 +425,62 @@ function ownerComments(
             .eq("projectId", projectId)
             .eq("status", args.status)
         )
-    : args.lost
+    : author
       ? ctx.db
           .query("comments")
-          .withIndex("by_project_status_lost", (q) =>
+          .withIndex("by_project_name_status", (q) =>
             q
               .eq("projectId", projectId)
+              .eq("authorName", author)
               .eq("status", args.status)
-              .gt("pinLostAt", 0)
           )
           .order("desc")
-      : ctx.db
-          .query("comments")
-          .withIndex("by_project_status", (q) =>
-            q.eq("projectId", projectId).eq("status", args.status)
-          )
-          .order("desc")
+      : args.lost
+        ? ctx.db
+            .query("comments")
+            .withIndex("by_project_status_lost", (q) =>
+              q
+                .eq("projectId", projectId)
+                .eq("status", args.status)
+                .gt("pinLostAt", 0)
+            )
+            .order("desc")
+        : ctx.db
+            .query("comments")
+            .withIndex("by_project_status", (q) =>
+              q.eq("projectId", projectId).eq("status", args.status)
+            )
+            .order("desc")
   return base.filter((q) =>
     q.and(
       args.path ? q.eq(q.field("page.path"), pageKey(args.path)) : true,
       args.origin ? q.eq(q.field("page.origin"), args.origin) : true,
-      // The search index can't filter by `pinLostAt`.
-      args.lost && search ? q.gt(q.field("pinLostAt"), 0) : true
+      // Already covered by the index chosen above, except when searching.
+      author ? q.eq(q.field("authorName"), author) : true,
+      args.lost ? q.gt(q.field("pinLostAt"), 0) : true
     )
   )
+}
+
+/**
+ * Every author name on the project's comments, one index read per name
+ * (each read skips past all of the previous name's comments).
+ */
+async function authorNames(ctx: QueryCtx, projectId: Id<"projects">) {
+  const names: string[] = []
+  let last = ""
+  while (names.length < SERVER_LIMITS.peopleFiltersMax) {
+    const next = await ctx.db
+      .query("comments")
+      .withIndex("by_project_name_status", (q) =>
+        q.eq("projectId", projectId).gt("authorName", last)
+      )
+      .first()
+    if (!next) break
+    names.push(next.authorName)
+    last = next.authorName
+  }
+  return names
 }
 
 /** The dashboard's inbox tabs. */
@@ -464,6 +499,7 @@ export const listForOwner = query({
     path: v.optional(v.string()),
     origin: v.optional(v.string()),
     search: v.optional(v.string()),
+    author: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, { view, ...args }) => {
@@ -497,17 +533,23 @@ export const lostCount = query({
   },
 })
 
-/** Page filter choices for the dashboard: every page with comments. */
+/**
+ * Filter choices for the dashboard: every page with comments, and the name
+ * of everyone who left one.
+ */
 export const ownerFilters = query({
   args: { publicId: v.string() },
   handler: async (ctx, { publicId }) => {
     const project = await dashboardProject(ctx, publicId)
-    if (!project) return { paths: [] }
+    if (!project) return { paths: [], people: [] }
     const stats = await ctx.db
       .query("pageStats")
       .withIndex("by_project_path", (q) => q.eq("projectId", project._id))
       .take(SERVER_LIMITS.pageFiltersMax)
-    return { paths: stats.map((p) => p.path) }
+    return {
+      paths: stats.map((p) => p.path),
+      people: await authorNames(ctx, project._id),
+    }
   },
 })
 

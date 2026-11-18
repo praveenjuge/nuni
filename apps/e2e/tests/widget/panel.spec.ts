@@ -48,6 +48,77 @@ test("the panel marks the comment opened last and searches comments", async ({
   await expect(widget.panel).toHaveCount(0)
 })
 
+test("the panel filters by person, counts what matches, and clears the filters", async ({
+  widget,
+  newVisitor,
+}) => {
+  const stamp = Date.now()
+  await widget.goto("/")
+  await widget.comment(widget.page.locator(".lead"), `Home note ${stamp}`, {
+    name: "Yogesh S",
+  })
+  await widget.goto("/pricing")
+  await widget.comment(price(widget, 0), `Starter note ${stamp}`)
+  await widget.comment(price(widget, 1), `Pro note ${stamp}`)
+  const ada = await newVisitor()
+  await ada.goto("/pricing")
+  await ada.comment(price(ada, 2), `Enterprise note ${stamp}`, {
+    name: "Ada Lovelace",
+  })
+
+  await widget.reload()
+  await widget.openPanel()
+  await expect(widget.tab("Open (4)")).toBeVisible()
+  await expect(widget.person.locator("option")).toHaveText([
+    "Everyone",
+    "Ada Lovelace",
+    "Yogesh S",
+  ])
+
+  // One person's comments, here and on other pages; the counts follow.
+  await widget.person.selectOption("Yogesh S")
+  await expect(widget.items).toHaveCount(3)
+  await expect(widget.tab("Open (3)")).toBeVisible()
+  await expect(widget.items.filter({ hasText: "Ada Lovelace" })).toHaveCount(0)
+  await widget.person.selectOption("Ada Lovelace")
+  await expect(widget.items).toHaveCount(1)
+  await expect(widget.items).toContainText(`Enterprise note ${stamp}`)
+  await expect(widget.tab("Open (1)")).toBeVisible()
+
+  // Search narrows it further; nothing left offers to clear both.
+  await widget.search.fill("starter")
+  await expect(widget.items).toHaveCount(0)
+  await expect(widget.panel).toContainText("No comments match these filters.")
+  await widget.panel.getByRole("button", { name: "Clear filters" }).click()
+  await expect(widget.items).toHaveCount(4)
+  await expect(widget.search).toHaveValue("")
+  await expect(widget.search).toBeFocused()
+  await expect(widget.person).toHaveValue("")
+
+  // The search's own clear button empties it and keeps focus there.
+  await widget.search.fill("note")
+  await widget.panel.getByRole("button", { name: "Clear search" }).click()
+  await expect(widget.search).toHaveValue("")
+  await expect(widget.search).toBeFocused()
+
+  // Escape clears the search, then the person, then closes.
+  await widget.person.selectOption("Ada Lovelace")
+  await widget.search.fill("note")
+  await widget.page.keyboard.press("Escape")
+  await expect(widget.search).toHaveValue("")
+  await expect(widget.person).toHaveValue("Ada Lovelace")
+  await widget.page.keyboard.press("Escape")
+  await expect(widget.person).toHaveValue("")
+  await expect(widget.items).toHaveCount(4)
+  await widget.page.keyboard.press("Escape")
+  await expect(widget.panel).toHaveCount(0)
+
+  // Yours are all your own, so there is no one to pick there.
+  await widget.openPanel()
+  await widget.tab("Yours (3)").click()
+  await expect(widget.person).toHaveCount(0)
+})
+
 test("Yours lists your comments on every page and opens them", async ({
   widget,
   newVisitor,

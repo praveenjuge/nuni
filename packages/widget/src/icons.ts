@@ -1,6 +1,7 @@
 import arrowUp from "vadivam/strings/arrow-up"
 import bot from "vadivam/strings/bot"
 import check from "vadivam/strings/check"
+import chevronDown from "vadivam/strings/chevron-down"
 import eye from "vadivam/strings/eye"
 import eyeOff from "vadivam/strings/eye-off"
 import smile from "vadivam/strings/face-slightly-smiling"
@@ -25,6 +26,7 @@ export const ICONS = {
   eyeOff,
   close,
   check,
+  chevronDown,
   trash,
   edit,
   bot,

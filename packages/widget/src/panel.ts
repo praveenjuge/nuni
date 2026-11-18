@@ -39,6 +39,8 @@ export function createPanel(ctx: Ctx) {
   let tab: Tab = "open"
   /** What the search box filters by. */
   let search = ""
+  /** Only this author's comments, by the name shown; empty for everyone. */
+  let person = ""
   /** The visitor's own comments on every page. */
   let mine: WidgetComment[] | null = null
   /** Comments on every page, grouped by page. */
@@ -60,7 +62,7 @@ export function createPanel(ctx: Ctx) {
           ?.scrollIntoView({ block: "nearest" })
       )
       if (isMobile()) ctx.setCard(null)
-    } else search = ""
+    } else clearFilters()
     ctx.render()
     if (!on && !ctx.card) ctx.dialog.restoreFocus()
   }
@@ -70,12 +72,20 @@ export function createPanel(ctx: Ctx) {
     ctx.render()
   }
 
+  function clearFilters() {
+    search = ""
+    person = ""
+  }
+
   const render = () => {
     const { page } = ctx
     const query = search.trim().toLocaleLowerCase()
+    // Yours are all the visitor's own, so only the search applies there.
+    const byPerson = tab === "mine" ? "" : person
+    const filtering = Boolean(query || byPerson)
     const hit = (...texts: (string | undefined)[]) =>
       !query || texts.some((text) => text?.toLocaleLowerCase().includes(query))
-    const found = (c: WidgetComment) =>
+    const matches = (c: WidgetComment) =>
       hit(
         c.body,
         c.authorName,
@@ -83,12 +93,15 @@ export function createPanel(ctx: Ctx) {
         c.suggestion?.after,
         c.page.path
       )
+    const found = (c: WidgetComment) =>
+      matches(c) && (!person || c.authorName === person)
     const status = tab === "resolved" ? "resolved" : "open"
     const here = (s: WidgetComment["status"]) =>
       page.comments.filter((c) => c.status === s)
     const elsewhere = (s: WidgetComment["status"]) =>
       (site ?? []).filter((c) => c.page.path !== page.key && c.status === s)
-    const list = (tab === "mine" ? (mine ?? []) : here(status)).filter(found)
+    const list =
+      tab === "mine" ? (mine ?? []).filter(matches) : here(status).filter(found)
     const placed = list.filter((c) => ctx.pins.found(c._id))
     const lost = list.filter((c) => !ctx.pins.found(c._id))
     const groups = new Map<string, WidgetComment[]>()
@@ -96,10 +109,22 @@ export function createPanel(ctx: Ctx) {
       groups.set(c.page.path, [...(groups.get(c.page.path) ?? []), c])
     }
     // Pages past the newest comments listed (or before they load): a link.
+    // Who wrote their comments isn't known here, so they hide for a person.
     const listed = new Set(elsewhere(status).map((c) => c.page.path))
     const otherPages = pages.filter(
-      (p) => p.path !== page.key && !listed.has(p.path) && hit(p.path)
+      (p) =>
+        p.path !== page.key && !listed.has(p.path) && !person && hit(p.path)
     )
+    /** How many each tab lists with the current filters. */
+    const count = (name: Tab) =>
+      name === "mine"
+        ? (mine ?? []).filter(matches).length
+        : here(name).filter(found).length + elsewhere(name).filter(found).length
+    /** Everyone with a comment here or on another page, to filter by. */
+    const people = [
+      ...new Set([...page.comments, ...(site ?? [])].map((c) => c.authorName)),
+    ].sort((a, b) => a.localeCompare(b))
+    if (person && !people.includes(person)) people.unshift(person)
 
     const content = (c: WidgetComment) => [
       c.suggestion
@@ -189,26 +214,53 @@ export function createPanel(ctx: Ctx) {
     const empty = (text: string) => h("div", { class: "empty" }, text)
     const label = (text: string, cls = "section-label") =>
       h("div", { class: cls }, text)
-    const noMatches = () => empty(t("noMatches", { query: search.trim() }))
+    const noMatches = () =>
+      h(
+        "div",
+        { class: "empty" },
+        h(
+          "p",
+          {},
+          byPerson
+            ? t("noMatchesFilters")
+            : t("noMatches", { query: search.trim() })
+        ),
+        h(
+          "button",
+          {
+            class: "btn",
+            type: "button",
+            "data-focus-key": "clear-filters",
+            onclick: () => {
+              clearFilters()
+              ctx.dialog.focusAfterRender('[data-focus-key="panel-search"]')
+              ctx.render()
+            },
+          },
+          t("clearFilters")
+        )
+      )
 
     const children: Node[] = []
     if (tab === "mine") {
       if (!mine) children.push(empty(t("loading")))
       else if (!list.length) {
-        children.push(query ? noMatches() : empty(t("noYours")))
+        children.push(filtering ? noMatches() : empty(t("noYours")))
       } else children.push(...list.map(mineItem))
     } else if (!page.loaded) {
       children.push(empty(t("loading")))
     } else {
       // This page first, then every other page with its comments.
       const others = groups.size > 0 || otherPages.length > 0
-      if (others && (list.length || !query)) children.push(label(t("thisPage")))
+      if (others && (list.length || !filtering)) {
+        children.push(label(t("thisPage")))
+      }
       if (list.length) {
         children.push(...placed.map((c) => item(c)))
         if (lost.length) {
           children.push(label(t("notFoundHere")), ...lost.map((c) => item(c)))
         }
-      } else if (!query) {
+      } else if (!filtering) {
         children.push(
           empty(
             tab === "open"
@@ -245,45 +297,109 @@ export function createPanel(ctx: Ctx) {
       }
     }
 
+    const searchBox = h(
+      "div",
+      { class: "panel-search" },
+      icon(ICONS.search),
+      h("input", {
+        class: "field",
+        type: "search",
+        value: search,
+        placeholder: t("searchComments"),
+        "aria-label": t("searchComments"),
+        "aria-controls": "nuni-panel-list",
+        "data-focus-key": "panel-search",
+        oninput: (e: Event) => {
+          search = (e.target as HTMLInputElement).value
+          ctx.render()
+        },
+      }),
+      search
+        ? h(
+            "button",
+            {
+              class: "icon-btn",
+              type: "button",
+              "aria-label": t("clearSearch"),
+              onclick: () => {
+                search = ""
+                ctx.dialog.focusAfterRender('[data-focus-key="panel-search"]')
+                ctx.render()
+              },
+            },
+            icon(ICONS.close)
+          )
+        : null
+    )
+
+    // Shown once there is more than one person to choose from.
+    const personPicker =
+      tab !== "mine" && people.length > 1
+        ? h(
+            "div",
+            { class: person ? "panel-person is-on" : "panel-person" },
+            icon(ICONS.user),
+            h(
+              "select",
+              {
+                "aria-label": t("filterByPerson"),
+                "aria-controls": "nuni-panel-list",
+                "data-focus-key": "panel-person",
+                onchange: (e: Event) => {
+                  person = (e.target as HTMLSelectElement).value
+                  ctx.render()
+                },
+              },
+              h("option", { value: "", selected: !person }, t("everyone")),
+              people.map((name) =>
+                h("option", { value: name, selected: name === person }, name)
+              )
+            ),
+            icon(ICONS.chevronDown)
+          )
+        : null
+
     return h(
       "div",
       { class: "panel", role: "dialog", "aria-label": t("comments") },
       h(
         "div",
-        { class: "panel-head" },
-        h("div", { class: "panel-title" }, t("comments")),
+        { class: "panel-top" },
         h(
-          "button",
-          {
-            class: "btn btn-ghost btn-icon",
-            type: "button",
-            "aria-label": t("close"),
-            onclick: () => toggle(false),
-          },
-          icon(ICONS.close)
-        )
+          "div",
+          { class: "panel-head" },
+          // First, so Tab goes from the tabs on to the filters and the list.
+          h(
+            "button",
+            {
+              class: "icon-btn",
+              type: "button",
+              "aria-label": t("close"),
+              onclick: () => toggle(false),
+            },
+            icon(ICONS.close)
+          ),
+          renderTabs()
+        ),
+        page.comments.length || mine?.length || site?.length
+          ? h("div", { class: "panel-filters" }, searchBox, personPicker)
+          : null
       ),
-      page.comments.length || mine?.length || site?.length
-        ? h(
-            "div",
-            { class: "panel-search" },
-            icon(ICONS.search),
-            h("input", {
-              class: "field",
-              type: "search",
-              value: search,
-              placeholder: t("searchComments"),
-              "aria-label": t("searchComments"),
-              "aria-controls": "nuni-panel-list",
-              "data-focus-key": "panel-search",
-              oninput: (e: Event) => {
-                search = (e.target as HTMLInputElement).value
-                ctx.render()
-              },
-            })
-          )
-        : null,
       h(
+        "div",
+        {
+          class: "panel-list",
+          id: "nuni-panel-list",
+          role: "tabpanel",
+          "aria-labelledby": `nuni-tab-${tab}`,
+        },
+        ...children
+      ),
+      renderFooter()
+    )
+
+    function renderTabs() {
+      return h(
         "div",
         {
           class: "tabs",
@@ -310,8 +426,9 @@ export function createPanel(ctx: Ctx) {
             setTab(TABS[next]!)
           },
         },
-        TABS.map((name) =>
-          h(
+        TABS.map((name) => {
+          const n = name === "mine" && !mine ? null : count(name)
+          return h(
             "button",
             {
               class: "tab",
@@ -321,31 +438,33 @@ export function createPanel(ctx: Ctx) {
               "data-focus-key": `tab-${name}`,
               "aria-selected": String(tab === name),
               "aria-controls": "nuni-panel-list",
+              // The visible name and count, in a translatable sentence.
+              "aria-label":
+                n === null
+                  ? t("yours")
+                  : t(
+                      name === "open"
+                        ? "tabOpen"
+                        : name === "resolved"
+                          ? "tabResolved"
+                          : "tabYours",
+                      { count: n }
+                    ),
               tabindex: tab === name ? 0 : -1,
               onclick: () => setTab(name),
             },
-            name === "mine"
-              ? mine
-                ? t("tabYours", { count: mine.length })
-                : t("yours")
-              : t(name === "open" ? "tabOpen" : "tabResolved", {
-                  count: here(name).length + elsewhere(name).length,
-                })
+            t(
+              name === "open"
+                ? "statusOpen"
+                : name === "resolved"
+                  ? "resolved"
+                  : "yours"
+            ),
+            n ? h("span", { class: "tab-count" }, String(n)) : null
           )
-        )
-      ),
-      h(
-        "div",
-        {
-          class: "panel-list",
-          id: "nuni-panel-list",
-          role: "tabpanel",
-          "aria-labelledby": `nuni-tab-${tab}`,
-        },
-        ...children
-      ),
-      renderFooter()
-    )
+        })
+      )
+    }
   }
 
   const renderFooter = () => {
@@ -417,13 +536,20 @@ export function createPanel(ctx: Ctx) {
       open = false
     },
 
-    /** Escape: clear the search, then close. False when already closed. */
+    /**
+     * Escape: clear the search, then the person, then close. False when
+     * already closed.
+     */
     escape(): boolean {
       if (!open) return false
-      if (search) {
-        search = ""
-        ctx.render()
-      } else toggle(false)
+      if (search) search = ""
+      // Yours has no person filter to clear.
+      else if (person && tab !== "mine") person = ""
+      else {
+        toggle(false)
+        return true
+      }
+      ctx.render()
       return true
     },
 
@@ -493,19 +619,64 @@ export const PANEL_CSS = /* css */ `
   pointer-events: auto;
   overflow: hidden;
 }
-.panel-head { display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--n-border); }
-.panel-title { font-weight: 650; flex: 1; }
-.tabs { display: flex; gap: 4px; padding: 0 12px; margin-top: 8px; }
+.panel-top { display: grid; gap: 8px; padding: 10px; border-bottom: 1px solid var(--n-border); }
+.panel-head { display: flex; align-items: center; gap: 8px; }
+.panel-head .icon-btn { order: 1; margin-left: auto; }
+/* The tabs, as one segmented control. */
+.tabs { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--n-bg-subtle); min-width: 0; }
 .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
   border: 0;
   background: transparent;
-  padding: 6px 10px;
+  padding: 0 10px;
   border-radius: 8px;
   color: var(--n-fg-muted);
   font-weight: 550;
   font-size: 13px;
+  white-space: nowrap;
 }
-.tab[aria-selected="true"] { background: var(--n-bg-subtle); color: var(--n-fg); }
+.tab:hover { color: var(--n-fg); }
+.tab[aria-selected="true"] { background: var(--n-bg); color: var(--n-fg); box-shadow: 0 1px 2px rgba(0,0,0,0.08), 0 0 0 1px var(--n-border); }
+.tab-count { font-size: 11px; font-weight: 600; color: var(--n-fg-muted); font-variant-numeric: tabular-nums; }
+.panel-filters { display: flex; gap: 6px; }
+.panel-search { position: relative; flex: 1; min-width: 0; }
+.panel-search > .icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--n-fg-muted); pointer-events: none; }
+.panel-search .field { height: 32px; padding: 0 30px 0 30px; border-color: transparent; background: var(--n-bg-subtle); font-size: 13px; }
+.panel-search .field:focus { background: var(--n-bg); }
+.panel-search .field::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.panel-search .icon-btn { position: absolute; right: 4px; top: 4px; width: 24px; height: 24px; border-radius: 6px; }
+.panel-search .icon-btn .icon { width: 14px; height: 14px; }
+/* Who to show: a compact native select, tinted while it filters. */
+.panel-person { position: relative; display: flex; align-items: center; flex: none; max-width: 45%; border-radius: 8px; background: var(--n-bg-subtle); color: var(--n-fg-muted); }
+.panel-person:hover, .panel-person:focus-within { color: var(--n-fg); }
+.panel-person.is-on { background: var(--n-accent-soft); color: var(--n-accent); }
+.panel-person > .icon { position: absolute; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; pointer-events: none; }
+.panel-person > .icon:first-child { left: 9px; }
+.panel-person > .icon:last-child { right: 7px; width: 13px; height: 13px; }
+.panel-person select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 32px;
+  padding: 0 26px 0 29px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+.panel-person select:focus-visible { outline: 2px solid var(--n-accent); outline-offset: 0; }
+/* The native list takes the page's colors, so it follows the widget's. */
+.panel-person option { background: var(--n-bg); color: var(--n-fg); }
 .panel-list { flex: 1; overflow: auto; padding: 8px; display: grid; align-content: start; gap: 4px; }
 .item {
   display: grid;
@@ -520,14 +691,12 @@ export const PANEL_CSS = /* css */ `
 .item:hover { background: var(--n-bg-subtle); }
 /* The comment opened last, so it's easy to find your place again. */
 .item[aria-current="true"] { background: var(--n-accent-soft); box-shadow: inset 3px 0 0 var(--n-accent); }
-.panel-search { position: relative; padding: 0 12px; margin-top: 8px; }
-.panel-search .icon { position: absolute; left: 22px; top: 50%; transform: translateY(-50%); color: var(--n-fg-muted); pointer-events: none; }
-.panel-search .field { padding-left: 32px; }
 .item-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
 .section-label { padding: 12px 10px 4px; font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--n-fg-muted); }
 /* A page's path, as written: paths are case-sensitive. */
 .section-path { text-transform: none; letter-spacing: 0; font-size: 12px; overflow-wrap: anywhere; }
-.empty { padding: 32px 16px; text-align: center; color: var(--n-fg-muted); }
+.empty { padding: 32px 16px; text-align: center; color: var(--n-fg-muted); display: grid; justify-items: center; gap: 12px; }
+.empty p { margin: 0; }
 .panel-foot { padding: 12px; border-top: 1px solid var(--n-border); display: grid; gap: 8px; font-size: 13px; }
 a.item { color: inherit; text-decoration: none; }
 

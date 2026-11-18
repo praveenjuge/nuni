@@ -33,6 +33,8 @@ export class Widget {
   readonly replies: Locator
   readonly panel: Locator
   readonly search: Locator
+  /** The panel's person filter. */
+  readonly person: Locator
   /** The open tab's list. */
   readonly list: Locator
   readonly items: Locator
@@ -78,6 +80,9 @@ export class Widget {
     })
     this.search = this.panel.getByRole("searchbox", {
       name: "Search comments",
+    })
+    this.person = this.panel.getByRole("combobox", {
+      name: "Filter by person",
     })
     this.list = this.panel.getByRole("tabpanel")
     this.items = this.list.locator(".item")

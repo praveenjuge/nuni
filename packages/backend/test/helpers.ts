@@ -58,6 +58,7 @@ export async function addComment(
   opts: {
     ip?: string
     body?: string
+    authorName?: string
     secret?: string
     commenterToken?: string
     path?: string
@@ -75,7 +76,7 @@ export async function addComment(
     publicId,
     ip: opts.ip ?? "1.1.1.1",
     body: opts.body ?? "Make this bigger",
-    authorName: "Sam",
+    authorName: opts.authorName ?? "Sam",
     authorSecret: opts.secret ?? generateSecret(),
     commenterToken: opts.commenterToken,
     page: { ...page(opts.path, opts.origin), ...opts.page },
