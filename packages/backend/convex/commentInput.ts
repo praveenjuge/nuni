@@ -27,7 +27,7 @@ import { SERVER_LIMITS } from "./limits"
  * through it, so a path longer than the stored one still matches.
  */
 export function pageKey(path: string) {
-  return clampString(path, SERVER_LIMITS.pagePartMaxLength)
+  return clampString(path, LIMITS.pagePartMaxLength)
 }
 
 function originOf(url: string): string | null {
@@ -65,8 +65,8 @@ export function cleanPage(page: PageInfo): PageInfo {
     origin,
     title: clampString(page.title, SERVER_LIMITS.pageTitleMaxLength),
     url: clampString(page.url, SERVER_LIMITS.pageUrlMaxLength),
-    search: clampString(page.search, SERVER_LIMITS.pagePartMaxLength),
-    hash: clampString(page.hash, SERVER_LIMITS.pagePartMaxLength),
+    search: clampString(page.search, LIMITS.pagePartMaxLength),
+    hash: clampString(page.hash, LIMITS.pagePartMaxLength),
     path: pageKey(page.path),
   }
 }

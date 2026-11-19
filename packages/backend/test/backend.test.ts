@@ -2,7 +2,8 @@ import {
   generateProjectId,
   generateSecret,
   LIMITS,
-  queryHash,
+  queryKey,
+  sha256Hex,
 } from "@nuni/shared"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -238,7 +239,7 @@ describe("widget comments", () => {
   it("lists comments on a path longer than the stored one", async () => {
     const t = setup()
     const publicId = generateProjectId()
-    const path = `/${"a".repeat(SERVER_LIMITS.pagePartMaxLength + 50)}`
+    const path = `/${"a".repeat(LIMITS.pagePartMaxLength + 50)}`
     const id = await addComment(t, publicId, { path })
     const listed = await t.query(api.comments.listForPage, { publicId, path })
     expect(listed.map((c) => c._id)).toEqual([id])
@@ -952,6 +953,9 @@ const uploadScreenshot = (
 ) => upload(t, "screenshot", target, body)
 
 describe("lost pins", () => {
+  /** What a widget on this query sends. */
+  const queryHash = (search: string, hash = "") =>
+    sha256Hex(queryKey(search, hash))
   const report = (
     t: T,
     publicId: string,
@@ -1068,6 +1072,38 @@ describe("lost pins", () => {
     expect(await (await report(t, publicId, { lost: [id] })).json()).toEqual({
       changed: 1,
     })
+  })
+
+  it("compares hash-route queries, and long queries as stored", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const hashRoute = await addComment(t, publicId, {
+      path: "/#/settings",
+      page: { hash: "#/settings?tab=team" },
+    })
+    const long = `?filters=${"a".repeat(LIMITS.pagePartMaxLength)}`
+    const longQuery = await addComment(t, publicId, {
+      page: { search: long, url: `${page().url}${long}` },
+    })
+    waitUntilLost()
+    const lost = async (id: string, query: string, path = "/pricing") =>
+      (await (await report(t, publicId, { lost: [id], query, path })).json())
+        .changed
+
+    // Another tab of the same hash route: ignored. Its own tab: lost.
+    const settings = "/#/settings"
+    expect(
+      await lost(hashRoute, await queryHash("", "#/settings?tab=all"), settings)
+    ).toBe(0)
+    expect(
+      await lost(
+        hashRoute,
+        await queryHash("", "#/settings?tab=team"),
+        settings
+      )
+    ).toBe(1)
+    // The visitor's full query matches the copy that was cut for storage.
+    expect(await lost(longQuery, await queryHash(long))).toBe(1)
   })
 
   it("rate limits reports and refuses oversized ones", async () => {

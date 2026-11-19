@@ -1,4 +1,4 @@
-import { sha256Hex } from "./sha256"
+import { LIMITS } from "./limits"
 
 interface PageLocation {
   origin: string
@@ -56,22 +56,24 @@ export const COMMENT_PARAM = "nuni"
 const ARRIVAL_PARAM = /^(?:utm_.*|gclid|fbclid|msclkid)$/i
 
 /**
- * A query string as pins compare it: what the page shows for it. Drops the
+ * A page's query as pins compare it: what the page shows for it. Drops the
  * `nuni` deep link and tracking parameters, and sorts the rest, so
- * `?b=2&a=1&utm_source=x` and `?a=1&b=2` are the same.
+ * `?b=2&a=1&utm_source=x` and `?a=1&b=2` are the same. A hash route's own
+ * query (`#/settings?tab=team`) counts too. Both are cut to the length
+ * comments store, so a long query still matches its stored copy.
  */
-export function queryKey(search: string): string {
-  const params = new URLSearchParams(search)
-  const kept = [...params].filter(
-    ([name]) => name !== COMMENT_PARAM && !ARRIVAL_PARAM.test(name)
+export function queryKey(search: string, hash = ""): string {
+  const max = LIMITS.pagePartMaxLength
+  const route = hash.slice(0, max)
+  const routeQuery = /^#!?\//.test(route) ? route.split("?")[1] : ""
+  const params = new URLSearchParams(
+    `${search.slice(0, max)}&${routeQuery ?? ""}`
   )
-  kept.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-  return new URLSearchParams(kept).toString()
-}
-
-/** The hash of `queryKey`, so pin reports never carry the query itself. */
-export function queryHash(search: string): Promise<string> {
-  return sha256Hex(queryKey(search))
+  for (const name of [...params.keys()]) {
+    if (name === COMMENT_PARAM || ARRIVAL_PARAM.test(name)) params.delete(name)
+  }
+  params.sort()
+  return params.toString()
 }
 
 /**

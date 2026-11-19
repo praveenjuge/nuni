@@ -1,7 +1,8 @@
 import {
   HTTP_ROUTES,
   LIMITS,
-  queryHash,
+  queryKey,
+  sha256Hex,
   type PinReportPayload,
 } from "@nuni/shared"
 import type { HttpRouter } from "convex/server"
@@ -34,7 +35,7 @@ export const report = internalMutation({
     path: v.string(),
     lost: v.array(v.string()),
     found: v.array(v.string()),
-    /** The visitor's `queryHash`; older widgets don't send it. */
+    /** SHA-256 of the visitor's `queryKey`; older widgets don't send it. */
     query: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -80,7 +81,8 @@ export const report = internalMutation({
         comment.pinLostAt !== undefined ||
         now - lastFound(comment) < LIMITS.pinLostAfterMs ||
         (args.query !== undefined &&
-          args.query !== (await queryHash(comment.page.search)))
+          args.query !==
+            (await sha256Hex(queryKey(comment.page.search, comment.page.hash))))
       ) {
         continue
       }

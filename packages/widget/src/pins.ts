@@ -65,8 +65,16 @@ export function createPins(ctx: Ctx) {
   const placements = new Map<string, Placement>()
   const buttons = new Map<string, HTMLButtonElement>()
   const positions = new Map<string, Point>()
-  /** Lost (true) or found (false), as last reported in this page view. */
-  const reported = new Map<string, boolean>()
+  /**
+   * What this page view last reported for each pin: lost or found, on
+   * which query and hash (the backend ignores lost reports from another
+   * query), and when.
+   */
+  const reported = new Map<
+    string,
+    { lost: boolean; query: string; at: number }
+  >()
+  const currentQuery = () => location.search + location.hash
   /** Shadow roots and iframes holding pins, watched for changes. */
   const scopes = new Map<ScopeRoot, () => void>()
   /** The visitor hid the pins (Shift+C); remembered for this project. */
@@ -173,6 +181,7 @@ export function createPins(ctx: Ctx) {
       const { page } = ctx
       if (!page.loaded || document.visibilityState !== "visible") return
       const now = Date.now()
+      const query = currentQuery()
       const lost: string[] = []
       const found: string[] = []
       for (const c of page.comments) {
@@ -180,9 +189,17 @@ export function createPins(ctx: Ctx) {
         const placement = placements.get(c._id)
         if (!placement) continue
         const isLost = !placement.element
+        // Only what was sent from this query counts: a lost report from
+        // another one was ignored.
         const sent = reported.get(c._id)
-        if (sent === isLost) continue
-        const wasLost = sent ?? Boolean(c.pinLost)
+        const last = sent?.query === query ? sent : undefined
+        if (
+          last?.lost === isLost &&
+          (isLost || now - last.at < LIMITS.pinFoundRefreshMs)
+        ) {
+          continue
+        }
+        const wasLost = last?.lost ?? Boolean(c.pinLost)
         const unfoundFor = now - (c.pinFoundAt ?? c.createdAt)
         if (
           isLost
@@ -192,7 +209,7 @@ export function createPins(ctx: Ctx) {
           continue
         }
         if (lost.length + found.length >= LIMITS.pinReportMax) break
-        reported.set(c._id, isLost)
+        reported.set(c._id, { lost: isLost, query, at: now })
         ;(isLost ? lost : found).push(c._id)
       }
       if (lost.length || found.length) ctx.api.reportPins(page.key, lost, found)
@@ -466,7 +483,7 @@ export function createPins(ctx: Ctx) {
     place(id: string, at: PinTarget) {
       const previous = placements.get(id)
       placements.set(id, { ...at, confidence: "exact" })
-      reported.set(id, false)
+      reported.set(id, { lost: false, query: currentQuery(), at: Date.now() })
       return () => {
         if (previous) placements.set(id, previous)
         else placements.delete(id)

@@ -2,7 +2,8 @@ import { api } from "@nuni/backend/api"
 import {
   errorData,
   HTTP_ROUTES,
-  queryHash,
+  queryKey,
+  sha256Hex,
   UPLOAD_HEADERS,
   UPLOAD_ROUTES,
   type ErrorCode,
@@ -177,7 +178,8 @@ export class NuniApi {
    * reports again.
    */
   reportPins(path: string, lost: string[], found: string[]) {
-    void queryHash(location.search)
+    // Hashed, since query strings can hold tokens.
+    void sha256Hex(queryKey(location.search, location.hash))
       .then((query) => {
         const payload: PinReportPayload = {
           publicId: this.config.project,

@@ -15,6 +15,7 @@ import {
   handoffMessage,
   isProjectId,
   isUserCode,
+  LIMITS,
   normalizePath,
   normalizeUserCode,
   projectIdsIn,
@@ -139,6 +140,19 @@ describe("queryKey", () => {
     )
     expect(queryKey("")).toBe("")
     expect(queryKey("?tab=overview")).not.toBe(queryKey("?tab=tickets"))
+  })
+
+  it("counts a hash route's query, not a plain hash", () => {
+    expect(queryKey("?id=4", "#/settings?tab=team")).toBe("id=4&tab=team")
+    expect(queryKey("", "#!/settings?tab=team")).toBe("tab=team")
+    expect(queryKey("", "#section?tab=team")).toBe("")
+  })
+
+  it("reads a query as far as comments store it", () => {
+    const long = `?a=${"x".repeat(LIMITS.pagePartMaxLength)}`
+    expect(queryKey(long)).toBe(
+      queryKey(long.slice(0, LIMITS.pagePartMaxLength))
+    )
   })
 })
 
