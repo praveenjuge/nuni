@@ -1,7 +1,7 @@
 import { dashboardPath, projectRoute } from "@nuni/shared"
 import type { Page } from "@playwright/test"
 
-import { expect, test } from "../../fixtures"
+import { convexRun, expect, test } from "../../fixtures"
 import {
   addComment,
   choosePlan,
@@ -317,7 +317,8 @@ test("pins visitors can't find show under Not found and close as outdated", asyn
   await ownerPage.goto(projectPage(projectId))
   await expect(ownerPage.getByRole("tab", { name: /Not found/ })).toHaveCount(0)
 
-  // The heading is gone for a visitor; their widget reports it.
+  // Days later, the heading is gone for a visitor; their widget reports it.
+  convexRun("testing:agePins", { publicId: projectId })
   await heading.evaluate((el) => el.remove())
   const lostTab = ownerPage.getByRole("tab", { name: /Not found\s+1/ })
   await expect(lostTab).toBeVisible({ timeout: 15_000 })

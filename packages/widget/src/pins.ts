@@ -162,14 +162,17 @@ export function createPins(ctx: Ctx) {
 
   /**
    * Once the pins have settled for a few seconds, report the ones that
-   * couldn't be found (or were found again), so the owner sees them in the
-   * dashboard. Only changes are sent.
+   * couldn't be found (or were found), so the owner sees them in the
+   * dashboard. Only what would change is sent: a lost pin nobody has found
+   * for a while, a found one that was lost, or one last found over a day
+   * ago.
    */
   const scheduleReport = () => {
     clearTimeout(reportTimer)
     reportTimer = window.setTimeout(() => {
       const { page } = ctx
       if (!page.loaded || document.visibilityState !== "visible") return
+      const now = Date.now()
       const lost: string[] = []
       const found: string[] = []
       for (const c of page.comments) {
@@ -177,7 +180,17 @@ export function createPins(ctx: Ctx) {
         const placement = placements.get(c._id)
         if (!placement) continue
         const isLost = !placement.element
-        if (isLost === (reported.get(c._id) ?? Boolean(c.pinLost))) continue
+        const sent = reported.get(c._id)
+        if (sent === isLost) continue
+        const wasLost = sent ?? Boolean(c.pinLost)
+        const unfoundFor = now - (c.pinFoundAt ?? c.createdAt)
+        if (
+          isLost
+            ? wasLost || unfoundFor < LIMITS.pinLostAfterMs
+            : !wasLost && unfoundFor < LIMITS.pinFoundRefreshMs
+        ) {
+          continue
+        }
         if (lost.length + found.length >= LIMITS.pinReportMax) break
         reported.set(c._id, isLost)
         ;(isLost ? lost : found).push(c._id)

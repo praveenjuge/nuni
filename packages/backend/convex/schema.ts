@@ -86,6 +86,11 @@ export default defineSchema({
      * as one finds it again.
      */
     pinLostAt: v.optional(v.number()),
+    /**
+     * When a visitor's widget last found the element (unset: `createdAt`),
+     * kept at most a day stale. A pin is only lost once this is old.
+     */
+    pinFoundAt: v.optional(v.number()),
     /** Replies in the thread. */
     replyCount: v.optional(v.number()),
     /** Reactions on the comment and its replies, for the per-thread cap. */

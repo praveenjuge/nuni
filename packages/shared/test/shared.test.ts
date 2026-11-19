@@ -18,6 +18,7 @@ import {
   normalizePath,
   normalizeUserCode,
   projectIdsIn,
+  queryKey,
   readHandoff,
 } from "../src"
 import { sha256 } from "../src/sha256"
@@ -127,6 +128,17 @@ describe("normalizePath", () => {
       hash: "#z",
       url: "https://a.com/x?y=1#z",
     })
+  })
+})
+
+describe("queryKey", () => {
+  it("keeps what changes the page, in a stable order", () => {
+    expect(queryKey("?tab=tickets&id=4")).toBe("id=4&tab=tickets")
+    expect(queryKey("?id=4&utm_source=mail&gclid=1&nuni=abc&tab=tickets")).toBe(
+      "id=4&tab=tickets"
+    )
+    expect(queryKey("")).toBe("")
+    expect(queryKey("?tab=overview")).not.toBe(queryKey("?tab=tickets"))
   })
 })
 

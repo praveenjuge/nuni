@@ -1,3 +1,5 @@
+import { sha256Hex } from "./sha256"
+
 interface PageLocation {
   origin: string
   path: string
@@ -49,6 +51,28 @@ export function describeLocation(input: string | URL): PageLocation {
 
 /** The query parameter the widget opens a comment from: `?nuni=<id>`. */
 export const COMMENT_PARAM = "nuni"
+
+/** Query parameters that only say how a visitor arrived, not what they see. */
+const ARRIVAL_PARAM = /^(?:utm_.*|gclid|fbclid|msclkid)$/i
+
+/**
+ * A query string as pins compare it: what the page shows for it. Drops the
+ * `nuni` deep link and tracking parameters, and sorts the rest, so
+ * `?b=2&a=1&utm_source=x` and `?a=1&b=2` are the same.
+ */
+export function queryKey(search: string): string {
+  const params = new URLSearchParams(search)
+  const kept = [...params].filter(
+    ([name]) => name !== COMMENT_PARAM && !ARRIVAL_PARAM.test(name)
+  )
+  kept.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return new URLSearchParams(kept).toString()
+}
+
+/** The hash of `queryKey`, so pin reports never carry the query itself. */
+export function queryHash(search: string): Promise<string> {
+  return sha256Hex(queryKey(search))
+}
 
 /**
  * A link to a page of the site, opening the comment `commentId` when given.

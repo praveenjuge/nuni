@@ -1,7 +1,13 @@
-import { generateProjectId, generateSecret, LIMITS } from "@nuni/shared"
-import { describe, expect, it, vi } from "vitest"
+import {
+  generateProjectId,
+  generateSecret,
+  LIMITS,
+  queryHash,
+} from "@nuni/shared"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { api, internal } from "../convex/_generated/api"
+import type { Id } from "../convex/_generated/dataModel"
 import { SERVER_LIMITS } from "../convex/limits"
 import { RATE_LIMITS } from "../convex/rateLimits"
 import {
@@ -11,6 +17,7 @@ import {
   ORIGIN,
   ownedProject,
   ownerToken,
+  page,
   postJson,
   setup,
   signIn,
@@ -948,9 +955,22 @@ describe("lost pins", () => {
   const report = (
     t: T,
     publicId: string,
-    body: { path?: string; lost?: string[]; found?: string[] },
+    body: { path?: string; lost?: string[]; found?: string[]; query?: string },
     ip?: string
   ) => postJson(t, "/widget/pins", { publicId, path: "/pricing", ...body }, ip)
+
+  /** Move the clock past the time a pin has to go unfound to be lost. */
+  const waitUntilLost = () =>
+    vi.setSystemTime(Date.now() + LIMITS.pinLostAfterMs + 1)
+  const lastFound = async (t: T, id: string) =>
+    (await t.run((ctx) => ctx.db.get(id as Id<"comments">)))?.pinFoundAt
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
 
   it("records pins visitors can't find, and clears them when found", async () => {
     const t = setup()
@@ -961,6 +981,7 @@ describe("lost pins", () => {
     const other = await addComment(t, generateProjectId())
     const alice = await signIn(t, "user_alice", "Alice")
     await claim(alice, publicId)
+    waitUntilLost()
 
     // Only open comments of this project, on the reported page, change.
     let res = await report(t, publicId, { lost: [a, elsewhere, other, "x"] })
@@ -985,10 +1006,68 @@ describe("lost pins", () => {
     expect(await alice.query(api.comments.lostCount, { publicId })).toBe(1)
     expect(await t.query(api.comments.lostCount, { publicId })).toBe(0)
 
-    // Found again by another visitor: cleared.
+    // Found again by another visitor: cleared. `b` was last found over a
+    // day ago, so it's refreshed too.
     res = await report(t, publicId, { found: [a, b] })
-    expect(await res.json()).toEqual({ changed: 1 })
+    expect(await res.json()).toEqual({ changed: 2 })
     expect(await alice.query(api.comments.lostCount, { publicId })).toBe(0)
+    expect(await lastFound(t, a)).toBe(Date.now())
+    expect(await lastFound(t, b)).toBe(Date.now())
+    // And not refreshed again the same day.
+    res = await report(t, publicId, { found: [b] })
+    expect(await res.json()).toEqual({ changed: 0 })
+  })
+
+  it("only marks a pin lost once nobody has found it for a while", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId)
+
+    // Just left, so whoever can't see it is likely looking at another state
+    // of the page (the form it's in is closed).
+    let res = await report(t, publicId, { lost: [id] })
+    expect(await res.json()).toEqual({ changed: 0 })
+
+    // Someone who opened the form found it, which restarts the wait.
+    vi.setSystemTime(Date.now() + LIMITS.pinLostAfterMs - 1000)
+    await report(t, publicId, { found: [id] })
+    vi.setSystemTime(Date.now() + 2000)
+    res = await report(t, publicId, { lost: [id] })
+    expect(await res.json()).toEqual({ changed: 0 })
+
+    waitUntilLost()
+    res = await report(t, publicId, { lost: [id] })
+    expect(await res.json()).toEqual({ changed: 1 })
+  })
+
+  it("only lets visitors on the comment's query string mark it lost", async () => {
+    const t = setup()
+    const publicId = generateProjectId()
+    const id = await addComment(t, publicId, {
+      page: { search: "?tab=tickets&id=4", url: `${page().url}?tab=tickets` },
+    })
+    waitUntilLost()
+
+    // Another tab, or no tab: the element isn't meant to be there.
+    for (const search of ["", "?tab=overview&id=4"]) {
+      const res = await report(t, publicId, {
+        lost: [id],
+        query: await queryHash(search),
+      })
+      expect(await res.json()).toEqual({ changed: 0 })
+    }
+    // The same tab, in another order and with tracking added, counts.
+    // Older widgets don't send a query, and still count.
+    const res = await report(t, publicId, {
+      lost: [id],
+      query: await queryHash("?id=4&utm_source=mail&tab=tickets&nuni=x"),
+    })
+    expect(await res.json()).toEqual({ changed: 1 })
+    await report(t, publicId, { found: [id] })
+    waitUntilLost()
+    expect(await (await report(t, publicId, { lost: [id] })).json()).toEqual({
+      changed: 1,
+    })
   })
 
   it("rate limits reports and refuses oversized ones", async () => {
@@ -1011,7 +1090,9 @@ describe("lost pins", () => {
   it("lets only the owner move a pin or close a comment as outdated", async () => {
     const t = setup()
     const { publicId, alice, id } = await ownedProject(t)
+    waitUntilLost()
     await report(t, publicId, { lost: [id] })
+    expect(await alice.query(api.comments.lostCount, { publicId })).toBe(1)
 
     const moved = { ...anchor, text: "Start free trial", tag: "a" }
     await expect(
@@ -1025,6 +1106,8 @@ describe("lost pins", () => {
     expect(comment?.anchor.tag).toBe("a")
     expect(comment?.anchor.text).toHaveLength(LIMITS.anchorTextMaxLength)
     expect(comment?.pinLostAt).toBeUndefined()
+    // The owner just placed it, so it isn't lost again straight away.
+    expect(comment?.pinFoundAt).toBe(Date.now())
 
     await expect(
       t.mutation(api.comments.resolve, { id, resolution: "outdated" })
