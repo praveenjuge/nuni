@@ -79,6 +79,13 @@ export interface PinReportPayload {
   path: string
   lost: string[]
   found: string[]
+  /**
+   * SHA-256 of the visitor's query string, as `queryKey` normalizes it.
+   * Pins are only reported lost by visitors on the same query as the
+   * comment (another tab or filter often hides the element). Hashed, since
+   * query strings can hold tokens. Older widgets don't send it.
+   */
+  query?: string
 }
 
 /** `POST /cli/login/start` answers 201 with this. */

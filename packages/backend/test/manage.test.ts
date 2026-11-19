@@ -162,7 +162,14 @@ describe("dashboard", () => {
     const t = setup()
     const { publicId, alice, ids } = await ownedProject(t, ["/b", "/a", "/b"])
     const [lost, resolved] = ids
-    await postJson(t, "/widget/pins", { publicId, path: "/b", lost: [lost] })
+    // Pins are only lost once nobody has found them for a while.
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(Date.now() + LIMITS.pinLostAfterMs + 1)
+    try {
+      await postJson(t, "/widget/pins", { publicId, path: "/b", lost: [lost] })
+    } finally {
+      vi.useRealTimers()
+    }
     await alice.mutation(api.comments.resolve, { id: resolved! })
     const view = async (view: "open" | "lost" | "resolved") =>
       (

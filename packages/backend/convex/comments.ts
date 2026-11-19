@@ -346,6 +346,7 @@ export const repin = mutation({
     await ctx.db.patch(found.comment._id, {
       anchor: cleanAnchor(anchor),
       pinLostAt: undefined,
+      pinFoundAt: Date.now(),
     })
   },
 })

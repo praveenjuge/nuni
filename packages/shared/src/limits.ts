@@ -18,6 +18,19 @@ export const LIMITS = {
   bulkMax: 100,
   /** Pins found or lost in one report from a visitor's widget. */
   pinReportMax: 200,
+  /**
+   * A pin is only reported lost once no visitor has found its element for
+   * this long, so an element that only shows sometimes (an open form, a
+   * menu, another tab) isn't flagged by visitors who didn't open it.
+   */
+  pinLostAfterMs: 3 * 24 * 60 * 60 * 1000,
+  /** Widgets refresh when a pin was last found at most this often. */
+  pinFoundRefreshMs: 24 * 60 * 60 * 1000,
+  /**
+   * A stored page's path, query and hash are cut to this. Widgets cut their
+   * query the same way before comparing it with a comment's.
+   */
+  pagePartMaxLength: 1000,
   /** The dashboard's "Not found" count stops here ("99+"). */
   lostCountMax: 99,
   /** Comments an agent (CLI or MCP) lists at once: by default, and at most. */

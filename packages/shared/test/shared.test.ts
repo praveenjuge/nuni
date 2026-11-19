@@ -15,9 +15,11 @@ import {
   handoffMessage,
   isProjectId,
   isUserCode,
+  LIMITS,
   normalizePath,
   normalizeUserCode,
   projectIdsIn,
+  queryKey,
   readHandoff,
 } from "../src"
 import { sha256 } from "../src/sha256"
@@ -127,6 +129,30 @@ describe("normalizePath", () => {
       hash: "#z",
       url: "https://a.com/x?y=1#z",
     })
+  })
+})
+
+describe("queryKey", () => {
+  it("keeps what changes the page, in a stable order", () => {
+    expect(queryKey("?tab=tickets&id=4")).toBe("id=4&tab=tickets")
+    expect(queryKey("?id=4&utm_source=mail&gclid=1&nuni=abc&tab=tickets")).toBe(
+      "id=4&tab=tickets"
+    )
+    expect(queryKey("")).toBe("")
+    expect(queryKey("?tab=overview")).not.toBe(queryKey("?tab=tickets"))
+  })
+
+  it("counts a hash route's query, not a plain hash", () => {
+    expect(queryKey("?id=4", "#/settings?tab=team")).toBe("id=4&tab=team")
+    expect(queryKey("", "#!/settings?tab=team")).toBe("tab=team")
+    expect(queryKey("", "#section?tab=team")).toBe("")
+  })
+
+  it("reads a query as far as comments store it", () => {
+    const long = `?a=${"x".repeat(LIMITS.pagePartMaxLength)}`
+    expect(queryKey(long)).toBe(
+      queryKey(long.slice(0, LIMITS.pagePartMaxLength))
+    )
   })
 })
 

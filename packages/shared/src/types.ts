@@ -63,6 +63,8 @@ export interface WidgetComment {
   resolution?: Resolution
   /** Visitors' widgets can't find the element on the page. */
   pinLost?: boolean
+  /** When a visitor's widget last found the element; unset means `createdAt`. */
+  pinFoundAt?: number
   /** Images the commenter attached; their links come with the thread. */
   imageCount?: number
   /** Replies in the thread (not counting the comment itself). */

@@ -1,4 +1,4 @@
-import { randomBase58 } from "@nuni/shared"
+import { LIMITS, randomBase58 } from "@nuni/shared"
 import { v } from "convex/values"
 
 import { internalMutation, internalQuery } from "./_generated/server"
@@ -57,6 +57,25 @@ export const previewDigest = internalMutation({
     allowTesting()
     const project = await liveProject(ctx, publicId)
     return project && preview(ctx, project)
+  },
+})
+
+/**
+ * Make a project's pins look unfound for long enough to be reported lost,
+ * as if no visitor had seen them in days.
+ */
+export const agePins = internalMutation({
+  args: { publicId: v.string() },
+  handler: async (ctx, { publicId }) => {
+    allowTesting()
+    const project = await liveProject(ctx, publicId)
+    if (!project) return
+    const comments = await ctx.db
+      .query("comments")
+      .withIndex("by_project_status", (q) => q.eq("projectId", project._id))
+      .take(100)
+    const pinFoundAt = Date.now() - LIMITS.pinLostAfterMs - 60_000
+    for (const c of comments) await ctx.db.patch(c._id, { pinFoundAt })
   },
 })
 

@@ -1,3 +1,5 @@
+import { LIMITS } from "./limits"
+
 interface PageLocation {
   origin: string
   path: string
@@ -49,6 +51,30 @@ export function describeLocation(input: string | URL): PageLocation {
 
 /** The query parameter the widget opens a comment from: `?nuni=<id>`. */
 export const COMMENT_PARAM = "nuni"
+
+/** Query parameters that only say how a visitor arrived, not what they see. */
+const ARRIVAL_PARAM = /^(?:utm_.*|gclid|fbclid|msclkid)$/i
+
+/**
+ * A page's query as pins compare it: what the page shows for it. Drops the
+ * `nuni` deep link and tracking parameters, and sorts the rest, so
+ * `?b=2&a=1&utm_source=x` and `?a=1&b=2` are the same. A hash route's own
+ * query (`#/settings?tab=team`) counts too. Both are cut to the length
+ * comments store, so a long query still matches its stored copy.
+ */
+export function queryKey(search: string, hash = ""): string {
+  const max = LIMITS.pagePartMaxLength
+  const route = hash.slice(0, max)
+  const routeQuery = /^#!?\//.test(route) ? route.split("?")[1] : ""
+  const params = new URLSearchParams(
+    `${search.slice(0, max)}&${routeQuery ?? ""}`
+  )
+  for (const name of [...params.keys()]) {
+    if (name === COMMENT_PARAM || ARRIVAL_PARAM.test(name)) params.delete(name)
+  }
+  params.sort()
+  return params.toString()
+}
 
 /**
  * A link to a page of the site, opening the comment `commentId` when given.

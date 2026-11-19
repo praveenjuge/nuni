@@ -34,7 +34,6 @@ export const SERVER_LIMITS = {
   /** Stored page details; `path` is also the key comments are listed by. */
   pageTitleMaxLength: 300,
   pageUrlMaxLength: 2000,
-  pagePartMaxLength: 1000,
   userAgentMaxLength: 400,
   /** Captured request methods, and the styles kept for the element. */
   methodMaxLength: 10,

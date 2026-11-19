@@ -157,7 +157,8 @@ export function CommentDetail({
         >
           <p className="text-muted-foreground">
             Visitors&apos; browsers haven&apos;t found this element on the page
-            since {timeAgo(c.pinLostAt)}. Open the page and choose{" "}
+            since {timeAgo(c.pinFoundAt ?? c.createdAt)}. Open the page and
+            choose{" "}
             <strong className="font-medium text-foreground">Move pin</strong> to
             point it at the right element, or close it if it no longer applies.
           </p>

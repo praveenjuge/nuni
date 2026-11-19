@@ -29,6 +29,7 @@ export async function toPublic(
     resolution: c.resolution,
     imageCount: c.images?.length ?? 0,
     pinLost: c.pinLostAt !== undefined,
+    pinFoundAt: c.pinFoundAt,
     replyCount: c.replyCount ?? 0,
     ...(await author(c)),
   }

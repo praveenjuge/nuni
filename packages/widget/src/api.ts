@@ -2,6 +2,8 @@ import { api } from "@nuni/backend/api"
 import {
   errorData,
   HTTP_ROUTES,
+  queryKey,
+  sha256Hex,
   UPLOAD_HEADERS,
   UPLOAD_ROUTES,
   type ErrorCode,
@@ -176,15 +178,24 @@ export class NuniApi {
    * reports again.
    */
   reportPins(path: string, lost: string[], found: string[]) {
-    const payload: PinReportPayload = {
-      publicId: this.config.project,
-      path,
-      lost,
-      found,
-    }
-    void this.post(HTTP_ROUTES.pins, JSON.stringify(payload), JSON_HEADERS, {
-      keepalive: true,
-    }).catch(() => null)
+    // Hashed, since query strings can hold tokens.
+    void sha256Hex(queryKey(location.search, location.hash))
+      .then((query) => {
+        const payload: PinReportPayload = {
+          publicId: this.config.project,
+          path,
+          lost,
+          found,
+          query,
+        }
+        return this.post(
+          HTTP_ROUTES.pins,
+          JSON.stringify(payload),
+          JSON_HEADERS,
+          { keepalive: true }
+        )
+      })
+      .catch(() => null)
   }
 
   private async postJson(route: string, payload: object): Promise<string> {
